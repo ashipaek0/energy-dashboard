@@ -2,7 +2,13 @@
 
 A self‑hosted, real‑time energy monitoring dashboard that integrates with **Home Assistant**, **Solar Assistant**, and **MQTT**. Designed for public displays – no login required for viewing, while settings are password‑protected.
 
-![Dashboard Screenshot](https://via.placeholder.com/800x400?text=Energy+Dashboard+Screenshot)
+
+<img width="1752" height="959" alt="Screenshot From 2026-04-16 19-37-59" src="https://github.com/user-attachments/assets/c3d12473-7d3b-4493-a01d-7d128b84e582" />
+<img width="1752" height="959" alt="Screenshot From 2026-04-16 19-38-13" src="https://github.com/user-attachments/assets/f8ab9a0a-4432-43f6-962c-6b0d6e4abf4b" />
+<img width="1752" height="864" alt="Screenshot From 2026-04-16 19-37-14" src="https://github.com/user-attachments/assets/a4a8ede7-925f-45e0-9fa1-62b75e573541" />
+<img width="1752" height="959" alt="Screenshot From 2026-04-16 19-37-37" src="https://github.com/user-attachments/assets/4f921b49-2ab9-44f2-bca9-14a016b40e26" />
+
+
 
 ## ✨ Features
 
@@ -26,19 +32,24 @@ The easiest way to run the dashboard is with Docker Compose.
 
 ```bash
 git clone https://github.com/ashipaek0/energy-dashboard.git
-cd energy-dashboard
+
+cd energy-dashboard```
+
 2. Set the Settings Password
 Edit docker-compose.yml and change the SETTINGS_PASSWORD environment variable:
 
-yaml
+```yaml
 environment:
-  - SETTINGS_PASSWORD=your_secure_password_here
+  - SETTINGS_PASSWORD=your_secure_password_here```
+  
 3. Start the Container
-bash
-docker compose up -d --build
+```bash
+docker compose up -d --build```
+
 The dashboard will be available at http://localhost:3000 (or your server's IP).
 
 4. Configure Data Sources
+
 Open http://your-server-ip:3000/settings
 
 Log in with username admin and the password you set.
@@ -88,6 +99,8 @@ Topics: Map each measurement to its MQTT topic. Leave empty to skip.
 
 All settings are stored in a SQLite database (./data/energy.db) and persist across container restarts.
 
+
+
 📊 Dashboard Usage
 Public View: http://your-server:3000/ – No login required.
 
@@ -95,13 +108,15 @@ Settings: http://your-server:3000/settings – Protected by HTTP Basic Auth (adm
 
 Data refreshes automatically every 30 seconds without page reload.
 
+
+
 🐳 Docker Image on Docker Hub
 A pre‑built image is available on Docker Hub:
-ashipaek0/energy-dashboard:latest
+```irunmole/energy-dashboard:latest```
 
 You can use it directly in your docker-compose.yml:
 
-yaml
+```yaml
 services:
   energy-dashboard:
     image: irunmole/energy-dashboard:latest
@@ -112,32 +127,35 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      - SETTINGS_PASSWORD=your_secure_password_here
+      - SETTINGS_PASSWORD=your_secure_password_here```
+
+      
 🔄 Automatic Updates (CI/CD)
 This repository includes a GitHub Actions workflow that automatically builds and pushes a Docker image to Docker Hub on every push to main.
 
 If you want to automatically update the running container on your server, add Watchtower to your docker-compose.yml:
 
-yaml
+```yaml
 watchtower:
   image: containrrr/watchtower
   container_name: watchtower
   restart: unless-stopped
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
-  command: --interval 300 energy-dashboard
+  command: --interval 300 energy-dashboard```
+  
 Watchtower will check for new images every 5 minutes and restart the container when an update is available.
 
 🛠️ Development / Manual Installation
 If you prefer to run without Docker:
 
-bash
+```bash
 npm install
-npm start
+npm start```
 The server listens on port 3000. A SQLite database will be created in ./data.
 
 📁 Project Structure
-text
+```text
 energy-dashboard/
 ├── Dockerfile
 ├── docker-compose.yml
@@ -150,7 +168,9 @@ energy-dashboard/
 │   ├── settings.html  # Protected configuration page
 │   └── settings.js
 ├── .env.example
-└── README.md
+└── README.md```
+
+
 ❓ Troubleshooting
 All values show zero
 Ensure at least one data source is enabled and correctly configured.
