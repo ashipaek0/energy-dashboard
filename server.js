@@ -169,9 +169,9 @@ async function restartMqtt() {
 }
 
 // HA helpers
-async function getHAState(entityId) {
-  const haUrl = await getConfig('ha_url');
-  const haToken = await getConfig('ha_token');
+async function getHAState(entityId, haUrl = null, haToken = null) {
+  if (!haUrl) haUrl = await getConfig('ha_url');
+  if (!haToken) haToken = await getConfig('ha_token');
   if (!haUrl || !haToken || !entityId) return 0;
   const res = await fetch(`${haUrl}/api/states/${entityId}`, {
     headers: { 'Authorization': `Bearer ${haToken}` }
@@ -181,9 +181,9 @@ async function getHAState(entityId) {
   return parseFloat(data.state) || 0;
 }
 
-async function getSolarData() {
-  const url = await getConfig('solar_assistant_url');
-  const key = await getConfig('solar_assistant_api_key');
+async function getSolarData(url = null, key = null) {
+  if (!url) url = await getConfig('solar_assistant_url');
+  if (!key) key = await getConfig('solar_assistant_api_key');
   if (!url || !key) return null;
   const res = await fetch(`${url}/api/v1/status`, {
     headers: { 'X-Api-Key': key }
@@ -458,9 +458,14 @@ app.post('/api/settings', async (req, res) => {
   res.json({ success: true });
 });
 
+// Fetch HA entities – supports query params for temporary testing
 app.get('/api/ha/entities', authMiddleware, async (req, res) => {
-  const haUrl = await getConfig('ha_url');
-  const haToken = await getConfig('ha_token');
+  let haUrl = req.query.url;
+  let haToken = req.query.token;
+  if (!haUrl || !haToken) {
+    haUrl = await getConfig('ha_url');
+    haToken = await getConfig('ha_token');
+  }
   if (!haUrl || !haToken) return res.status(400).json({ error: 'HA not configured' });
   try {
     const response = await fetch(`${haUrl}/api/states`, {
@@ -475,9 +480,14 @@ app.get('/api/ha/entities', authMiddleware, async (req, res) => {
   }
 });
 
+// Test Solar Assistant – accepts query params for temporary test
 app.get('/api/test-solar', authMiddleware, async (req, res) => {
-  const url = await getConfig('solar_assistant_url');
-  const key = await getConfig('solar_assistant_api_key');
+  let url = req.query.url;
+  let key = req.query.key;
+  if (!url || !key) {
+    url = await getConfig('solar_assistant_url');
+    key = await getConfig('solar_assistant_api_key');
+  }
   if (!url || !key) return res.status(400).json({ error: 'Solar Assistant URL or API Key not configured' });
   if (url.includes('solar-assistant.io')) {
     return res.status(400).json({ error: 'Use local IP address (e.g., http://192.168.1.100), not the cloud dashboard URL' });
@@ -494,12 +504,14 @@ app.get('/api/test-solar', authMiddleware, async (req, res) => {
   }
 });
 
+// Test MQTT broker – accepts query params
 app.get('/api/test-mqtt', authMiddleware, async (req, res) => {
-  const brokerUrl = await getConfig('mqtt_broker_url');
+  let brokerUrl = req.query.broker;
+  if (!brokerUrl) brokerUrl = await getConfig('mqtt_broker_url');
   if (!brokerUrl) return res.status(400).json({ error: 'MQTT broker URL not configured' });
   const options = {};
-  const username = await getConfig('mqtt_username');
-  const password = await getConfig('mqtt_password');
+  const username = req.query.username || await getConfig('mqtt_username');
+  const password = req.query.password || await getConfig('mqtt_password');
   if (username) options.username = username;
   if (password) options.password = password;
   const testClient = mqtt.connect(brokerUrl, options);
@@ -528,14 +540,16 @@ app.get('/api/test-mqtt', authMiddleware, async (req, res) => {
   });
 });
 
+// Test MQTT topic – accepts query params
 app.get('/api/test-mqtt-topic', authMiddleware, async (req, res) => {
-  const brokerUrl = await getConfig('mqtt_broker_url');
+  let brokerUrl = req.query.broker;
+  if (!brokerUrl) brokerUrl = await getConfig('mqtt_broker_url');
   if (!brokerUrl) return res.status(400).json({ error: 'MQTT broker URL not configured' });
   const topic = req.query.topic;
   if (!topic) return res.status(400).json({ error: 'Topic required' });
   const options = {};
-  const username = await getConfig('mqtt_username');
-  const password = await getConfig('mqtt_password');
+  const username = req.query.username || await getConfig('mqtt_username');
+  const password = req.query.password || await getConfig('mqtt_password');
   if (username) options.username = username;
   if (password) options.password = password;
   const testClient = mqtt.connect(brokerUrl, options);
