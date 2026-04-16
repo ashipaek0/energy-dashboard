@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Energy Monitor</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <img id="logo-img" src="" alt="Logo" style="display:none; height:40px; margin-right:1rem;">
+        <h1 id="dashboard-title">⚡ Energy Dashboard</h1>
+      </div>
+      <a href="/settings" class="settings-link">⚙️ Settings</a>
+    </header>
+
+    <!-- Flow Card -->
+    <div class="flow-card">
+      <div class="flow-item solar">
+        <div class="flow-icon">☀️</div>
+        <div class="flow-label">Solar</div>
+        <div class="flow-value" id="flow-solar">0 W</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-item battery">
+        <div class="flow-icon">🔋</div>
+        <div class="flow-label">Battery</div>
+        <div class="flow-value" id="flow-battery-soc">--%</div>
+        <div class="flow-sub" id="flow-battery-power">⚡ 0 W</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-item home">
+        <div class="flow-icon">🏠</div>
+        <div class="flow-label">Home</div>
+        <div class="flow-value" id="flow-home">0 W</div>
+      </div>
+      <div class="flow-arrow">⇄</div>
+      <div class="flow-item grid">
+        <div class="flow-icon">⚡</div>
+        <div class="flow-label">Grid</div>
+        <div class="flow-value" id="flow-grid">0 W</div>
+        <div class="flow-sub" id="flow-grid-direction">Import</div>
+      </div>
+    </div>
+
+    <!-- Quick Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Today's Solar</div>
+        <div class="stat-value" id="daily-solar">-- kWh</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Today's Usage</div>
+        <div class="stat-value" id="daily-load">-- kWh</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Self-sufficiency</div>
+        <div class="stat-value" id="self-sufficiency">--%</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Est. Savings</div>
+        <div class="stat-value" id="savings">-- €</div>
+      </div>
+    </div>
+
+    <!-- Grid Status -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Grid Status</div>
+        <div class="stat-value" id="grid-state">--</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Today's Grid</div>
+        <div class="stat-value" id="grid-hours-day">-- h</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">This Week</div>
+        <div class="stat-value" id="grid-hours-week">-- h</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">This Month</div>
+        <div class="stat-value" id="grid-hours-month">-- h</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">This Year</div>
+        <div class="stat-value" id="grid-hours-year">-- h</div>
+      </div>
+    </div>
+    <div class="stats-footer" style="margin-bottom:1rem;">
+      <span>Last ON: <span id="grid-last-on">--</span></span>
+      <span>Last OFF: <span id="grid-last-off">--</span></span>
+    </div>
+
+    <!-- Chart -->
+    <div class="chart-container">
+      <div class="chart-header">
+        <h3>Power Overview</h3>
+        <div class="chart-controls">
+          <button data-range="1" class="active">24h</button>
+          <button data-range="7">7d</button>
+          <button data-range="30">30d</button>
+          <button data-range="90">90d</button>
+        </div>
+      </div>
+      <canvas id="powerChart"></canvas>
+    </div>
+
+    <!-- Monthly Table -->
+    <div class="table-container">
+      <h3>Last 12 Months</h3>
+      <div class="table-wrapper">
+        <table id="monthly-table">
+          <thead><tr><th></th><th>Load</th><th>Solar PV</th><th>Battery charged</th><th>Battery discharged</th><th>Grid used</th><th>Grid exported</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>

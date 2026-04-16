@@ -1,0 +1,11 @@
+services:
+  energy-dashboard:
+    build: .
+    container_name: energy-dashboard
+    restart: unless-stopped
+    ports:
+      - "9000:3000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - SETTINGS_PASSWORD=spiceenergydashboard

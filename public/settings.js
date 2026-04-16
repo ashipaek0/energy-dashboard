@@ -1,0 +1,194 @@
+const form = document.getElementById('settings-form');
+const saveStatus = document.getElementById('save-status');
+
+function showStatus(element, msg, type) {
+  element.textContent = msg;
+  element.className = `status ${type}`;
+  if (type !== 'info') {
+    setTimeout(() => { element.textContent = ''; element.className = 'status'; }, 5000);
+  }
+}
+
+async function loadSettings() {
+  try {
+    const res = await fetch('/api/settings');
+    const data = await res.json();
+    for (const [key, value] of Object.entries(data)) {
+      const input = form.querySelector(`[name="${key}"]`);
+      if (input) {
+        if (input.type === 'checkbox') {
+          input.checked = value === 'true';
+        } else {
+          input.value = value;
+        }
+      }
+    }
+  } catch (e) {
+    showStatus(saveStatus, 'Failed to load settings', 'error');
+  }
+}
+
+async function fetchEntities() {
+  const haUrl = form.querySelector('[name="ha_url"]').value;
+  const haToken = form.querySelector('[name="ha_token"]').value;
+  if (!haUrl || !haToken) {
+    showStatus(saveStatus, 'Please enter HA URL and Token first', 'error');
+    return;
+  }
+  showStatus(saveStatus, 'Fetching entities...', 'info');
+  try {
+    const res = await fetch('/api/ha/entities');
+    if (!res.ok) throw new Error('Failed to fetch');
+    const entities = await res.json();
+    const selects = form.querySelectorAll('select');
+    selects.forEach(select => {
+      const currentVal = select.value;
+      select.innerHTML = '<option value="">-- Select entity --</option>';
+      entities.sort().forEach(id => {
+        const option = document.createElement('option');
+        option.value = id;
+        option.textContent = id;
+        select.appendChild(option);
+      });
+      if (currentVal) select.value = currentVal;
+    });
+    showStatus(saveStatus, 'Entities loaded!', 'success');
+  } catch (e) {
+    showStatus(saveStatus, 'Error fetching entities: ' + e.message, 'error');
+  }
+}
+
+document.getElementById('fetch-entities').addEventListener('click', fetchEntities);
+
+// Solar Assistant test
+document.getElementById('test-solar').addEventListener('click', async function() {
+  const btn = this;
+  const statusEl = document.getElementById('solar-test-status');
+  const url = form.querySelector('[name="solar_assistant_url"]').value;
+  const key = form.querySelector('[name="solar_assistant_api_key"]').value;
+  
+  if (!url || !key) {
+    showStatus(statusEl, 'Please enter URL and API Key', 'error');
+    return;
+  }
+  // Warn if cloud URL
+  if (url.includes('solar-assistant.io')) {
+    showStatus(statusEl, '⚠️ Use local IP address, not cloud URL', 'error');
+    return;
+  }
+  
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Testing...';
+  showStatus(statusEl, 'Testing connection...', 'info');
+  
+  try {
+    const res = await fetch('/api/test-solar');
+    const data = await res.json();
+    if (res.ok) {
+      showStatus(statusEl, `✅ Connected! Power: ${data.data.power}W, Today: ${data.data.energy}kWh`, 'success');
+    } else {
+      showStatus(statusEl, `❌ ${data.error}`, 'error');
+    }
+  } catch (e) {
+    showStatus(statusEl, `❌ Error: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Test Solar Assistant Connection';
+  }
+});
+
+// MQTT broker test
+document.getElementById('test-mqtt').addEventListener('click', async function() {
+  const btn = this;
+  const statusEl = document.getElementById('mqtt-test-status');
+  const broker = form.querySelector('[name="mqtt_broker_url"]').value;
+  
+  if (!broker) {
+    showStatus(statusEl, 'Please enter Broker URL', 'error');
+    return;
+  }
+  
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Testing...';
+  showStatus(statusEl, 'Testing connection...', 'info');
+  
+  try {
+    const res = await fetch('/api/test-mqtt');
+    const data = await res.json();
+    if (res.ok) {
+      showStatus(statusEl, '✅ Connected to MQTT broker!', 'success');
+    } else {
+      showStatus(statusEl, `❌ ${data.error}`, 'error');
+    }
+  } catch (e) {
+    showStatus(statusEl, `❌ Error: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Test MQTT Broker Connection';
+  }
+});
+
+// MQTT topic test
+document.getElementById('test-mqtt-topic').addEventListener('click', async function() {
+  const btn = this;
+  const statusEl = document.getElementById('topic-test-status');
+  const broker = form.querySelector('[name="mqtt_broker_url"]').value;
+  const topic = document.getElementById('test-topic').value;
+  
+  if (!broker) {
+    showStatus(statusEl, 'Please enter Broker URL first', 'error');
+    return;
+  }
+  if (!topic) {
+    showStatus(statusEl, 'Please enter a topic to test', 'error');
+    return;
+  }
+  
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Testing...';
+  showStatus(statusEl, `Waiting for message on "${topic}"...`, 'info');
+  
+  try {
+    const res = await fetch(`/api/test-mqtt-topic?topic=${encodeURIComponent(topic)}`);
+    const data = await res.json();
+    if (res.ok) {
+      if (data.value !== undefined && data.value !== null) {
+        showStatus(statusEl, `✅ Received: ${data.value}`, 'success');
+      } else {
+        showStatus(statusEl, `✅ Received (non-numeric): ${data.raw}`, 'success');
+      }
+    } else {
+      showStatus(statusEl, `❌ ${data.error}`, 'error');
+    }
+  } catch (e) {
+    showStatus(statusEl, `❌ Error: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Test Topic';
+  }
+});
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const formData = new FormData(form);
+  const data = Object.fromEntries(formData.entries());
+  ['ha_enabled', 'solar_enabled', 'mqtt_enabled'].forEach(key => {
+    data[key] = form.querySelector(`[name="${key}"]`)?.checked ? 'true' : 'false';
+  });
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (res.ok) {
+      showStatus(saveStatus, 'Settings saved successfully!', 'success');
+    } else {
+      showStatus(saveStatus, 'Failed to save settings', 'error');
+    }
+  } catch (e) {
+    showStatus(saveStatus, 'Error: ' + e.message, 'error');
+  }
+});
+
+loadSettings();

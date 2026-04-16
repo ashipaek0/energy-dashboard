@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings - Energy Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .settings-form { background: var(--card-bg); padding: 2rem; border-radius: 1rem; max-width: 900px; margin: 2rem auto; }
+    .form-group { margin-bottom: 1.2rem; }
+    label { display: block; margin-bottom: 0.4rem; font-weight: 500; }
+    input, select { width: 100%; padding: 0.75rem; background: #0f172a; border: 1px solid #334155; border-radius: 0.5rem; color: var(--text); font-size: 1rem; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    button { background: var(--accent); color: white; border: none; padding: 0.75rem 2rem; border-radius: 0.5rem; font-size: 1rem; cursor: pointer; margin-right: 1rem; }
+    .back-link { display: inline-block; margin-bottom: 1rem; color: var(--accent); text-decoration: none; }
+    .status { padding: 0.5rem; border-radius: 0.5rem; margin-top: 0.5rem; }
+    .success { background: #10b98120; color: #10b981; }
+    .error { background: #ef444420; color: #ef4444; }
+    .info { background: #3b82f620; color: #3b82f6; }
+    h3 { margin: 2rem 0 1rem; border-bottom: 1px solid #334155; padding-bottom: 0.5rem; }
+    .fetch-btn { background: #334155; margin-top: 0.5rem; }
+    .toggle-group { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
+    .toggle-group label { margin-bottom: 0; }
+    input[type="checkbox"] { width: auto; margin-right: 0.5rem; }
+    .test-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    .test-status { margin-left: 1rem; font-size: 0.9rem; }
+    .spinner { display: inline-block; width: 1rem; height: 1rem; border: 2px solid #fff3; border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .note { font-size: 0.85rem; opacity: 0.7; margin-top: 0.25rem; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <a href="/" class="back-link">← Back to Dashboard</a>
+  <div class="settings-form">
+    <h2>Configuration</h2>
+    <form id="settings-form">
+      <!-- Home Assistant -->
+      <h3>Home Assistant</h3>
+      <div class="toggle-group">
+        <label><input type="checkbox" name="ha_enabled" value="true"> Enable Home Assistant</label>
+      </div>
+      <div class="form-group">
+        <label>URL</label>
+        <input type="url" name="ha_url" placeholder="http://homeassistant.local:8123">
+      </div>
+      <div class="form-group">
+        <label>Long-Lived Access Token</label>
+        <input type="password" name="ha_token" placeholder="eyJhbGciOiJ...">
+      </div>
+      <button type="button" id="fetch-entities" class="fetch-btn">Fetch Entities from HA</button>
+
+      <h3>Entity Mapping (Home Assistant)</h3>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Consumption (W)</label>
+          <select name="ha_entity_consumption"></select>
+        </div>
+        <div class="form-group">
+          <label>Solar PV (W)</label>
+          <select name="ha_entity_solar"></select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Battery Charge (W)</label>
+          <select name="ha_entity_battery_charge"></select>
+        </div>
+        <div class="form-group">
+          <label>Battery Discharge (W)</label>
+          <select name="ha_entity_battery_discharge"></select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Grid Import (W)</label>
+          <select name="ha_entity_grid_import"></select>
+        </div>
+        <div class="form-group">
+          <label>Grid Export (W)</label>
+          <select name="ha_entity_grid_export"></select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Battery SOC (%)</label>
+          <select name="ha_entity_battery_soc"></select>
+        </div>
+        <div class="form-group">
+          <label>Grid Status (ON/OFF)</label>
+          <select name="grid_status_entity"></select>
+        </div>
+      </div>
+      <h4>Daily Energy (kWh) – must reset at midnight</h4>
+      <div class="note">Use sensors that reset daily (e.g., utility meter or Riemann sum integral).</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Daily Consumption</label>
+          <select name="ha_entity_daily_consumption"></select>
+        </div>
+        <div class="form-group">
+          <label>Daily Solar</label>
+          <select name="ha_entity_daily_solar"></select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Daily Battery Charge</label>
+          <select name="ha_entity_daily_battery_charge"></select>
+        </div>
+        <div class="form-group">
+          <label>Daily Battery Discharge</label>
+          <select name="ha_entity_daily_battery_discharge"></select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Daily Grid Import</label>
+          <select name="ha_entity_daily_grid_import"></select>
+        </div>
+        <div class="form-group">
+          <label>Daily Grid Export</label>
+          <select name="ha_entity_daily_grid_export"></select>
+        </div>
+      </div>
+
+      <!-- Solar Assistant -->
+      <h3>Solar Assistant</h3>
+      <div class="toggle-group">
+        <label><input type="checkbox" name="solar_enabled" value="true"> Enable Solar Assistant</label>
+      </div>
+      <div class="form-group">
+        <label>URL (use local IP, not cloud URL)</label>
+        <input type="url" name="solar_assistant_url" placeholder="http://192.168.1.100">
+        <div class="note">Example: http://192.168.1.100 (not the cloud dashboard)</div>
+      </div>
+      <div class="form-group">
+        <label>API Key</label>
+        <input type="password" name="solar_assistant_api_key">
+      </div>
+      <div class="test-row">
+        <button type="button" id="test-solar" class="fetch-btn">Test Solar Assistant Connection</button>
+        <span id="solar-test-status" class="test-status"></span>
+      </div>
+
+      <!-- MQTT -->
+      <h3>MQTT</h3>
+      <div class="toggle-group">
+        <label><input type="checkbox" name="mqtt_enabled" value="true"> Enable MQTT</label>
+      </div>
+      <div class="form-group">
+        <label>Broker URL</label>
+        <input type="text" name="mqtt_broker_url" placeholder="mqtt://broker.local:1883">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Username</label>
+          <input type="text" name="mqtt_username">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" name="mqtt_password">
+        </div>
+      </div>
+      <div class="test-row">
+        <button type="button" id="test-mqtt" class="fetch-btn">Test MQTT Broker Connection</button>
+        <span id="mqtt-test-status" class="test-status"></span>
+      </div>
+      <h4>MQTT Topics (leave empty to skip)</h4>
+      <div class="form-row">
+        <div class="form-group"><label>Consumption (W)</label><input name="mqtt_topic_consumption" placeholder="energy/consumption"></div>
+        <div class="form-group"><label>Solar PV (W)</label><input name="mqtt_topic_solar" placeholder="energy/solar"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Battery Charge (W)</label><input name="mqtt_topic_battery_charge"></div>
+        <div class="form-group"><label>Battery Discharge (W)</label><input name="mqtt_topic_battery_discharge"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Grid Import (W)</label><input name="mqtt_topic_grid_import"></div>
+        <div class="form-group"><label>Grid Export (W)</label><input name="mqtt_topic_grid_export"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Battery SOC (%)</label><input name="mqtt_topic_battery_soc" placeholder="battery/soc"></div>
+      </div>
+      <h4>Daily Energy Topics (kWh)</h4>
+      <div class="form-row">
+        <div class="form-group"><label>Daily Consumption</label><input name="mqtt_topic_daily_consumption"></div>
+        <div class="form-group"><label>Daily Solar</label><input name="mqtt_topic_daily_solar"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Daily Battery Charge</label><input name="mqtt_topic_daily_battery_charge"></div>
+        <div class="form-group"><label>Daily Battery Discharge</label><input name="mqtt_topic_daily_battery_discharge"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Daily Grid Import</label><input name="mqtt_topic_daily_grid_import"></div>
+        <div class="form-group"><label>Daily Grid Export</label><input name="mqtt_topic_daily_grid_export"></div>
+      </div>
+      <div class="test-row" style="margin-top:1rem;">
+        <div class="form-group" style="flex:1; margin-bottom:0;">
+          <label>Test Topic (optional)</label>
+          <input type="text" id="test-topic" placeholder="energy/consumption">
+        </div>
+        <button type="button" id="test-mqtt-topic" class="fetch-btn">Test Topic</button>
+        <span id="topic-test-status" class="test-status"></span>
+      </div>
+
+      <!-- Savings -->
+      <h3>Savings Calculation</h3>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Currency Symbol</label>
+          <input name="savings_currency" value="€" placeholder="€">
+        </div>
+        <div class="form-group">
+          <label>Rate per kWh</label>
+          <input name="savings_rate" value="0.30" placeholder="0.30">
+        </div>
+      </div>
+
+      <!-- Branding -->
+      <h3>Branding</h3>
+      <div class="form-group">
+        <label>Dashboard Title</label>
+        <input name="dashboard_title" placeholder="My Energy Dashboard" value="⚡ Energy Dashboard">
+      </div>
+      <div class="form-group">
+        <label>Logo URL (optional)</label>
+        <input name="dashboard_logo" placeholder="https://example.com/logo.png">
+      </div>
+
+      <button type="submit">Save All Settings</button>
+      <div id="save-status" class="status"></div>
+    </form>
+  </div>
+</div>
+<script src="settings.js"></script>
+</body>
+</html>
