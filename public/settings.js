@@ -29,15 +29,15 @@ async function loadSettings() {
 }
 
 async function fetchEntities() {
-  const haUrl = form.querySelector('[name="ha_url"]').value;
-  const haToken = form.querySelector('[name="ha_token"]').value;
+  const haUrl = form.querySelector('[name="ha_url"]').value.trim();
+  const haToken = form.querySelector('[name="ha_token"]').value.trim();
   if (!haUrl || !haToken) {
     showStatus(saveStatus, 'Please enter HA URL and Token first', 'error');
     return;
   }
   showStatus(saveStatus, 'Fetching entities...', 'info');
   try {
-    const res = await fetch('/api/ha/entities');
+    const res = await fetch(`/api/ha/entities?url=${encodeURIComponent(haUrl)}&token=${encodeURIComponent(haToken)}`);
     if (!res.ok) throw new Error('Failed to fetch');
     const entities = await res.json();
     const selects = form.querySelectorAll('select');
@@ -64,14 +64,17 @@ document.getElementById('fetch-entities').addEventListener('click', fetchEntitie
 document.getElementById('test-solar').addEventListener('click', async function() {
   const btn = this;
   const statusEl = document.getElementById('solar-test-status');
-  const url = form.querySelector('[name="solar_assistant_url"]').value;
-  const key = form.querySelector('[name="solar_assistant_api_key"]').value;
+  let url = form.querySelector('[name="solar_assistant_url"]').value.trim();
+  const key = form.querySelector('[name="solar_assistant_api_key"]').value.trim();
   
   if (!url || !key) {
     showStatus(statusEl, 'Please enter URL and API Key', 'error');
     return;
   }
-  // Warn if cloud URL
+  // Ensure URL has protocol
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    url = 'http://' + url;
+  }
   if (url.includes('solar-assistant.io')) {
     showStatus(statusEl, '⚠️ Use local IP address, not cloud URL', 'error');
     return;
@@ -82,7 +85,7 @@ document.getElementById('test-solar').addEventListener('click', async function()
   showStatus(statusEl, 'Testing connection...', 'info');
   
   try {
-    const res = await fetch('/api/test-solar');
+    const res = await fetch(`/api/test-solar?url=${encodeURIComponent(url)}&key=${encodeURIComponent(key)}`);
     const data = await res.json();
     if (res.ok) {
       showStatus(statusEl, `✅ Connected! Power: ${data.data.power}W, Today: ${data.data.energy}kWh`, 'success');
@@ -101,7 +104,9 @@ document.getElementById('test-solar').addEventListener('click', async function()
 document.getElementById('test-mqtt').addEventListener('click', async function() {
   const btn = this;
   const statusEl = document.getElementById('mqtt-test-status');
-  const broker = form.querySelector('[name="mqtt_broker_url"]').value;
+  const broker = form.querySelector('[name="mqtt_broker_url"]').value.trim();
+  const username = form.querySelector('[name="mqtt_username"]').value.trim();
+  const password = form.querySelector('[name="mqtt_password"]').value.trim();
   
   if (!broker) {
     showStatus(statusEl, 'Please enter Broker URL', 'error');
@@ -112,8 +117,12 @@ document.getElementById('test-mqtt').addEventListener('click', async function() 
   btn.innerHTML = '<span class="spinner"></span> Testing...';
   showStatus(statusEl, 'Testing connection...', 'info');
   
+  const params = new URLSearchParams({ broker });
+  if (username) params.append('username', username);
+  if (password) params.append('password', password);
+  
   try {
-    const res = await fetch('/api/test-mqtt');
+    const res = await fetch(`/api/test-mqtt?${params.toString()}`);
     const data = await res.json();
     if (res.ok) {
       showStatus(statusEl, '✅ Connected to MQTT broker!', 'success');
@@ -132,8 +141,10 @@ document.getElementById('test-mqtt').addEventListener('click', async function() 
 document.getElementById('test-mqtt-topic').addEventListener('click', async function() {
   const btn = this;
   const statusEl = document.getElementById('topic-test-status');
-  const broker = form.querySelector('[name="mqtt_broker_url"]').value;
-  const topic = document.getElementById('test-topic').value;
+  const broker = form.querySelector('[name="mqtt_broker_url"]').value.trim();
+  const username = form.querySelector('[name="mqtt_username"]').value.trim();
+  const password = form.querySelector('[name="mqtt_password"]').value.trim();
+  const topic = document.getElementById('test-topic').value.trim();
   
   if (!broker) {
     showStatus(statusEl, 'Please enter Broker URL first', 'error');
@@ -148,8 +159,12 @@ document.getElementById('test-mqtt-topic').addEventListener('click', async funct
   btn.innerHTML = '<span class="spinner"></span> Testing...';
   showStatus(statusEl, `Waiting for message on "${topic}"...`, 'info');
   
+  const params = new URLSearchParams({ broker, topic });
+  if (username) params.append('username', username);
+  if (password) params.append('password', password);
+  
   try {
-    const res = await fetch(`/api/test-mqtt-topic?topic=${encodeURIComponent(topic)}`);
+    const res = await fetch(`/api/test-mqtt-topic?${params.toString()}`);
     const data = await res.json();
     if (res.ok) {
       if (data.value !== undefined && data.value !== null) {
