@@ -6,6 +6,8 @@ const { open } = require('sqlite');
 const path = require('path');
 const basicAuth = require('express-basic-auth');
 const mqtt = require('mqtt');
+const multer = require('multer');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -17,10 +19,25 @@ const authMiddleware = basicAuth({
   realm: 'Energy Dashboard Settings'
 });
 
+// Configure multer for file uploads (restore)
+const upload = multer({ 
+  dest: '/tmp/',
+  fileFilter: (req, file, cb) => {
+    if (file.originalname.endsWith('.db')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only .db files are allowed'));
+    }
+  },
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB max
+});
+
 let db;
-(async () => {
+const DB_PATH = './data/energy.db';
+
+async function initializeDatabase() {
   db = await open({
-    filename: './data/energy.db',
+    filename: DB_PATH,
     driver: sqlite3.Database
   });
   // History table
@@ -91,7 +108,9 @@ let db;
   }
   console.log('Database initialized');
   setupMqtt();
-})();
+}
+
+initializeDatabase();
 
 async function getConfig(key) {
   const row = await db.get('SELECT value FROM config WHERE key = ?', key);
@@ -446,6 +465,66 @@ app.get('/api/grid/hours', async (req, res) => {
   }
 });
 
+// --- Backup & Restore (protected) ---
+app.get('/api/backup', authMiddleware, async (req, res) => {
+  try {
+    // Close database connection temporarily to ensure file consistency
+    await db.close();
+    res.download(DB_PATH, `energy-dashboard-backup-${Date.now()}.db`, async (err) => {
+      // Reopen database after download completes or fails
+      await initializeDatabase();
+      if (err) {
+        console.error('Backup download error:', err);
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/restore', authMiddleware, upload.single('dbfile'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+  const tempPath = req.file.path;
+  try {
+    // Validate that the uploaded file is a valid SQLite database
+    const testDb = await open({
+      filename: tempPath,
+      driver: sqlite3.Database
+    });
+    await testDb.get('SELECT 1');
+    await testDb.close();
+    
+    // Close current database
+    await db.close();
+    // Stop MQTT client temporarily
+    if (mqttClient) {
+      mqttClient.end();
+      mqttClient = null;
+    }
+    
+    // Replace the current database with the uploaded one
+    fs.copyFileSync(tempPath, DB_PATH);
+    
+    // Reinitialize database connection
+    await initializeDatabase();
+    // Restart MQTT
+    await setupMqtt();
+    
+    // Clean up temp file
+    fs.unlinkSync(tempPath);
+    
+    res.json({ success: true, message: 'Database restored successfully' });
+  } catch (err) {
+    // Clean up temp file on error
+    try { fs.unlinkSync(tempPath); } catch (e) {}
+    // Reopen original database if possible
+    try { await initializeDatabase(); } catch (e) {}
+    res.status(500).json({ error: 'Invalid database file: ' + err.message });
+  }
+});
+
 // --- Settings API (protected) ---
 app.use('/api/settings', authMiddleware);
 
@@ -488,7 +567,6 @@ app.get('/api/ha/entities', authMiddleware, async (req, res) => {
   }
 });
 
-// Test MQTT broker – accepts query params
 app.get('/api/test-mqtt', authMiddleware, async (req, res) => {
   let brokerUrl = req.query.broker;
   if (!brokerUrl) brokerUrl = await getConfig('mqtt_broker_url');
@@ -524,7 +602,6 @@ app.get('/api/test-mqtt', authMiddleware, async (req, res) => {
   });
 });
 
-// Test MQTT topic – accepts query params
 app.get('/api/test-mqtt-topic', authMiddleware, async (req, res) => {
   let brokerUrl = req.query.broker;
   if (!brokerUrl) brokerUrl = await getConfig('mqtt_broker_url');
