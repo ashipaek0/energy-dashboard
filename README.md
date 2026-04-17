@@ -178,7 +178,7 @@ energy-dashboard/
 - Use the **Test Solar Assistant Connection** button in settings to verify API access
 - For Home Assistant, verify the token has read access to the selected entities
 
-### Solar Assistant test fails with "ETIMEDOUT"
+### Solar Assistant test fails with "TIMEDOUT"
 
 - Make sure you are using the local IP address of the device, not the cloud URL
 - The device must be on the same network as the dashboard
