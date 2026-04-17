@@ -1,6 +1,6 @@
 # ⚡ Energy Dashboard
 
-A self‑hosted, real‑time energy monitoring dashboard that integrates with **Home Assistant**, **Solar Assistant**, and **MQTT**. Designed for public displays – no login required for viewing, while settings are password‑protected.
+A self‑hosted, real‑time energy monitoring dashboard that integrates with **Home Assistant**, and **MQTT**. Designed for public displays – no login required for viewing, while settings are password‑protected.
 
 ![Energy Dashboard Screenshot 1](https://github.com/user-attachments/assets/c3d12473-7d3b-4493-a01d-7d128b84e582)
 ![Energy Dashboard Screenshot 2](https://github.com/user-attachments/assets/f8ab9a0a-4432-43f6-962c-6b0d6e4abf4b)
@@ -77,12 +77,6 @@ The dashboard will immediately begin displaying data.
 - **Battery SOC (%)**: battery state of charge
 - **Grid status**: binary sensor – ON/OFF
 - **Daily energy (kWh)**: must reset at midnight (use utility meter or Riemann sum integral sensors)
-
-### Solar Assistant
-
-- **URL**: The local IP address of your Solar Assistant device (e.g., `http://192.168.1.101`)
-  - ⚠️ Do not use the cloud dashboard URL (`*.solar-assistant.io`)
-- **API Key**: Found in Solar Assistant under Configuration → MQTT / API
 
 ### MQTT
 
@@ -177,11 +171,6 @@ energy-dashboard/
 - Ensure at least one data source is enabled and correctly configured
 - Use the **Test Solar Assistant Connection** button in settings to verify API access
 - For Home Assistant, verify the token has read access to the selected entities
-
-### Solar Assistant test fails with "TIMEDOUT"
-
-- Make sure you are using the local IP address of the device, not the cloud URL
-- The device must be on the same network as the dashboard
 
 ### Daily energy values grow exponentially
 
