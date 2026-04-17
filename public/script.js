@@ -311,27 +311,11 @@ async function updateMonthlyTable() {
     const tbody = document.getElementById('monthly-table-body');
     tbody.innerHTML = '';
     
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    
     data.forEach(row => {
-      let monthStr;
-      if (row.month && row.month.includes('-')) {
-        const [year, month] = row.month.split('-');
-        const monthIndex = parseInt(month, 10) - 1;
-        if (monthIndex >= 0 && monthIndex < 12) {
-          monthStr = monthNames[monthIndex] + ' ' + year.slice(2);
-        } else {
-          monthStr = row.month;
-        }
-      } else if (row.month) {
-        monthStr = row.month;
-      } else {
-        monthStr = 'Unknown';
-      }
-      
+      const monthDisplay = row.month_display || row.month;
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td>${monthStr}</td>
+        <td>${monthDisplay}</td>
         <td>${(row.consumption_kwh || 0).toFixed(1)} kWh</td>
         <td>${(row.solar_kwh || 0).toFixed(1)} kWh</td>
         <td>${(row.battery_charge_kwh || 0).toFixed(1)} kWh</td>
