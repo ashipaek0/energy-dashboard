@@ -24,7 +24,6 @@ function initCharts() {
   const gridColor = isDark ? '#334155' : '#cbd5e1';
   const textColor = isDark ? '#f8fafc' : '#0f172a';
 
-  // Power line chart
   powerChart = new Chart(ctxPower, {
     type: 'line',
     data: { datasets: [] },
@@ -58,7 +57,6 @@ function initCharts() {
     }
   });
 
-  // Daily energy bar chart
   energyBarChart = new Chart(ctxEnergy, {
     type: 'bar',
     data: {
@@ -311,17 +309,16 @@ async function updateMonthlyTable() {
     const tbody = document.getElementById('monthly-table-body');
     tbody.innerHTML = '';
     
-    data.forEach(row => {
-      const monthDisplay = row.month_display || row.month;
+    data.reverse().forEach(row => {
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td>${monthDisplay}</td>
-        <td>${(row.consumption_kwh || 0).toFixed(1)} kWh</td>
-        <td>${(row.solar_kwh || 0).toFixed(1)} kWh</td>
-        <td>${(row.battery_charge_kwh || 0).toFixed(1)} kWh</td>
-        <td>${(row.battery_discharge_kwh || 0).toFixed(1)} kWh</td>
-        <td>${(row.grid_import_kwh || 0).toFixed(1)} kWh</td>
-        <td>${(row.grid_export_kwh || 0).toFixed(1)} kWh</td>
+        <td>${row.month}</td>
+        <td>${row.consumption_kwh.toFixed(1)} kWh</td>
+        <td>${row.solar_kwh.toFixed(1)} kWh</td>
+        <td>${row.battery_charge_kwh.toFixed(1)} kWh</td>
+        <td>${row.battery_discharge_kwh.toFixed(1)} kWh</td>
+        <td>${row.grid_import_kwh.toFixed(1)} kWh</td>
+        <td>${row.grid_export_kwh.toFixed(1)} kWh</td>
       `;
       tbody.appendChild(tr);
     });
@@ -374,7 +371,6 @@ async function loadBranding() {
   } catch (e) {}
 }
 
-// Theme handling
 function initTheme() {
   const savedTheme = localStorage.getItem('theme');
   const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -431,7 +427,6 @@ function updateChartColors() {
   }
 }
 
-// Toggle daily breakdown
 document.getElementById('toggle-daily-details').addEventListener('click', () => {
   const content = document.getElementById('daily-breakdown-content');
   const btn = document.getElementById('toggle-daily-details');
@@ -439,7 +434,6 @@ document.getElementById('toggle-daily-details').addEventListener('click', () => 
   btn.classList.toggle('collapsed');
 });
 
-// Toggle monthly breakdown
 document.getElementById('toggle-monthly-details').addEventListener('click', () => {
   const content = document.getElementById('monthly-breakdown-content');
   const btn = document.getElementById('toggle-monthly-details');
@@ -447,7 +441,6 @@ document.getElementById('toggle-monthly-details').addEventListener('click', () =
   btn.classList.toggle('collapsed');
 });
 
-// Event listeners
 document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
 
 document.querySelectorAll('.chart-controls button').forEach(btn => {
@@ -459,7 +452,6 @@ document.querySelectorAll('.chart-controls button').forEach(btn => {
   });
 });
 
-// Initialize
 initTheme();
 initCharts();
 updateCurrent();
