@@ -447,43 +447,66 @@ app.get('/api/grid/status', async (req, res) => {
   }
 });
 
+// Helper: get grid state at a specific Unix timestamp (or nearest before)
+async function getGridStateAt(timestamp) {
+  const row = await db.get(
+    'SELECT state FROM grid_status WHERE timestamp <= ? ORDER BY timestamp DESC LIMIT 1',
+    [timestamp]
+  );
+  return row ? row.state : 0;
+}
+
 app.get('/api/grid/hours', async (req, res) => {
   const period = req.query.period || 'day';
   const now = new Date();
   let start, end;
+  
   if (period === 'day') {
-    start = new Date(now); start.setHours(0,0,0,0);
-    end = new Date(now); end.setHours(23,59,59,999);
+    start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
+    end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
   } else if (period === 'week') {
-    const day = now.getDay();
+    const day = now.getUTCDay();
     const diff = (day === 0 ? 6 : day - 1);
-    start = new Date(now); start.setDate(now.getDate() - diff); start.setHours(0,0,0,0);
-    end = new Date(start); end.setDate(start.getDate() + 6); end.setHours(23,59,59,999);
+    start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - diff, 0, 0, 0));
+    end = new Date(start);
+    end.setUTCDate(start.getUTCDate() + 6);
+    end.setUTCHours(23, 59, 59, 999);
   } else if (period === 'month') {
-    start = new Date(now.getFullYear(), now.getMonth(), 1);
-    end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23,59,59,999);
+    start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0));
+    end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
   } else if (period === 'year') {
-    start = new Date(now.getFullYear(), 0, 1);
-    end = new Date(now.getFullYear(), 11, 31, 23,59,59,999);
+    start = new Date(Date.UTC(now.getUTCFullYear(), 0, 1, 0, 0, 0));
+    end = new Date(Date.UTC(now.getUTCFullYear(), 11, 31, 23, 59, 59, 999));
   } else {
     return res.status(400).json({ error: 'Invalid period' });
   }
+  
   const startUnix = Math.floor(start.getTime() / 1000);
   const endUnix = Math.floor(end.getTime() / 1000);
+  
   try {
+    const initialState = await getGridStateAt(startUnix - 1);
     const rows = await db.all(
       `SELECT timestamp, state FROM grid_status WHERE timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC`,
       [startUnix, endUnix]
     );
+    
     let hours = 0;
-    let lastState = null;
+    let lastState = initialState;
     let lastTime = startUnix;
+    
     for (const row of rows) {
-      if (lastState === 1) hours += (row.timestamp - lastTime) / 3600;
+      if (lastState === 1) {
+        hours += (row.timestamp - lastTime) / 3600;
+      }
       lastState = row.state;
       lastTime = row.timestamp;
     }
-    if (lastState === 1) hours += (endUnix - lastTime) / 3600;
+    
+    if (lastState === 1) {
+      hours += (endUnix - lastTime) / 3600;
+    }
+    
     res.json({ period, hours: Math.round(hours * 10) / 10 });
   } catch (err) {
     res.status(500).json({ error: err.message });
