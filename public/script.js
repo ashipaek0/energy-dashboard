@@ -133,7 +133,8 @@ async function updateCurrent() {
     document.getElementById('flow-battery-soc').textContent = battSoc.toFixed(1) + '%';
 
     const battNet = battCharge - battDischarge;
-    const battSign = battNet >= 0 ? '↓' : '↑';
+    // Battery power indicator: ↑ charging (power into battery), ↓ discharging
+    const battSign = battNet >= 0 ? '↑' : '↓';
     const battColor = battNet >= 0 ? 'var(--battery)' : '#f59e0b';
     document.getElementById('flow-battery-power').innerHTML = `<span style="color:${battColor}">${battSign} ${Math.abs(battNet)} W</span>`;
 
@@ -174,6 +175,7 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
   const gridArrow = document.querySelector('.flow-arrow.grid');
   const gridToBatt = document.getElementById('grid-to-battery');
 
+  // Solar arrow: always points right (toward house/battery) if generating
   if (solar > 0) {
     solarArrow.style.color = 'var(--solar)';
     solarArrow.classList.add('flowing');
@@ -184,17 +186,19 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
     solarArrow.textContent = '→';
   }
 
-  if (battCharge > battDischarge) {
-    battArrow.style.color = 'var(--battery)';
-    battArrow.textContent = '↓';
-  } else if (battDischarge > battCharge) {
+  // Battery arrow: discharge = → (to home), charge = ← (to battery)
+  if (battDischarge > battCharge) {
     battArrow.style.color = '#f59e0b';
-    battArrow.textContent = '↑';
+    battArrow.textContent = '→';
+  } else if (battCharge > battDischarge) {
+    battArrow.style.color = 'var(--battery)';
+    battArrow.textContent = '←';
   } else {
     battArrow.style.color = 'var(--text-secondary)';
     battArrow.textContent = '⇄';
   }
 
+  // Grid arrow: import = ← (toward home), export = → (toward grid)
   if (gridImport > gridExport) {
     gridArrow.style.color = 'var(--grid)';
     gridArrow.textContent = '←';
