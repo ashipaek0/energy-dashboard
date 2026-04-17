@@ -1,9 +1,58 @@
+// Theme handling
+function initTheme() {
+  const savedTheme = localStorage.getItem('theme');
+  const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  
+  if (savedTheme === 'dark' || (!savedTheme && systemPrefersDark)) {
+    document.documentElement.setAttribute('data-theme', 'dark');
+    document.getElementById('theme-toggle').innerHTML = '<span class="theme-icon">☀️</span>';
+  } else {
+    document.documentElement.setAttribute('data-theme', 'light');
+    document.getElementById('theme-toggle').innerHTML = '<span class="theme-icon">🌙</span>';
+  }
+}
+
+function toggleTheme() {
+  const currentTheme = document.documentElement.getAttribute('data-theme');
+  const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', newTheme);
+  localStorage.setItem('theme', newTheme);
+  document.getElementById('theme-toggle').innerHTML = newTheme === 'dark' 
+    ? '<span class="theme-icon">☀️</span>' 
+    : '<span class="theme-icon">🌙</span>';
+  
+  // Update chart colors to match new theme
+  updateChartColors();
+}
+
+function updateChartColors() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const gridColor = isDark ? '#334155' : '#cbd5e1';
+  const textColor = isDark ? '#f8fafc' : '#0f172a';
+  
+  if (powerChart) {
+    powerChart.options.scales.x.grid.color = gridColor;
+    powerChart.options.scales.y.grid.color = gridColor;
+    powerChart.options.plugins.legend.labels.color = textColor;
+    powerChart.update();
+  }
+  if (energyBarChart) {
+    energyBarChart.options.scales.x.grid.color = gridColor;
+    energyBarChart.options.scales.y.grid.color = gridColor;
+    energyBarChart.options.plugins.legend.labels.color = textColor;
+    energyBarChart.update();
+  }
+}
+
+// Charts initialization and other functions remain the same as before...
+// (Include all the existing functions: initCharts, updateCurrent, updateFlowArrows, 
+//  updateGridStatus, updateChart, updateEnergyBarChart, updateMonthly, loadBranding)
+
 let powerChart;
 let energyBarChart;
 const ctxPower = document.getElementById('powerChart').getContext('2d');
 const ctxEnergy = document.getElementById('energyBarChart').getContext('2d');
 
-// Store user's legend visibility preferences (keyed by dataset label)
 const visibilityPrefs = {
   'Load': true,
   'Solar PV': true,
@@ -14,7 +63,10 @@ const visibilityPrefs = {
 };
 
 function initCharts() {
-  // Power line chart
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const gridColor = isDark ? '#334155' : '#cbd5e1';
+  const textColor = isDark ? '#f8fafc' : '#0f172a';
+
   powerChart = new Chart(ctxPower, {
     type: 'line',
     data: { datasets: [] },
@@ -27,21 +79,19 @@ function initCharts() {
         point: { radius: 0, hoverRadius: 4 }
       },
       scales: {
-        x: { type: 'time', time: { unit: 'hour' }, grid: { color: '#334155' } },
-        y: { title: { display: true, text: 'Power (kW)' }, grid: { color: '#334155' } }
+        x: { type: 'time', time: { unit: 'hour' }, grid: { color: gridColor } },
+        y: { title: { display: true, text: 'Power (kW)', color: textColor }, grid: { color: gridColor } }
       },
       plugins: {
         tooltip: { mode: 'index' },
         legend: {
-          labels: { color: '#f8fafc' },
+          labels: { color: textColor },
           onClick: (e, legendItem, legend) => {
-            // Toggle visibility and store preference
             const index = legendItem.datasetIndex;
             const ci = legend.chart;
             const meta = ci.getDatasetMeta(index);
             meta.hidden = meta.hidden === null ? !ci.data.datasets[index].hidden : !meta.hidden;
             ci.update();
-            // Save preference
             const label = ci.data.datasets[index].label;
             visibilityPrefs[label] = !meta.hidden;
           }
@@ -50,31 +100,33 @@ function initCharts() {
     }
   });
 
-  // Energy bar chart
   energyBarChart = new Chart(ctxEnergy, {
     type: 'bar',
     data: {
       labels: [],
       datasets: [
-        { label: 'Solar Generated', backgroundColor: '#fbbf24', data: [] },
-        { label: 'Grid Imported', backgroundColor: '#ef4444', data: [] },
-        { label: 'Energy Consumed', backgroundColor: '#8b5cf6', data: [] }
+        { label: 'Solar Generated', backgroundColor: '#d97706', data: [] },
+        { label: 'Grid Imported', backgroundColor: '#dc2626', data: [] },
+        { label: 'Energy Consumed', backgroundColor: '#7c3aed', data: [] }
       ]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       scales: {
-        x: { grid: { color: '#334155' } },
-        y: { title: { display: true, text: 'Energy (kWh)' }, grid: { color: '#334155' }, beginAtZero: true }
+        x: { grid: { color: gridColor } },
+        y: { title: { display: true, text: 'Energy (kWh)', color: textColor }, grid: { color: gridColor }, beginAtZero: true }
       },
       plugins: {
-        legend: { labels: { color: '#f8fafc' } },
+        legend: { labels: { color: textColor } },
         tooltip: { mode: 'index' }
       }
     }
   });
 }
+
+// [Rest of the functions unchanged: updateCurrent, updateFlowArrows, updateGridStatus,
+//  updateChart, updateEnergyBarChart, updateMonthly, loadBranding, event listeners, intervals]
 
 async function updateCurrent() {
   try {
@@ -94,20 +146,19 @@ async function updateCurrent() {
 
     const battNet = battCharge - battDischarge;
     const battSign = battNet >= 0 ? '↓' : '↑';
-    const battColor = battNet >= 0 ? '#10b981' : '#f59e0b';
+    const battColor = battNet >= 0 ? 'var(--battery)' : '#f59e0b';
     document.getElementById('flow-battery-power').innerHTML = `<span style="color:${battColor}">${battSign} ${Math.abs(battNet)} W</span>`;
 
     document.getElementById('flow-home').textContent = consumption + ' W';
 
     const gridNet = gridImport - gridExport;
     const gridDir = gridNet >= 0 ? 'Import' : 'Export';
-    const gridColor = gridNet >= 0 ? '#ef4444' : '#3b82f6';
+    const gridColor = gridNet >= 0 ? 'var(--grid)' : '#3b82f6';
     document.getElementById('flow-grid').innerHTML = `<span style="color:${gridColor}">${Math.abs(gridNet)} W</span>`;
     document.getElementById('flow-grid-direction').textContent = gridDir;
 
     updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImport, gridExport);
 
-    // Get public config for currency/rate
     const cfgRes = await fetch('/api/public-config');
     const cfg = await cfgRes.json();
     const currency = cfg.savings_currency || '€';
@@ -127,34 +178,34 @@ async function updateCurrent() {
 function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImport, gridExport) {
   const solarArrow = document.querySelector('.flow-arrow.solar-home');
   if (solar > 0) {
-    solarArrow.style.color = '#fbbf24';
+    solarArrow.style.color = 'var(--solar)';
     solarArrow.classList.add('flowing');
   } else {
-    solarArrow.style.color = '#64748b';
+    solarArrow.style.color = 'var(--text-secondary)';
     solarArrow.classList.remove('flowing');
   }
 
   const battArrow = document.querySelector('.flow-arrow.battery');
   if (battCharge > battDischarge) {
-    battArrow.style.color = '#10b981';
+    battArrow.style.color = 'var(--battery)';
     battArrow.textContent = '↓';
   } else if (battDischarge > battCharge) {
     battArrow.style.color = '#f59e0b';
     battArrow.textContent = '↑';
   } else {
-    battArrow.style.color = '#64748b';
+    battArrow.style.color = 'var(--text-secondary)';
     battArrow.textContent = '⇄';
   }
 
   const gridArrow = document.querySelector('.flow-arrow.grid');
   if (gridImport > gridExport) {
-    gridArrow.style.color = '#ef4444';
+    gridArrow.style.color = 'var(--grid)';
     gridArrow.textContent = '→';
   } else if (gridExport > gridImport) {
     gridArrow.style.color = '#3b82f6';
     gridArrow.textContent = '←';
   } else {
-    gridArrow.style.color = '#64748b';
+    gridArrow.style.color = 'var(--text-secondary)';
     gridArrow.textContent = '⇄';
   }
 
@@ -175,7 +226,7 @@ async function updateGridStatus() {
       return;
     }
     document.getElementById('grid-state').textContent = d.current ? '⚡ ON' : '⚫ OFF';
-    document.getElementById('grid-state').style.color = d.current ? '#10b981' : '#ef4444';
+    document.getElementById('grid-state').style.color = d.current ? 'var(--battery)' : 'var(--grid)';
     document.getElementById('grid-last-on').textContent = d.lastOn ? new Date(d.lastOn).toLocaleString() : 'Never';
     document.getElementById('grid-last-off').textContent = d.lastOff ? new Date(d.lastOff).toLocaleString() : 'Never';
 
@@ -201,17 +252,16 @@ async function updateChart(days = 1) {
     if (days >= 30) timeUnit = 'week';
     powerChart.options.scales.x.time.unit = timeUnit;
 
-    // Build new datasets with visibility from preferences
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     const newDatasets = [
-      { label: 'Load', data: [], borderColor: '#8b5cf6', backgroundColor: '#8b5cf620', tension: 0.3, borderWidth: 1.5 },
-      { label: 'Solar PV', data: [], borderColor: '#fbbf24', backgroundColor: '#fbbf2420', tension: 0.3, borderWidth: 1.5 },
-      { label: 'Battery Charge', data: [], borderColor: '#10b981', backgroundColor: '#10b98120', tension: 0.3, borderWidth: 1.5 },
+      { label: 'Load', data: [], borderColor: isDark ? '#8b5cf6' : '#7c3aed', backgroundColor: isDark ? '#8b5cf620' : '#7c3aed20', tension: 0.3, borderWidth: 1.5 },
+      { label: 'Solar PV', data: [], borderColor: isDark ? '#fbbf24' : '#d97706', backgroundColor: isDark ? '#fbbf2420' : '#d9770620', tension: 0.3, borderWidth: 1.5 },
+      { label: 'Battery Charge', data: [], borderColor: isDark ? '#10b981' : '#059669', backgroundColor: isDark ? '#10b98120' : '#05966920', tension: 0.3, borderWidth: 1.5 },
       { label: 'Battery Discharge', data: [], borderColor: '#f59e0b', backgroundColor: '#f59e0b20', tension: 0.3, borderWidth: 1.5 },
-      { label: 'Grid Import', data: [], borderColor: '#ef4444', backgroundColor: '#ef444420', tension: 0.3, borderWidth: 1.5 },
+      { label: 'Grid Import', data: [], borderColor: isDark ? '#ef4444' : '#dc2626', backgroundColor: isDark ? '#ef444420' : '#dc262620', tension: 0.3, borderWidth: 1.5 },
       { label: 'Grid Export', data: [], borderColor: '#3b82f6', backgroundColor: '#3b82f620', tension: 0.3, borderWidth: 1.5 }
     ];
 
-    // Apply saved visibility preferences
     newDatasets.forEach(ds => {
       const pref = visibilityPrefs[ds.label];
       ds.hidden = (pref === false);
@@ -298,6 +348,9 @@ async function loadBranding() {
   } catch (e) {}
 }
 
+// Event listeners
+document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
+
 document.querySelectorAll('.chart-controls button').forEach(btn => {
   btn.addEventListener('click', (e) => {
     document.querySelector('.chart-controls .active')?.classList.remove('active');
@@ -308,6 +361,7 @@ document.querySelectorAll('.chart-controls button').forEach(btn => {
 });
 
 // Initialize
+initTheme();
 initCharts();
 updateCurrent();
 updateGridStatus();

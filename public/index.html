@@ -15,7 +15,12 @@
         <img id="logo-img" src="" alt="Logo" style="display:none; height:40px; margin-right:1rem;">
         <h1 id="dashboard-title">⚡ Energy Dashboard</h1>
       </div>
-      <a href="/settings" class="settings-link">⚙️ Settings</a>
+      <div class="header-right">
+        <button id="theme-toggle" class="theme-toggle" aria-label="Toggle dark/light mode">
+          <span class="theme-icon">🌙</span>
+        </button>
+        <a href="/settings" class="settings-link">⚙️ Settings</a>
+      </div>
     </header>
 
     <!-- Flow Card -->
@@ -46,7 +51,7 @@
         <div class="flow-sub" id="flow-grid-direction">Import</div>
       </div>
     </div>
-    <div id="grid-to-battery" style="display:none; text-align:center; margin-top:-0.5rem; margin-bottom:1rem; color:#ef4444; font-size:0.9rem;">
+    <div id="grid-to-battery" style="display:none; text-align:center; margin-top:-0.5rem; margin-bottom:1rem; color:var(--grid); font-size:0.9rem;">
       ⚡ Grid charging battery ⚡
     </div>
 
