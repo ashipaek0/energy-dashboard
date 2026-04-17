@@ -78,7 +78,6 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     .note { font-size: 0.85rem; opacity: 0.7; margin-top: 0.25rem; color: var(--text-secondary); }
     
-    /* Header for settings page */
     .settings-header {
       display: flex;
       justify-content: space-between;
@@ -207,25 +206,6 @@
         </div>
       </div>
 
-      <!-- Solar Assistant -->
-      <h3>Solar Assistant</h3>
-      <div class="toggle-group">
-        <label><input type="checkbox" name="solar_enabled" value="true"> Enable Solar Assistant</label>
-      </div>
-      <div class="form-group">
-        <label>URL (use local IP, not cloud URL)</label>
-        <input type="url" name="solar_assistant_url" placeholder="http://192.168.1.100">
-        <div class="note">Example: http://192.168.1.100 (not the cloud dashboard)</div>
-      </div>
-      <div class="form-group">
-        <label>API Key</label>
-        <input type="password" name="solar_assistant_api_key">
-      </div>
-      <div class="test-row">
-        <button type="button" id="test-solar" class="fetch-btn">Test Solar Assistant Connection</button>
-        <span id="solar-test-status" class="test-status"></span>
-      </div>
-
       <!-- MQTT -->
       <h3>MQTT</h3>
       <div class="toggle-group">
@@ -317,7 +297,6 @@
   </div>
 </div>
 <script>
-  // Theme handling for settings page
   function initTheme() {
     const savedTheme = localStorage.getItem('theme');
     const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;

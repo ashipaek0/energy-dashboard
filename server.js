@@ -59,7 +59,6 @@ let db;
   `);
   const essentialKeys = [
     'ha_url', 'ha_token', 'ha_enabled',
-    'solar_assistant_url', 'solar_assistant_api_key', 'solar_enabled',
     'mqtt_broker_url', 'mqtt_username', 'mqtt_password', 'mqtt_enabled',
     'mqtt_topic_consumption', 'mqtt_topic_solar', 'mqtt_topic_battery_charge',
     'mqtt_topic_battery_discharge', 'mqtt_topic_grid_import', 'mqtt_topic_grid_export',
@@ -81,7 +80,6 @@ let db;
   // Defaults
   const defaults = {
     ha_enabled: 'true',
-    solar_enabled: 'false',
     mqtt_enabled: 'false',
     dashboard_title: '⚡ Energy Dashboard',
     savings_currency: '€',
@@ -181,22 +179,10 @@ async function getHAState(entityId, haUrl = null, haToken = null) {
   return parseFloat(data.state) || 0;
 }
 
-async function getSolarData(url = null, key = null) {
-  if (!url) url = await getConfig('solar_assistant_url');
-  if (!key) key = await getConfig('solar_assistant_api_key');
-  if (!url || !key) return null;
-  const res = await fetch(`${url}/api/v1/status`, {
-    headers: { 'X-Api-Key': key }
-  });
-  if (!res.ok) throw new Error(`Solar API error: ${res.status}`);
-  return await res.json();
-}
-
 // Polling
 async function pollAndCache() {
   try {
     const haEnabled = await isSourceEnabled('ha_enabled');
-    const solarEnabled = await isSourceEnabled('solar_enabled');
     const mqttEnabled = await isSourceEnabled('mqtt_enabled');
 
     async function getValue(mqttKey, haEntityKey) {
@@ -215,18 +201,8 @@ async function pollAndCache() {
     const gridExport = await getValue('grid_export', 'ha_entity_grid_export');
     const batterySoc = await getValue('battery_soc', 'ha_entity_battery_soc');
 
-    let solarPower = 0, dailySolar = 0;
-    if (solarEnabled) {
-      try {
-        const sa = await getSolarData();
-        if (sa) {
-          solarPower = sa.power?.now || 0;
-          dailySolar = sa.energy?.today || 0;
-        }
-      } catch { /* fallback */ }
-    }
-    if (solarPower === 0) solarPower = await getValue('solar', 'ha_entity_solar');
-    if (dailySolar === 0) dailySolar = await getValue('daily_solar', 'ha_entity_daily_solar');
+    const solarPower = await getValue('solar', 'ha_entity_solar');
+    const dailySolar = await getValue('daily_solar', 'ha_entity_daily_solar');
 
     const dailyConsumption = await getValue('daily_consumption', 'ha_entity_daily_consumption');
     const dailyBattCharge = await getValue('daily_battery_charge', 'ha_entity_daily_battery_charge');
@@ -268,12 +244,10 @@ pollAndCache();
 setInterval(pollAndCache, 30000);
 
 // --- Public API ---
-// Prevent favicon requests from triggering auth prompts
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
-// Public configuration (non-sensitive)
 app.get('/api/public-config', async (req, res) => {
   try {
     const keys = ['dashboard_title', 'dashboard_logo', 'savings_currency', 'savings_rate'];
@@ -372,7 +346,6 @@ app.get('/api/monthly', async (req, res) => {
     months.push(d.toISOString().slice(0,7));
   }
   try {
-    // Get daily max values per day, then sum by month to avoid double counting
     const rows = await db.all(`
       SELECT 
         strftime('%Y-%m', date(timestamp, 'unixepoch')) as month,
@@ -494,7 +467,6 @@ app.post('/api/settings', async (req, res) => {
   res.json({ success: true });
 });
 
-// Fetch HA entities – supports query params for temporary testing
 app.get('/api/ha/entities', authMiddleware, async (req, res) => {
   let haUrl = req.query.url;
   let haToken = req.query.token;
@@ -511,30 +483,6 @@ app.get('/api/ha/entities', authMiddleware, async (req, res) => {
     const data = await response.json();
     const sensors = data.filter(e => e.entity_id.startsWith('sensor.') || e.entity_id.startsWith('binary_sensor.')).map(e => e.entity_id);
     res.json(sensors);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Test Solar Assistant – accepts query params for temporary test
-app.get('/api/test-solar', authMiddleware, async (req, res) => {
-  let url = req.query.url;
-  let key = req.query.key;
-  if (!url || !key) {
-    url = await getConfig('solar_assistant_url');
-    key = await getConfig('solar_assistant_api_key');
-  }
-  if (!url || !key) return res.status(400).json({ error: 'Solar Assistant URL or API Key not configured' });
-  if (url.includes('solar-assistant.io')) {
-    return res.status(400).json({ error: 'Use local IP address (e.g., http://192.168.1.100), not the cloud dashboard URL' });
-  }
-  try {
-    const response = await fetch(`${url}/api/v1/status`, {
-      headers: { 'X-Api-Key': key }
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
-    res.json({ success: true, data: { power: data.power?.now, energy: data.energy?.today } });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
