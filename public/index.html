@@ -125,14 +125,38 @@
       <canvas id="energyBarChart"></canvas>
     </div>
 
-    <!-- Monthly Table -->
-    <div class="table-container">
-      <h3>Last 12 Months</h3>
-      <div class="table-wrapper">
-        <table id="monthly-table">
-          <thead><tr><th></th><th>Load</th><th>Solar PV</th><th>Battery charged</th><th>Battery discharged</th><th>Grid used</th><th>Grid exported</th></tr></thead>
-          <tbody></tbody>
-        </table>
+    <!-- Monthly Energy Chart (Last 12 Months) -->
+    <div class="chart-container">
+      <div class="chart-header">
+        <h3>Last 12 Months</h3>
+        <div class="chart-legend" id="monthly-chart-legend"></div>
+      </div>
+      <canvas id="monthlyChart"></canvas>
+    </div>
+
+    <!-- Daily Energy Breakdown (Last 30 Days) -->
+    <div class="daily-breakdown-container">
+      <div class="daily-breakdown-header">
+        <h3>Last 30 Days</h3>
+        <button id="toggle-daily-details" class="toggle-btn">▼</button>
+      </div>
+      <div id="daily-breakdown-content" class="daily-breakdown-content">
+        <div class="daily-table-wrapper">
+          <table id="daily-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Load</th>
+                <th>Solar PV</th>
+                <th>Battery charged</th>
+                <th>Battery discharged</th>
+                <th>Grid used</th>
+                <th>Grid exported</th>
+              </tr>
+            </thead>
+            <tbody id="daily-table-body"></tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
