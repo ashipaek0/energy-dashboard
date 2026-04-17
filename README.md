@@ -28,14 +28,14 @@ A self‑hosted, real‑time energy monitoring dashboard that integrates with **
 
 The easiest way to run the dashboard is with Docker Compose.
 
-### 1. Clone the Repository
+## 1. Clone the Repository
 
 ```bash
 git clone https://github.com/ashipaek0/energy-dashboard.git
 
 cd energy-dashboard```
 
-2. Set the Settings Password
+## **2. Set the Settings Password**
 Edit docker-compose.yml and change the SETTINGS_PASSWORD environment variable:
 
 ```yaml
