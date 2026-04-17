@@ -81,7 +81,7 @@ async function initializeDatabase() {
     'mqtt_topic_battery_discharge', 'mqtt_topic_grid_import', 'mqtt_topic_grid_export',
     'mqtt_topic_battery_soc',
     'mqtt_topic_daily_consumption', 'mqtt_topic_daily_solar', 'mqtt_topic_daily_battery_charge',
-    'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export',
+    'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_1000',
     'ha_entity_consumption', 'ha_entity_solar', 'ha_entity_battery_charge', 'ha_entity_battery_discharge',
     'ha_entity_grid_import', 'ha_entity_grid_export', 'ha_entity_daily_consumption', 'ha_entity_daily_solar',
     'ha_entity_daily_battery_charge', 'ha_entity_daily_battery_discharge', 'ha_entity_daily_grid_import', 'ha_entity_daily_grid_export',
@@ -372,44 +372,77 @@ app.get('/api/daily', async (req, res) => {
 });
 
 app.get('/api/monthly', async (req, res) => {
-  const now = new Date();
-  const months = [];
-  for (let i = 11; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    months.push(d.toISOString().slice(0,7));
-  }
   try {
+    // Generate last 12 months in YYYY-MM format
+    const now = new Date();
+    const months = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      months.push(`${year}-${month}`);
+    }
+
+    // Get daily maximums first, then aggregate by month
     const rows = await db.all(`
-      SELECT 
-        strftime('%Y-%m', date(timestamp, 'unixepoch')) as month,
-        SUM(daily_consumption) as consumption_kwh,
-        SUM(daily_solar) as solar_kwh,
-        SUM(daily_battery_charge) as battery_charge_kwh,
-        SUM(daily_battery_discharge) as battery_discharge_kwh,
-        SUM(daily_grid_import) as grid_import_kwh,
-        SUM(daily_grid_export) as grid_export_kwh
-      FROM (
+      WITH daily_max AS (
         SELECT 
           date(timestamp, 'unixepoch') as day,
-          MAX(daily_consumption) as daily_consumption,
-          MAX(daily_solar) as daily_solar,
-          MAX(daily_battery_charge) as daily_battery_charge,
-          MAX(daily_battery_discharge) as daily_battery_discharge,
-          MAX(daily_grid_import) as daily_grid_import,
-          MAX(daily_grid_export) as daily_grid_export
+          MAX(daily_consumption) as consumption,
+          MAX(daily_solar) as solar,
+          MAX(daily_battery_charge) as battery_charge,
+          MAX(daily_battery_discharge) as battery_discharge,
+          MAX(daily_grid_import) as grid_import,
+          MAX(daily_grid_export) as grid_export
         FROM history
         GROUP BY day
       )
+      SELECT 
+        strftime('%Y-%m', day) as month,
+        SUM(consumption) as consumption_kwh,
+        SUM(solar) as solar_kwh,
+        SUM(battery_charge) as battery_charge_kwh,
+        SUM(battery_discharge) as battery_discharge_kwh,
+        SUM(grid_import) as grid_import_kwh,
+        SUM(grid_export) as grid_export_kwh
+      FROM daily_max
       GROUP BY month
       ORDER BY month DESC
       LIMIT 12
     `);
+
+    // Create a map of existing data
+    const dataMap = {};
+    rows.forEach(r => { dataMap[r.month] = r; });
+
+    // Build result array with all months (fill missing with zeros)
     const result = months.map(m => {
-      const found = rows.find(r => r.month === m);
-      return found || { month: m, consumption_kwh:0, solar_kwh:0, battery_charge_kwh:0, battery_discharge_kwh:0, grid_import_kwh:0, grid_export_kwh:0 };
+      if (dataMap[m]) {
+        return {
+          month: m,
+          consumption_kwh: dataMap[m].consumption_kwh || 0,
+          solar_kwh: dataMap[m].solar_kwh || 0,
+          battery_charge_kwh: dataMap[m].battery_charge_kwh || 0,
+          battery_discharge_kwh: dataMap[m].battery_discharge_kwh || 0,
+          grid_import_kwh: dataMap[m].grid_import_kwh || 0,
+          grid_export_kwh: dataMap[m].grid_export_kwh || 0
+        };
+      } else {
+        return {
+          month: m,
+          consumption_kwh: 0,
+          solar_kwh: 0,
+          battery_charge_kwh: 0,
+          battery_discharge_kwh: 0,
+          grid_import_kwh: 0,
+          grid_export_kwh: 0
+        };
+      }
     });
+
     res.json(result);
   } catch (err) {
+    console.error('Monthly query error:', err);
     res.status(500).json({ error: err.message });
   }
 });
