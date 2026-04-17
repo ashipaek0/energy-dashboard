@@ -2,13 +2,10 @@
 
 A self‑hosted, real‑time energy monitoring dashboard that integrates with **Home Assistant**, **Solar Assistant**, and **MQTT**. Designed for public displays – no login required for viewing, while settings are password‑protected.
 
-
-<img width="1752" height="959" alt="Screenshot From 2026-04-16 19-37-59" src="https://github.com/user-attachments/assets/c3d12473-7d3b-4493-a01d-7d128b84e582" />
-<img width="1752" height="959" alt="Screenshot From 2026-04-16 19-38-13" src="https://github.com/user-attachments/assets/f8ab9a0a-4432-43f6-962c-6b0d6e4abf4b" />
-<img width="1752" height="864" alt="Screenshot From 2026-04-16 19-37-14" src="https://github.com/user-attachments/assets/a4a8ede7-925f-45e0-9fa1-62b75e573541" />
-<img width="1752" height="959" alt="Screenshot From 2026-04-16 19-37-37" src="https://github.com/user-attachments/assets/4f921b49-2ab9-44f2-bca9-14a016b40e26" />
-
-
+![Energy Dashboard Screenshot 1](https://github.com/user-attachments/assets/c3d12473-7d3b-4493-a01d-7d128b84e582)
+![Energy Dashboard Screenshot 2](https://github.com/user-attachments/assets/f8ab9a0a-4432-43f6-962c-6b0d6e4abf4b)
+![Energy Dashboard Screenshot 3](https://github.com/user-attachments/assets/a4a8ede7-925f-45e0-9fa1-62b75e573541)
+![Energy Dashboard Screenshot 4](https://github.com/user-attachments/assets/4f921b49-2ab9-44f2-bca9-14a016b40e26)
 
 ## ✨ Features
 
@@ -28,93 +25,89 @@ A self‑hosted, real‑time energy monitoring dashboard that integrates with **
 
 The easiest way to run the dashboard is with Docker Compose.
 
-## 1. Clone the Repository
+### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/ashipaek0/energy-dashboard.git
+cd energy-dashboard
+```
 
-cd energy-dashboard```
+### 2. Set the Settings Password
 
-## **2. Set the Settings Password**
-Edit docker-compose.yml and change the SETTINGS_PASSWORD environment variable:
+Edit `docker-compose.yml` and change the `SETTINGS_PASSWORD` environment variable:
 
 ```yaml
 environment:
-  - SETTINGS_PASSWORD=your_secure_password_here```
-  
-3. Start the Container
+  - SETTINGS_PASSWORD=your_secure_password_here
+```
+
+### 3. Start the Container
+
 ```bash
-docker compose up -d --build```
+docker compose up -d --build
+```
 
-The dashboard will be available at http://localhost:3000 (or your server's IP).
+The dashboard will be available at `http://localhost:3000` (or your server's IP).
 
-4. Configure Data Sources
+### 4. Configure Data Sources
 
-Open http://your-server-ip:3000/settings
-
-Log in with username admin and the password you set.
-
-Configure Home Assistant (URL and Long‑Lived Access Token).
-
-Click Fetch Entities from HA to load all available sensors.
-
-Map each measurement (consumption, solar, battery, etc.) to the appropriate sensor.
-
-Optionally enable Solar Assistant (local IP required) and/or MQTT.
-
-Customise Savings Calculation (currency and rate) and Branding (title and logo).
-
-Click Save All Settings.
+1. Open `http://your-server-ip:3000/settings`
+2. Log in with username `admin` and the password you set.
+3. Configure Home Assistant:
+   - Enter your Home Assistant URL (e.g., `http://homeassistant.local:8123`)
+   - Generate and paste a Long‑Lived Access Token from your Home Assistant profile
+4. Click **Fetch Entities from HA** to load all available sensors
+5. Map each measurement (consumption, solar, battery, etc.) to the appropriate sensor
+6. Optionally enable Solar Assistant (local IP required) and/or MQTT
+7. Customize Savings Calculation (currency and rate) and Branding (title and logo)
+8. Click **Save All Settings**
 
 The dashboard will immediately begin displaying data.
 
-🔧 Configuration Details
-Home Assistant
-URL: Your Home Assistant instance (e.g., http://homeassistant.local:8123).
+## 🔧 Configuration Details
 
-Token: Generate a Long‑Lived Access Token in your Home Assistant profile.
+### Home Assistant
 
-Entities: After fetching, select the sensors for:
+- **URL**: Your Home Assistant instance (e.g., `http://homeassistant.local:8123`)
+- **Token**: Generate a Long‑Lived Access Token in your Home Assistant profile
 
-Power (Watts): consumption, solar, battery charge/discharge, grid import/export.
+**Entities**: After fetching, select the sensors for:
 
-Battery SOC (%).
+- **Power (Watts)**: consumption, solar, battery charge/discharge, grid import/export
+- **Battery SOC (%)**: battery state of charge
+- **Grid status**: binary sensor – ON/OFF
+- **Daily energy (kWh)**: must reset at midnight (use utility meter or Riemann sum integral sensors)
 
-Grid status (binary sensor – ON/OFF).
+### Solar Assistant
 
-Daily energy (kWh) – must reset at midnight (use utility meter or Riemann sum integral sensors).
+- **URL**: The local IP address of your Solar Assistant device (e.g., `http://192.168.1.101`)
+  - ⚠️ Do not use the cloud dashboard URL (`*.solar-assistant.io`)
+- **API Key**: Found in Solar Assistant under Configuration → MQTT / API
 
-Solar Assistant
-URL: The local IP address of your Solar Assistant device (e.g., http://192.168.1.101).
-Do not use the cloud dashboard URL (*.solar-assistant.io).
+### MQTT
 
-API Key: Found in Solar Assistant under Configuration → MQTT / API.
+- **Broker URL**: `mqtt://your-broker:1883`
+- **Username / Password**: Optional
+- **Topics**: Map each measurement to its MQTT topic. Leave empty to skip.
 
-MQTT
-Broker URL: mqtt://your-broker:1883
+All settings are stored in a SQLite database (`./data/energy.db`) and persist across container restarts.
 
-Username / Password: Optional.
+## 📊 Dashboard Usage
 
-Topics: Map each measurement to its MQTT topic. Leave empty to skip.
-
-All settings are stored in a SQLite database (./data/energy.db) and persist across container restarts.
-
-
-
-📊 Dashboard Usage
-Public View: http://your-server:3000/ – No login required.
-
-Settings: http://your-server:3000/settings – Protected by HTTP Basic Auth (admin / your password).
+- **Public View**: `http://your-server:3000/` – No login required
+- **Settings**: `http://your-server:3000/settings` – Protected by HTTP Basic Auth (`admin` / your password)
 
 Data refreshes automatically every 30 seconds without page reload.
 
+## 🐳 Docker Image on Docker Hub
 
-
-🐳 Docker Image on Docker Hub
 A pre‑built image is available on Docker Hub:
-```irunmole/energy-dashboard:latest```
 
-You can use it directly in your docker-compose.yml:
+```
+irunmole/energy-dashboard:latest
+```
+
+You can use it directly in your `docker-compose.yml`:
 
 ```yaml
 services:
@@ -127,13 +120,14 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      - SETTINGS_PASSWORD=your_secure_password_here```
+      - SETTINGS_PASSWORD=your_secure_password_here
+```
 
-      
-🔄 Automatic Updates (CI/CD)
+## 🔄 Automatic Updates (CI/CD)
+
 This repository includes a GitHub Actions workflow that automatically builds and pushes a Docker image to Docker Hub on every push to main.
 
-If you want to automatically update the running container on your server, add Watchtower to your docker-compose.yml:
+If you want to automatically update the running container on your server, add Watchtower to your `docker-compose.yml`:
 
 ```yaml
 watchtower:
@@ -142,20 +136,25 @@ watchtower:
   restart: unless-stopped
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
-  command: --interval 300 energy-dashboard```
-  
+  command: --interval 300 energy-dashboard
+```
+
 Watchtower will check for new images every 5 minutes and restart the container when an update is available.
 
-🛠️ Development / Manual Installation
+## 🛠️ Development / Manual Installation
+
 If you prefer to run without Docker:
 
 ```bash
 npm install
-npm start```
-The server listens on port 3000. A SQLite database will be created in ./data.
+npm start
+```
 
-📁 Project Structure
-```text
+The server listens on port 3000. A SQLite database will be created in `./data`.
+
+## 📁 Project Structure
+
+```
 energy-dashboard/
 ├── Dockerfile
 ├── docker-compose.yml
@@ -168,32 +167,37 @@ energy-dashboard/
 │   ├── settings.html  # Protected configuration page
 │   └── settings.js
 ├── .env.example
-└── README.md```
+└── README.md
+```
 
+## ❓ Troubleshooting
 
-❓ Troubleshooting
-All values show zero
-Ensure at least one data source is enabled and correctly configured.
+### All values show zero
 
-Use the Test Solar Assistant Connection button in settings to verify API access.
+- Ensure at least one data source is enabled and correctly configured
+- Use the **Test Solar Assistant Connection** button in settings to verify API access
+- For Home Assistant, verify the token has read access to the selected entities
 
-For Home Assistant, verify the token has read access to the selected entities.
+### Solar Assistant test fails with "ETIMEDOUT"
 
-Solar Assistant test fails with "ETIMEDOUT"
-Make sure you are using the local IP address of the device, not the cloud URL.
+- Make sure you are using the local IP address of the device, not the cloud URL
+- The device must be on the same network as the dashboard
 
-The device must be on the same network as the dashboard.
+### Daily energy values grow exponentially
 
-Daily energy values grow exponentially
-The sensors selected for Daily Energy must reset to zero at midnight. Use Home Assistant's Utility Meter or Riemann sum integration to create resetting sensors.
+- The sensors selected for Daily Energy must reset to zero at midnight
+- Use Home Assistant's Utility Meter or Riemann sum integration to create resetting sensors
 
-Grid status shows "Not configured"
-Select a binary sensor in the settings that reports grid availability (e.g., binary_sensor.grid_status).
+### Grid status shows "Not configured"
 
-📄 License
+- Select a binary sensor in the settings that reports grid availability (e.g., `binary_sensor.grid_status`)
+
+## 📄 License
+
 MIT License – see LICENSE file for details.
 
-🙌 Acknowledgements
+## 🙌 Acknowledgements
+
 Built with Express, Chart.js, SQLite, and MQTT.js.
 
 Happy monitoring! ☀️🔋🏠
