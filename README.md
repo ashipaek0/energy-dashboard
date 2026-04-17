@@ -214,3 +214,4 @@ GNU General License – see LICENSE file for details.
 Built with Express, Chart.js, SQLite, and MQTT.js.
 
 Happy monitoring! ☀️🔋🏠
+
