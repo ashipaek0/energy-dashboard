@@ -170,15 +170,20 @@ async function updateCurrent() {
 
 function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImport, gridExport) {
   const solarArrow = document.querySelector('.flow-arrow.solar-home');
+  const battArrow = document.querySelector('.flow-arrow.battery');
+  const gridArrow = document.querySelector('.flow-arrow.grid');
+  const gridToBatt = document.getElementById('grid-to-battery');
+
   if (solar > 0) {
     solarArrow.style.color = 'var(--solar)';
     solarArrow.classList.add('flowing');
+    solarArrow.textContent = '→';
   } else {
     solarArrow.style.color = 'var(--text-secondary)';
     solarArrow.classList.remove('flowing');
+    solarArrow.textContent = '→';
   }
 
-  const battArrow = document.querySelector('.flow-arrow.battery');
   if (battCharge > battDischarge) {
     battArrow.style.color = 'var(--battery)';
     battArrow.textContent = '↓';
@@ -190,7 +195,6 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
     battArrow.textContent = '⇄';
   }
 
-  const gridArrow = document.querySelector('.flow-arrow.grid');
   if (gridImport > gridExport) {
     gridArrow.style.color = 'var(--grid)';
     gridArrow.textContent = '→';
@@ -202,8 +206,8 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
     gridArrow.textContent = '⇄';
   }
 
-  const gridToBatt = document.getElementById('grid-to-battery');
-  if (gridImport > 0 && battCharge > battDischarge && battCharge > 0) {
+  const isGridChargingBattery = gridImport > 0 && battCharge > battDischarge && battCharge > 0;
+  if (isGridChargingBattery) {
     gridToBatt.style.display = 'block';
   } else {
     gridToBatt.style.display = 'none';
