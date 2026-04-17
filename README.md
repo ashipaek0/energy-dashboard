@@ -1,6 +1,6 @@
 # ⚡ Energy Dashboard
 
-A self‑hosted, real‑time energy monitoring dashboard that integrates with **Home Assistant**, and **MQTT**. Designed for public displays – no login required for viewing, while settings are password‑protected.
+A self‑hosted, real‑time energy monitoring dashboard that integrates with **Home Assistant** and **MQTT**. Designed for public displays – no login required for viewing, while settings are password‑protected.
 
 ![Energy Dashboard Screenshot 1](https://github.com/user-attachments/assets/c3d12473-7d3b-4493-a01d-7d128b84e582)
 ![Energy Dashboard Screenshot 2](https://github.com/user-attachments/assets/f8ab9a0a-4432-43f6-962c-6b0d6e4abf4b)
@@ -9,16 +9,26 @@ A self‑hosted, real‑time energy monitoring dashboard that integrates with **
 
 ## ✨ Features
 
-- **Live Flow Card** – See power flowing between Solar, Battery, Home, and Grid at a glance.
-- **Real‑time Stats** – Current power (kW), battery state of charge, daily totals, and self‑sufficiency.
-- **Historical Charts** – Interactive line charts for 24h, 7d, 30d, and 90d.
-- **Monthly Energy Table** – 12‑month breakdown of load, solar, battery, and grid.
-- **Grid Uptime Tracking** – Hours of grid supply per day/week/month/year and last ON/OFF timestamps.
-- **Fully Configurable UI** – Set dashboard title and logo via settings.
-- **Multiple Data Sources** – Pull from Home Assistant, Solar Assistant, and MQTT simultaneously or individually.
-- **Source Toggles** – Enable/disable each source independently.
+- **Live Flow Card** – Animated arrows show power flowing between Solar, Battery, Home, and Grid.
+- **Real‑time Stats** – Current power (W), battery state of charge (%), daily totals (kWh), self‑sufficiency, and cost savings.
+- **Grid Status Tracking** – Displays current grid state (ON/OFF), uptime hours (day/week/month/year), and last change timestamps.
+- **Historical Charts**
+  - Power Overview (line chart) – 24h, 7d, 30d, 90d with smooth gradient fills.
+  - Daily Energy Bar Chart – Solar generated, grid imported, and energy consumed for the last 7 days.
+- **Data Tables**
+  - **Last 30 Days** – Collapsible table with daily totals for load, solar, battery, and grid.
+  - **Last 12 Months** – Collapsible table with monthly energy breakdown.
+- **Light / Dark Mode** – Toggle manually or follow system preference; choice is saved.
+- **Fully Configurable UI**
+  - Set dashboard title and logo.
+  - Configure savings currency and rate.
+- **Multiple Data Sources**
+  - **Home Assistant** – Pull sensor data via REST API (long‑lived token).
+  - **MQTT** – Subscribe to topics for real‑time updates.
+  - Enable/disable each source independently.
 - **Entity Auto‑Discovery** – Fetch sensor list from Home Assistant and map via dropdowns.
-- **Connection Testing** – Verify Solar Assistant and MQTT connections before saving.
+- **Connection Testing** – Verify MQTT broker and topics before saving.
+- **Backup & Restore** – Download the entire SQLite database (settings + history) and restore it later.
 - **Responsive Design** – Works on mobile, tablet, and desktop.
 
 ## 🚀 Quick Start (Docker)
@@ -57,8 +67,8 @@ The dashboard will be available at `http://localhost:3000` (or your server's IP)
    - Enter your Home Assistant URL (e.g., `http://homeassistant.local:8123`)
    - Generate and paste a Long‑Lived Access Token from your Home Assistant profile
 4. Click **Fetch Entities from HA** to load all available sensors
-5. Map each measurement (consumption, solar, battery, etc.) to the appropriate sensor
-6. Optionally enable Solar Assistant (local IP required) and/or MQTT
+5. Map each measurement (consumption, solar, battery, grid, etc.) to the appropriate sensor
+6. Optionally enable MQTT and fill in broker details and topics
 7. Customize Savings Calculation (currency and rate) and Branding (title and logo)
 8. Click **Save All Settings**
 
@@ -86,6 +96,15 @@ The dashboard will immediately begin displaying data.
 
 All settings are stored in a SQLite database (`./data/energy.db`) and persist across container restarts.
 
+## 💾 Backup & Restore
+
+The settings page includes a Backup & Restore section:
+
+- **Download Backup** – Saves the entire database as a `.db` file.
+- **Restore Backup** – Upload a previously saved `.db` file to restore all settings and historical data.
+
+This is especially useful before reinstalling or migrating the dashboard.
+
 ## 📊 Dashboard Usage
 
 - **Public View**: `http://your-server:3000/` – No login required
@@ -98,7 +117,7 @@ Data refreshes automatically every 30 seconds without page reload.
 A pre‑built image is available on Docker Hub:
 
 ```
-irunmole/energy-dashboard:latest
+ashipaek0/energy-dashboard:latest
 ```
 
 You can use it directly in your `docker-compose.yml`:
@@ -106,7 +125,7 @@ You can use it directly in your `docker-compose.yml`:
 ```yaml
 services:
   energy-dashboard:
-    image: irunmole/energy-dashboard:latest
+    image: ashipaek0/energy-dashboard:latest
     container_name: energy-dashboard
     restart: unless-stopped
     ports:
@@ -121,7 +140,7 @@ services:
 
 This repository includes a GitHub Actions workflow that automatically builds and pushes a Docker image to Docker Hub on every push to main.
 
-If you want to automatically update the running container on your server, add Watchtower to your `docker-compose.yml`:
+To automatically update the running container on your server, add Watchtower to your `docker-compose.yml`:
 
 ```yaml
 watchtower:
@@ -156,10 +175,10 @@ energy-dashboard/
 ├── server.js          # Express backend + SQLite + polling
 ├── public/
 │   ├── index.html     # Main dashboard UI
-│   ├── style.css
-│   ├── script.js
+│   ├── style.css      # Light/dark theme styles
+│   ├── script.js      # Charts, flow card, tables
 │   ├── settings.html  # Protected configuration page
-│   └── settings.js
+│   └── settings.js    # Settings logic + backup/restore
 ├── .env.example
 └── README.md
 ```
@@ -169,7 +188,7 @@ energy-dashboard/
 ### All values show zero
 
 - Ensure at least one data source is enabled and correctly configured
-- Use the **Test Solar Assistant Connection** button in settings to verify API access
+- Use the **Test MQTT Broker Connection** and **Test Topic** buttons in settings to verify connectivity
 - For Home Assistant, verify the token has read access to the selected entities
 
 ### Daily energy values grow exponentially
@@ -181,9 +200,14 @@ energy-dashboard/
 
 - Select a binary sensor in the settings that reports grid availability (e.g., `binary_sensor.grid_status`)
 
+### Login popup appears on main page
+
+- This was fixed in recent versions
+- If you still see it, clear your browser cache or test in incognito mode
+
 ## 📄 License
 
-GNU General Public License V3 – see LICENSE file for details.
+MIT License – see LICENSE file for details.
 
 ## 🙌 Acknowledgements
 
