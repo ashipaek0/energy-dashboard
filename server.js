@@ -88,7 +88,7 @@ async function initializeDatabase() {
     'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export',
     'ha_entity_consumption', 'ha_entity_solar', 'ha_entity_battery_charge', 'ha_entity_battery_discharge',
     'ha_entity_grid_import', 'ha_entity_grid_export', 'ha_entity_daily_consumption', 'ha_entity_daily_solar',
-    'ha_entity_daily_battery_charge', 'ha_entity_daily_battery_discharge', 'ha_entity_daily_grid_import', 'ha_entity_daily_grid_export',
+    'ha_entity_daily_battery_charge', 'ha_entity_daily_battery_discharge', 'ha_entity_daily_grid_import', 'ha_entity_daily_grid_1000',
     'ha_entity_battery_soc', 'grid_status_entity',
     'savings_currency', 'savings_rate', 'dashboard_title', 'dashboard_logo'
   ];
@@ -161,7 +161,7 @@ async function setupMqtt() {
       'mqtt_topic_consumption', 'mqtt_topic_solar', 'mqtt_topic_battery_charge',
       'mqtt_topic_battery_discharge', 'mqtt_topic_grid_import', 'mqtt_topic_grid_export',
       'mqtt_topic_battery_soc',
-      'mqtt_topic_daily_consumption', 'mqtt_topic_daily_solar', 'mqtt_topic_daily_battery_charge',
+      'mqtt_topic_daily_consumption', 'mqtt_topic_daily_solar', 'mqtt_topic_daily_battery_1000',
       'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export'
     ];
     const topics = [];
@@ -196,7 +196,7 @@ async function getHAState(entityId, haUrl = null, haToken = null) {
   });
   if (!res.ok) throw new Error(`HA API error: ${res.status}`);
   const data = await res.json();
-  return data.state; // Return raw state, not parsed as number
+  return data.state;
 }
 
 async function pollAndCache() {
@@ -242,7 +242,6 @@ async function pollAndCache() {
        dailyConsumption, dailySolar, dailyBattCharge, dailyBattDischarge, dailyGridImport, dailyGridExport]
     );
 
-    // Grid status with string/number handling
     const gridEntity = await getConfig('grid_status_entity');
     if (gridEntity) {
       try {
@@ -447,7 +446,6 @@ app.get('/api/grid/status', async (req, res) => {
   }
 });
 
-// Helper: get grid state at a specific Unix timestamp (or nearest before)
 async function getGridStateAt(timestamp) {
   const row = await db.get(
     'SELECT state FROM grid_status WHERE timestamp <= ? ORDER BY timestamp DESC LIMIT 1',
@@ -462,21 +460,21 @@ app.get('/api/grid/hours', async (req, res) => {
   let start, end;
   
   if (period === 'day') {
-    start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
-    end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+    end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
   } else if (period === 'week') {
-    const day = now.getUTCDay();
+    const day = now.getDay();
     const diff = (day === 0 ? 6 : day - 1);
-    start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - diff, 0, 0, 0));
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - diff, 0, 0, 0);
     end = new Date(start);
-    end.setUTCDate(start.getUTCDate() + 6);
-    end.setUTCHours(23, 59, 59, 999);
+    end.setDate(start.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
   } else if (period === 'month') {
-    start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0));
-    end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
+    start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
   } else if (period === 'year') {
-    start = new Date(Date.UTC(now.getUTCFullYear(), 0, 1, 0, 0, 0));
-    end = new Date(Date.UTC(now.getUTCFullYear(), 11, 31, 23, 59, 59, 999));
+    start = new Date(now.getFullYear(), 0, 1, 0, 0, 0);
+    end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
   } else {
     return res.status(400).json({ error: 'Invalid period' });
   }
