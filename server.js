@@ -34,6 +34,14 @@ const upload = multer({
 let db;
 const DB_PATH = './data/energy.db';
 
+function parseGridState(state) {
+  if (state === null || state === undefined) return 0;
+  if (typeof state === 'number') return state > 0 ? 1 : 0;
+  const str = String(state).toLowerCase().trim();
+  if (str === 'on' || str === 'true' || str === '1' || str === 'open' || str === 'unlocked') return 1;
+  return 0;
+}
+
 async function initializeDatabase() {
   db = await open({
     filename: DB_PATH,
@@ -188,7 +196,7 @@ async function getHAState(entityId, haUrl = null, haToken = null) {
   });
   if (!res.ok) throw new Error(`HA API error: ${res.status}`);
   const data = await res.json();
-  return parseFloat(data.state) || 0;
+  return data.state; // Return raw state, not parsed as number
 }
 
 async function pollAndCache() {
@@ -200,7 +208,10 @@ async function pollAndCache() {
       if (mqttEnabled && mqttValues[mqttKey] !== undefined) return mqttValues[mqttKey];
       if (haEnabled) {
         const entity = await getConfig(haEntityKey);
-        if (entity) return await getHAState(entity).catch(() => 0);
+        if (entity) {
+          const raw = await getHAState(entity).catch(() => 0);
+          return parseFloat(raw) || 0;
+        }
       }
       return 0;
     }
@@ -231,17 +242,18 @@ async function pollAndCache() {
        dailyConsumption, dailySolar, dailyBattCharge, dailyBattDischarge, dailyGridImport, dailyGridExport]
     );
 
+    // Grid status with string/number handling
     const gridEntity = await getConfig('grid_status_entity');
     if (gridEntity) {
       try {
-        const state = await getHAState(gridEntity);
-        const isOn = state > 0 ? 1 : 0;
+        const rawState = await getHAState(gridEntity);
+        const isOn = parseGridState(rawState);
         const lastRecord = await db.get('SELECT state FROM grid_status ORDER BY timestamp DESC LIMIT 1');
         if (!lastRecord || lastRecord.state !== isOn) {
           await db.run('INSERT INTO grid_status (timestamp, state) VALUES (?, ?)', [now, isOn]);
-          console.log(`Grid state changed to ${isOn ? 'ON' : 'OFF'}`);
+          console.log(`Grid state changed to ${isOn ? 'ON' : 'OFF'} (raw: ${rawState})`);
         }
-      } catch (e) {}
+      } catch (e) { console.error('Grid status polling error:', e); }
     }
 
     console.log(`Cached at ${new Date().toISOString()}`);
@@ -420,12 +432,13 @@ app.get('/api/grid/status', async (req, res) => {
   try {
     const entity = await getConfig('grid_status_entity');
     if (!entity) return res.json({ configured: false });
-    const current = await getHAState(entity).catch(() => 0);
+    const rawState = await getHAState(entity).catch(() => 0);
+    const current = parseGridState(rawState);
     const lastOn = await db.get("SELECT timestamp FROM grid_status WHERE state = 1 ORDER BY timestamp DESC LIMIT 1");
     const lastOff = await db.get("SELECT timestamp FROM grid_status WHERE state = 0 ORDER BY timestamp DESC LIMIT 1");
     res.json({
       configured: true,
-      current: current > 0,
+      current: current === 1,
       lastOn: lastOn ? lastOn.timestamp * 1000 : null,
       lastOff: lastOff ? lastOff.timestamp * 1000 : null
     });
