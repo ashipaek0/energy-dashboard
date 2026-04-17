@@ -125,7 +125,7 @@
       <canvas id="energyBarChart"></canvas>
     </div>
 
-    <!-- Daily Energy Breakdown (Last 30 Days) - NOW BEFORE MONTHLY -->
+    <!-- Daily Energy Breakdown (Last 30 Days) -->
     <div class="daily-breakdown-container">
       <div class="daily-breakdown-header">
         <h3>Last 30 Days</h3>
@@ -151,13 +151,33 @@
       </div>
     </div>
 
-    <!-- Monthly Energy Chart (Last 12 Months) -->
-    <div class="chart-container">
-      <div class="chart-header">
+    <!-- Spacer for padding -->
+    <div style="height: 2rem;"></div>
+
+    <!-- Monthly Energy Breakdown (Last 12 Months) -->
+    <div class="daily-breakdown-container">
+      <div class="daily-breakdown-header">
         <h3>Last 12 Months</h3>
-        <div class="chart-legend" id="monthly-chart-legend"></div>
+        <button id="toggle-monthly-details" class="toggle-btn">▼</button>
       </div>
-      <canvas id="monthlyChart"></canvas>
+      <div id="monthly-breakdown-content" class="daily-breakdown-content">
+        <div class="daily-table-wrapper">
+          <table id="monthly-table">
+            <thead>
+              <tr>
+                <th>Month</th>
+                <th>Load</th>
+                <th>Solar PV</th>
+                <th>Battery charged</th>
+                <th>Battery discharged</th>
+                <th>Grid used</th>
+                <th>Grid exported</th>
+              </tr>
+            </thead>
+            <tbody id="monthly-table-body"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </div>
   <script src="script.js"></script>

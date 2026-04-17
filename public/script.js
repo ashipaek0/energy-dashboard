@@ -1,9 +1,7 @@
 let powerChart;
 let energyBarChart;
-let monthlyChart;
 const ctxPower = document.getElementById('powerChart').getContext('2d');
 const ctxEnergy = document.getElementById('energyBarChart').getContext('2d');
-const ctxMonthly = document.getElementById('monthlyChart').getContext('2d');
 
 const visibilityPrefs = {
   'Load': true,
@@ -12,15 +10,6 @@ const visibilityPrefs = {
   'Battery Discharge': false,
   'Grid Import': false,
   'Grid Export': false
-};
-
-const monthlyVisibility = {
-  'Load': true,
-  'Solar PV': true,
-  'Battery charged': true,
-  'Battery discharged': true,
-  'Grid used': true,
-  'Grid exported': true
 };
 
 function initCharts() {
@@ -85,55 +74,6 @@ function initCharts() {
         tooltip: { mode: 'index' }
       }
     }
-  });
-
-  // Monthly stacked bar chart
-  monthlyChart = new Chart(ctxMonthly, {
-    type: 'bar',
-    data: {
-      labels: [],
-      datasets: [
-        { label: 'Load', backgroundColor: isDark ? '#8b5cf6' : '#7c3aed', data: [], stack: 'energy' },
-        { label: 'Solar PV', backgroundColor: isDark ? '#fbbf24' : '#d97706', data: [], stack: 'energy' },
-        { label: 'Battery charged', backgroundColor: isDark ? '#10b981' : '#059669', data: [], stack: 'battery' },
-        { label: 'Battery discharged', backgroundColor: '#f59e0b', data: [], stack: 'battery' },
-        { label: 'Grid used', backgroundColor: isDark ? '#ef4444' : '#dc2626', data: [], stack: 'grid' },
-        { label: 'Grid exported', backgroundColor: '#3b82f6', data: [], stack: 'grid' }
-      ]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        x: { stacked: true, grid: { color: gridColor } },
-        y: { stacked: true, title: { display: true, text: 'Energy (kWh)', color: textColor }, grid: { color: gridColor } }
-      },
-      plugins: {
-        legend: { display: false },
-        tooltip: { mode: 'index' }
-      }
-    }
-  });
-
-  buildMonthlyLegend();
-}
-
-function buildMonthlyLegend() {
-  const legendContainer = document.getElementById('monthly-chart-legend');
-  const datasets = monthlyChart.data.datasets;
-  legendContainer.innerHTML = '';
-  datasets.forEach((ds, i) => {
-    const item = document.createElement('div');
-    item.className = 'legend-item' + (monthlyVisibility[ds.label] ? ' active' : '');
-    item.innerHTML = `<span class="legend-color" style="background:${ds.backgroundColor}"></span>${ds.label}`;
-    item.addEventListener('click', () => {
-      const meta = monthlyChart.getDatasetMeta(i);
-      meta.hidden = !meta.hidden;
-      monthlyVisibility[ds.label] = !meta.hidden;
-      item.classList.toggle('active', !meta.hidden);
-      monthlyChart.update();
-    });
-    legendContainer.appendChild(item);
   });
 }
 
@@ -352,41 +292,32 @@ async function updateEnergyBarChart() {
   }
 }
 
-async function updateMonthlyChart() {
+async function updateMonthlyTable() {
   try {
     const res = await fetch('/api/monthly');
     const data = await res.json();
-    if (!data.length) return;
-
+    const tbody = document.getElementById('monthly-table-body');
+    tbody.innerHTML = '';
+    
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const labels = data.map(d => {
-      const [year, month] = d.month.split('-');
-      return monthNames[parseInt(month) - 1] + ' ' + year.slice(2);
+    
+    data.forEach(row => {
+      const [year, month] = row.month.split('-');
+      const monthStr = monthNames[parseInt(month) - 1] + ' ' + year.slice(2);
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${monthStr}</td>
+        <td>${row.consumption_kwh.toFixed(1)} kWh</td>
+        <td>${row.solar_kwh.toFixed(1)} kWh</td>
+        <td>${row.battery_charge_kwh.toFixed(1)} kWh</td>
+        <td>${row.battery_discharge_kwh.toFixed(1)} kWh</td>
+        <td>${row.grid_import_kwh.toFixed(1)} kWh</td>
+        <td>${row.grid_export_kwh.toFixed(1)} kWh</td>
+      `;
+      tbody.appendChild(tr);
     });
-
-    const loadData = data.map(d => d.consumption_kwh);
-    const solarData = data.map(d => d.solar_kwh);
-    const battChargeData = data.map(d => d.battery_charge_kwh);
-    const battDischargeData = data.map(d => d.battery_discharge_kwh);
-    const gridImportData = data.map(d => d.grid_import_kwh);
-    const gridExportData = data.map(d => d.grid_export_kwh);
-
-    monthlyChart.data.labels = labels;
-    monthlyChart.data.datasets[0].data = loadData;
-    monthlyChart.data.datasets[1].data = solarData;
-    monthlyChart.data.datasets[2].data = battChargeData;
-    monthlyChart.data.datasets[3].data = battDischargeData;
-    monthlyChart.data.datasets[4].data = gridImportData;
-    monthlyChart.data.datasets[5].data = gridExportData;
-
-    monthlyChart.data.datasets.forEach((ds, i) => {
-      const meta = monthlyChart.getDatasetMeta(i);
-      meta.hidden = !monthlyVisibility[ds.label];
-    });
-
-    monthlyChart.update();
   } catch (e) {
-    console.error('Monthly chart error:', e);
+    console.error('Monthly table error:', e);
   }
 }
 
@@ -459,17 +390,6 @@ function toggleTheme() {
   
   updateChartColors();
   if (powerChart) applyGradientFills(powerChart);
-  
-  // Update monthly chart colors
-  const isDark = newTheme === 'dark';
-  monthlyChart.data.datasets[0].backgroundColor = isDark ? '#8b5cf6' : '#7c3aed';
-  monthlyChart.data.datasets[1].backgroundColor = isDark ? '#fbbf24' : '#d97706';
-  monthlyChart.data.datasets[2].backgroundColor = isDark ? '#10b981' : '#059669';
-  monthlyChart.data.datasets[3].backgroundColor = '#f59e0b';
-  monthlyChart.data.datasets[4].backgroundColor = isDark ? '#ef4444' : '#dc2626';
-  monthlyChart.data.datasets[5].backgroundColor = '#3b82f6';
-  monthlyChart.update();
-  buildMonthlyLegend();
 }
 
 function updateChartColors() {
@@ -498,16 +418,20 @@ function updateChartColors() {
     energyBarChart.options.plugins.legend.labels.color = textColor;
     energyBarChart.update();
   }
-  if (monthlyChart) {
-    monthlyChart.options.scales.x.grid.color = gridColor;
-    monthlyChart.options.scales.y.grid.color = gridColor;
-  }
 }
 
 // Toggle daily breakdown
 document.getElementById('toggle-daily-details').addEventListener('click', () => {
   const content = document.getElementById('daily-breakdown-content');
   const btn = document.getElementById('toggle-daily-details');
+  content.classList.toggle('collapsed');
+  btn.classList.toggle('collapsed');
+});
+
+// Toggle monthly breakdown
+document.getElementById('toggle-monthly-details').addEventListener('click', () => {
+  const content = document.getElementById('monthly-breakdown-content');
+  const btn = document.getElementById('toggle-monthly-details');
   content.classList.toggle('collapsed');
   btn.classList.toggle('collapsed');
 });
@@ -531,8 +455,8 @@ updateCurrent();
 updateGridStatus();
 updateChart(1);
 updateEnergyBarChart();
-updateMonthlyChart();
 updateDailyTable();
+updateMonthlyTable();
 loadBranding();
 
 setInterval(() => {
@@ -540,6 +464,6 @@ setInterval(() => {
   updateGridStatus();
   updateChart(1);
   updateEnergyBarChart();
-  updateMonthlyChart();
   updateDailyTable();
+  updateMonthlyTable();
 }, 30000);
