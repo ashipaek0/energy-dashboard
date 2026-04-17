@@ -286,9 +286,21 @@ app.get('/api/public-config', async (req, res) => {
 app.get('/api/current', async (req, res) => {
   try {
     const latest = await db.get('SELECT * FROM history ORDER BY timestamp DESC LIMIT 1');
+    
+    const rateRow = await db.get('SELECT value FROM config WHERE key = ?', 'savings_rate');
+    const rate = parseFloat(rateRow?.value) || 0.30;
+    
+    const allTimeSolar = await db.get(`
+      SELECT SUM(daily_solar) as total FROM (
+        SELECT MAX(daily_solar) as daily_solar
+        FROM history
+        GROUP BY date(timestamp, 'unixepoch')
+      )
+    `);
+    const allTimeSavings = (allTimeSolar?.total || 0) * rate;
+    
     if (latest) {
       const curr = await getConfig('savings_currency') || '€';
-      const rate = parseFloat(await getConfig('savings_rate')) || 0.30;
       res.json({
         consumption_kw: latest.consumption / 1000,
         solar_kw: latest.solar / 1000,
@@ -305,6 +317,8 @@ app.get('/api/current', async (req, res) => {
         daily_grid_export_kwh: latest.daily_grid_export,
         savings_currency: curr,
         savings_rate: rate,
+        today_savings: latest.daily_solar * rate,
+        all_time_savings: allTimeSavings,
         timestamp: latest.timestamp * 1000
       });
     } else {
@@ -468,10 +482,8 @@ app.get('/api/grid/hours', async (req, res) => {
 // --- Backup & Restore (protected) ---
 app.get('/api/backup', authMiddleware, async (req, res) => {
   try {
-    // Close database connection temporarily to ensure file consistency
     await db.close();
     res.download(DB_PATH, `energy-dashboard-backup-${Date.now()}.db`, async (err) => {
-      // Reopen database after download completes or fails
       await initializeDatabase();
       if (err) {
         console.error('Backup download error:', err);
@@ -488,7 +500,6 @@ app.post('/api/restore', authMiddleware, upload.single('dbfile'), async (req, re
   }
   const tempPath = req.file.path;
   try {
-    // Validate that the uploaded file is a valid SQLite database
     const testDb = await open({
       filename: tempPath,
       driver: sqlite3.Database
@@ -496,30 +507,20 @@ app.post('/api/restore', authMiddleware, upload.single('dbfile'), async (req, re
     await testDb.get('SELECT 1');
     await testDb.close();
     
-    // Close current database
     await db.close();
-    // Stop MQTT client temporarily
     if (mqttClient) {
       mqttClient.end();
       mqttClient = null;
     }
     
-    // Replace the current database with the uploaded one
     fs.copyFileSync(tempPath, DB_PATH);
-    
-    // Reinitialize database connection
     await initializeDatabase();
-    // Restart MQTT
     await setupMqtt();
-    
-    // Clean up temp file
     fs.unlinkSync(tempPath);
     
     res.json({ success: true, message: 'Database restored successfully' });
   } catch (err) {
-    // Clean up temp file on error
     try { fs.unlinkSync(tempPath); } catch (e) {}
-    // Reopen original database if possible
     try { await initializeDatabase(); } catch (e) {}
     res.status(500).json({ error: 'Invalid database file: ' + err.message });
   }

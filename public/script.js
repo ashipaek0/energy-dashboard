@@ -12,6 +12,13 @@ const visibilityPrefs = {
   'Grid Export': false
 };
 
+function formatCurrency(amount, currency) {
+  return currency + ' ' + amount.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
+
 function initCharts() {
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
   const gridColor = isDark ? '#334155' : '#cbd5e1';
@@ -152,8 +159,13 @@ async function updateCurrent() {
     document.getElementById('daily-load').textContent = d.daily_consumption_kwh.toFixed(2) + ' kWh';
     const sufficiency = d.daily_consumption_kwh > 0 ? (d.daily_solar_kwh / d.daily_consumption_kwh * 100).toFixed(1) : '0.0';
     document.getElementById('self-sufficiency').textContent = sufficiency + '%';
-    const savings = (d.daily_solar_kwh * rate).toFixed(2);
-    document.getElementById('savings').textContent = `${savings} ${currency}`;
+
+    const todaySavings = d.today_savings || (d.daily_solar_kwh * rate);
+    const allTimeSavings = d.all_time_savings || 0;
+    document.getElementById('savings').innerHTML = `
+      <div style="font-size: 1.2rem;">${formatCurrency(todaySavings, currency)}</div>
+      <div style="font-size: 0.8rem; opacity: 0.7;">All-time: ${formatCurrency(allTimeSavings, currency)}</div>
+    `;
   } catch (e) {
     console.error(e);
   }
