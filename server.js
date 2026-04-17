@@ -273,6 +273,23 @@ app.get('/favicon.ico', (req, res) => res.status(204).end());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
+// Public configuration (non-sensitive)
+app.get('/api/public-config', async (req, res) => {
+  try {
+    const keys = ['dashboard_title', 'dashboard_logo', 'savings_currency', 'savings_rate'];
+    const config = {};
+    for (const key of keys) {
+      config[key] = await getConfig(key);
+    }
+    config.dashboard_title = config.dashboard_title || '⚡ Energy Dashboard';
+    config.savings_currency = config.savings_currency || '€';
+    config.savings_rate = config.savings_rate || '0.30';
+    res.json(config);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/current', async (req, res) => {
   try {
     const latest = await db.get('SELECT * FROM history ORDER BY timestamp DESC LIMIT 1');
