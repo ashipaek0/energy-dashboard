@@ -404,3 +404,16 @@ h1 {
   .flow-arrow { display: none; }
   .flow-card { flex-direction: column; }
 }
+.daily-breakdown-container {
+  background: var(--card-bg);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  margin-top: 2rem;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+}
+
+/* Override margin for consecutive containers */
+.daily-breakdown-container + .daily-breakdown-container {
+  margin-top: 1rem;
+}

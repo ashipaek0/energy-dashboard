@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Energy Monitor</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%233b82f6'/%3E%3Ctext x='50' y='70' font-size='50' text-anchor='middle' fill='white'%3E⚡%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
@@ -12,7 +13,7 @@
   <div class="container">
     <header>
       <div class="header-left">
-        <img id="logo-img" src="" alt="Logo" style="display:none; height:40px; margin-right:1rem;">
+        <img id="logo-img" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%233b82f6'/%3E%3Ctext x='50' y='70' font-size='50' text-anchor='middle' fill='white'%3E⚡%3C/text%3E%3C/svg%3E" alt="Logo" style="height:40px; margin-right:1rem;">
         <h1 id="dashboard-title">⚡ Energy Dashboard</h1>
       </div>
       <div class="header-right">
@@ -126,7 +127,7 @@
     </div>
 
     <!-- Daily Energy Breakdown (Last 30 Days) -->
-    <div class="daily-breakdown-container">
+    <div class="daily-breakdown-container" style="margin-bottom:1rem;">
       <div class="daily-breakdown-header">
         <h3>Last 30 Days</h3>
         <button id="toggle-daily-details" class="toggle-btn">▼</button>
@@ -150,9 +151,6 @@
         </div>
       </div>
     </div>
-
-    <!-- Spacer for padding -->
-    <div style="height: 2rem;"></div>
 
     <!-- Monthly Energy Breakdown (Last 12 Months) -->
     <div class="daily-breakdown-container">
