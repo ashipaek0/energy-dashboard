@@ -1,5 +1,6 @@
 const form = document.getElementById('settings-form');
 const saveStatus = document.getElementById('save-status');
+const backupStatus = document.getElementById('backup-status');
 
 function showStatus(element, msg, type) {
   element.textContent = msg;
@@ -140,6 +141,62 @@ document.getElementById('test-mqtt-topic').addEventListener('click', async funct
   } finally {
     btn.disabled = false;
     btn.textContent = 'Test Topic';
+  }
+});
+
+// Backup & Restore
+document.getElementById('backup-btn').addEventListener('click', async function() {
+  const btn = this;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Preparing backup...';
+  showStatus(backupStatus, 'Generating backup file...', 'info');
+  
+  try {
+    // Trigger download
+    window.location.href = '/api/backup';
+    showStatus(backupStatus, '✅ Backup download started', 'success');
+  } catch (e) {
+    showStatus(backupStatus, `❌ Error: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '⬇️ Download Backup';
+  }
+});
+
+document.getElementById('restore-btn').addEventListener('click', function() {
+  document.getElementById('restore-file').click();
+});
+
+document.getElementById('restore-file').addEventListener('change', async function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  
+  const btn = document.getElementById('restore-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Restoring...';
+  showStatus(backupStatus, 'Uploading and restoring database...', 'info');
+  
+  const formData = new FormData();
+  formData.append('dbfile', file);
+  
+  try {
+    const res = await fetch('/api/restore', {
+      method: 'POST',
+      body: formData
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showStatus(backupStatus, '✅ Database restored successfully! Reloading...', 'success');
+      setTimeout(() => { window.location.reload(); }, 2000);
+    } else {
+      showStatus(backupStatus, `❌ ${data.error}`, 'error');
+    }
+  } catch (e) {
+    showStatus(backupStatus, `❌ Error: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '⬆️ Restore Backup';
+    document.getElementById('restore-file').value = '';
   }
 });
 

@@ -104,6 +104,15 @@
       background: var(--accent);
       color: white;
     }
+    .backup-row {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    #restore-file {
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -290,6 +299,15 @@
         <label>Logo URL (optional)</label>
         <input name="dashboard_logo" placeholder="https://example.com/logo.png">
       </div>
+
+      <!-- Backup & Restore -->
+      <h3>Backup & Restore</h3>
+      <div class="backup-row">
+        <button type="button" id="backup-btn" class="fetch-btn">⬇️ Download Backup</button>
+        <button type="button" id="restore-btn" class="fetch-btn">⬆️ Restore Backup</button>
+        <input type="file" id="restore-file" accept=".db">
+      </div>
+      <div id="backup-status" class="status"></div>
 
       <button type="submit">Save All Settings</button>
       <div id="save-status" class="status"></div>
