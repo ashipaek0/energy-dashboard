@@ -60,46 +60,6 @@ async function fetchEntities() {
 
 document.getElementById('fetch-entities').addEventListener('click', fetchEntities);
 
-// Solar Assistant test
-document.getElementById('test-solar').addEventListener('click', async function() {
-  const btn = this;
-  const statusEl = document.getElementById('solar-test-status');
-  let url = form.querySelector('[name="solar_assistant_url"]').value.trim();
-  const key = form.querySelector('[name="solar_assistant_api_key"]').value.trim();
-  
-  if (!url || !key) {
-    showStatus(statusEl, 'Please enter URL and API Key', 'error');
-    return;
-  }
-  // Ensure URL has protocol
-  if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    url = 'http://' + url;
-  }
-  if (url.includes('solar-assistant.io')) {
-    showStatus(statusEl, '⚠️ Use local IP address, not cloud URL', 'error');
-    return;
-  }
-  
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Testing...';
-  showStatus(statusEl, 'Testing connection...', 'info');
-  
-  try {
-    const res = await fetch(`/api/test-solar?url=${encodeURIComponent(url)}&key=${encodeURIComponent(key)}`);
-    const data = await res.json();
-    if (res.ok) {
-      showStatus(statusEl, `✅ Connected! Power: ${data.data.power}W, Today: ${data.data.energy}kWh`, 'success');
-    } else {
-      showStatus(statusEl, `❌ ${data.error}`, 'error');
-    }
-  } catch (e) {
-    showStatus(statusEl, `❌ Error: ${e.message}`, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Test Solar Assistant Connection';
-  }
-});
-
 // MQTT broker test
 document.getElementById('test-mqtt').addEventListener('click', async function() {
   const btn = this;
@@ -187,7 +147,7 @@ form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const formData = new FormData(form);
   const data = Object.fromEntries(formData.entries());
-  ['ha_enabled', 'solar_enabled', 'mqtt_enabled'].forEach(key => {
+  ['ha_enabled', 'mqtt_enabled'].forEach(key => {
     data[key] = form.querySelector(`[name="${key}"]`)?.checked ? 'true' : 'false';
   });
   try {
