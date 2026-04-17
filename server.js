@@ -268,6 +268,8 @@ pollAndCache();
 setInterval(pollAndCache, 30000);
 
 // --- Public API ---
+// Prevent favicon requests from triggering auth prompts
+app.get('/favicon.ico', (req, res) => res.status(204).end());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
