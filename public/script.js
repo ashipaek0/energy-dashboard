@@ -87,7 +87,6 @@ function initCharts() {
 function applyGradientFills(chart) {
   const ctx = chart.ctx;
   const datasets = chart.data.datasets;
-  const yScale = chart.scales.y;
   const chartArea = chart.chartArea;
 
   datasets.forEach((dataset, i) => {
@@ -307,6 +306,7 @@ async function updateEnergyBarChart() {
 async function updateMonthlyTable() {
   try {
     const res = await fetch('/api/monthly');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const tbody = document.getElementById('monthly-table-body');
     tbody.innerHTML = '';
@@ -314,22 +314,37 @@ async function updateMonthlyTable() {
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     
     data.forEach(row => {
-      const [year, month] = row.month.split('-');
-      const monthStr = monthNames[parseInt(month) - 1] + ' ' + year.slice(2);
+      let monthStr;
+      if (row.month && row.month.includes('-')) {
+        const [year, month] = row.month.split('-');
+        const monthIndex = parseInt(month, 10) - 1;
+        if (monthIndex >= 0 && monthIndex < 12) {
+          monthStr = monthNames[monthIndex] + ' ' + year.slice(2);
+        } else {
+          monthStr = row.month;
+        }
+      } else if (row.month) {
+        monthStr = row.month;
+      } else {
+        monthStr = 'Unknown';
+      }
+      
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td>${monthStr}</td>
-        <td>${row.consumption_kwh.toFixed(1)} kWh</td>
-        <td>${row.solar_kwh.toFixed(1)} kWh</td>
-        <td>${row.battery_charge_kwh.toFixed(1)} kWh</td>
-        <td>${row.battery_discharge_kwh.toFixed(1)} kWh</td>
-        <td>${row.grid_import_kwh.toFixed(1)} kWh</td>
-        <td>${row.grid_export_kwh.toFixed(1)} kWh</td>
+        <td>${(row.consumption_kwh || 0).toFixed(1)} kWh</td>
+        <td>${(row.solar_kwh || 0).toFixed(1)} kWh</td>
+        <td>${(row.battery_charge_kwh || 0).toFixed(1)} kWh</td>
+        <td>${(row.battery_discharge_kwh || 0).toFixed(1)} kWh</td>
+        <td>${(row.grid_import_kwh || 0).toFixed(1)} kWh</td>
+        <td>${(row.grid_export_kwh || 0).toFixed(1)} kWh</td>
       `;
       tbody.appendChild(tr);
     });
   } catch (e) {
     console.error('Monthly table error:', e);
+    const tbody = document.getElementById('monthly-table-body');
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--grid);">Error loading data</td></tr>';
   }
 }
 
