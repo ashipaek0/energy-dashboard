@@ -27,7 +27,7 @@ function initCharts() {
     }
   });
 
-  // Energy bar chart (daily totals)
+  // Energy bar chart
   energyBarChart = new Chart(ctxEnergy, {
     type: 'bar',
     data: {
@@ -174,7 +174,11 @@ async function updateChart(days = 1) {
     if (days >= 30) timeUnit = 'week';
     powerChart.options.scales.x.time.unit = timeUnit;
 
-    const datasets = [
+    // Preserve existing dataset hidden states
+    const existingDatasets = powerChart.data.datasets || [];
+    const hiddenState = existingDatasets.map(ds => ds.hidden || false);
+
+    const newDatasets = [
       { label: 'Load', data: [], borderColor: '#8b5cf6', backgroundColor: '#8b5cf620', tension: 0.3, borderWidth: 1.5 },
       { label: 'Solar PV', data: [], borderColor: '#fbbf24', backgroundColor: '#fbbf2420', tension: 0.3, borderWidth: 1.5 },
       { label: 'Battery Charge', data: [], borderColor: '#10b981', backgroundColor: '#10b98120', tension: 0.3, borderWidth: 1.5, hidden: true },
@@ -183,16 +187,21 @@ async function updateChart(days = 1) {
       { label: 'Grid Export', data: [], borderColor: '#3b82f6', backgroundColor: '#3b82f620', tension: 0.3, borderWidth: 1.5, hidden: true }
     ];
 
+    // Restore hidden state if number of datasets matches
+    if (hiddenState.length === newDatasets.length) {
+      newDatasets.forEach((ds, i) => { ds.hidden = hiddenState[i]; });
+    }
+
     data.forEach(d => {
-      datasets[0].data.push({ x: d.timestamp, y: d.consumption_kw });
-      datasets[1].data.push({ x: d.timestamp, y: d.solar_kw });
-      datasets[2].data.push({ x: d.timestamp, y: d.battery_charge_kw });
-      datasets[3].data.push({ x: d.timestamp, y: d.battery_discharge_kw });
-      datasets[4].data.push({ x: d.timestamp, y: d.grid_import_kw });
-      datasets[5].data.push({ x: d.timestamp, y: d.grid_export_kw });
+      newDatasets[0].data.push({ x: d.timestamp, y: d.consumption_kw });
+      newDatasets[1].data.push({ x: d.timestamp, y: d.solar_kw });
+      newDatasets[2].data.push({ x: d.timestamp, y: d.battery_charge_kw });
+      newDatasets[3].data.push({ x: d.timestamp, y: d.battery_discharge_kw });
+      newDatasets[4].data.push({ x: d.timestamp, y: d.grid_import_kw });
+      newDatasets[5].data.push({ x: d.timestamp, y: d.grid_export_kw });
     });
 
-    powerChart.data.datasets = datasets;
+    powerChart.data.datasets = newDatasets;
     powerChart.update();
   } catch (e) {
     console.error(e);
@@ -273,7 +282,7 @@ document.querySelectorAll('.chart-controls button').forEach(btn => {
   });
 });
 
-// Initialize charts
+// Initialize
 initCharts();
 updateCurrent();
 updateGridStatus();
