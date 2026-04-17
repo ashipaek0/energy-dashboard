@@ -125,7 +125,7 @@ You can use it directly in your `docker-compose.yml`:
 ```yaml
 services:
   energy-dashboard:
-    image: ashipaek0/energy-dashboard:latest
+    image: irunmole/energy-dashboard:latest
     container_name: energy-dashboard
     restart: unless-stopped
     ports:
