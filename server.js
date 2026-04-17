@@ -353,15 +353,32 @@ app.get('/api/monthly', async (req, res) => {
     months.push(d.toISOString().slice(0,7));
   }
   try {
+    // Get daily max values per day, then sum by month to avoid double counting
     const rows = await db.all(`
-      SELECT strftime('%Y-%m', timestamp, 'unixepoch') as month,
+      SELECT 
+        strftime('%Y-%m', date(timestamp, 'unixepoch')) as month,
         SUM(daily_consumption) as consumption_kwh,
         SUM(daily_solar) as solar_kwh,
         SUM(daily_battery_charge) as battery_charge_kwh,
         SUM(daily_battery_discharge) as battery_discharge_kwh,
         SUM(daily_grid_import) as grid_import_kwh,
         SUM(daily_grid_export) as grid_export_kwh
-      FROM history GROUP BY month ORDER BY month DESC LIMIT 12`);
+      FROM (
+        SELECT 
+          date(timestamp, 'unixepoch') as day,
+          MAX(daily_consumption) as daily_consumption,
+          MAX(daily_solar) as daily_solar,
+          MAX(daily_battery_charge) as daily_battery_charge,
+          MAX(daily_battery_discharge) as daily_battery_discharge,
+          MAX(daily_grid_import) as daily_grid_import,
+          MAX(daily_grid_export) as daily_grid_export
+        FROM history
+        GROUP BY day
+      )
+      GROUP BY month
+      ORDER BY month DESC
+      LIMIT 12
+    `);
     const result = months.map(m => {
       const found = rows.find(r => r.month === m);
       return found || { month: m, consumption_kwh:0, solar_kwh:0, battery_charge_kwh:0, battery_discharge_kwh:0, grid_import_kwh:0, grid_export_kwh:0 };
