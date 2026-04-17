@@ -1,8 +1,11 @@
 let powerChart;
-const ctx = document.getElementById('powerChart').getContext('2d');
+let energyBarChart;
+const ctxPower = document.getElementById('powerChart').getContext('2d');
+const ctxEnergy = document.getElementById('energyBarChart').getContext('2d');
 
-function initChart() {
-  powerChart = new Chart(ctx, {
+function initCharts() {
+  // Power line chart
+  powerChart = new Chart(ctxPower, {
     type: 'line',
     data: { datasets: [] },
     options: {
@@ -10,29 +13,41 @@ function initChart() {
       maintainAspectRatio: false,
       interaction: { mode: 'index' },
       elements: {
-        line: {
-          borderWidth: 1.5,
-          tension: 0.3
-        },
-        point: {
-          radius: 0,
-          hoverRadius: 4
-        }
+        line: { borderWidth: 1.5, tension: 0.3 },
+        point: { radius: 0, hoverRadius: 4 }
       },
       scales: {
-        x: {
-          type: 'time',
-          time: { unit: 'hour' },
-          grid: { color: '#334155' }
-        },
-        y: {
-          title: { display: true, text: 'Power (kW)' },
-          grid: { color: '#334155' }
-        }
+        x: { type: 'time', time: { unit: 'hour' }, grid: { color: '#334155' } },
+        y: { title: { display: true, text: 'Power (kW)' }, grid: { color: '#334155' } }
       },
       plugins: {
         tooltip: { mode: 'index' },
         legend: { labels: { color: '#f8fafc' } }
+      }
+    }
+  });
+
+  // Energy bar chart (daily totals)
+  energyBarChart = new Chart(ctxEnergy, {
+    type: 'bar',
+    data: {
+      labels: [],
+      datasets: [
+        { label: 'Solar Generated', backgroundColor: '#fbbf24', data: [] },
+        { label: 'Grid Imported', backgroundColor: '#ef4444', data: [] },
+        { label: 'Energy Consumed', backgroundColor: '#8b5cf6', data: [] }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { grid: { color: '#334155' } },
+        y: { title: { display: true, text: 'Energy (kWh)' }, grid: { color: '#334155' }, beginAtZero: true }
+      },
+      plugins: {
+        legend: { labels: { color: '#f8fafc' } },
+        tooltip: { mode: 'index' }
       }
     }
   });
@@ -184,6 +199,30 @@ async function updateChart(days = 1) {
   }
 }
 
+async function updateEnergyBarChart() {
+  try {
+    const res = await fetch('/api/daily?days=7');
+    const data = await res.json();
+    if (!data.length) return;
+
+    const labels = data.map(d => {
+      const date = new Date(d.day + 'T00:00:00');
+      return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    });
+    const solar = data.map(d => d.solar_kwh);
+    const grid = data.map(d => d.grid_import_kwh);
+    const consumption = data.map(d => d.consumption_kwh);
+
+    energyBarChart.data.labels = labels;
+    energyBarChart.data.datasets[0].data = solar;
+    energyBarChart.data.datasets[1].data = grid;
+    energyBarChart.data.datasets[2].data = consumption;
+    energyBarChart.update();
+  } catch (e) {
+    console.error('Energy bar chart error:', e);
+  }
+}
+
 async function updateMonthly() {
   try {
     const res = await fetch('/api/monthly');
@@ -234,10 +273,12 @@ document.querySelectorAll('.chart-controls button').forEach(btn => {
   });
 });
 
-initChart();
+// Initialize charts
+initCharts();
 updateCurrent();
 updateGridStatus();
 updateChart(1);
+updateEnergyBarChart();
 updateMonthly();
 loadBranding();
 
@@ -245,4 +286,5 @@ setInterval(() => {
   updateCurrent();
   updateGridStatus();
   updateChart(1);
+  updateEnergyBarChart();
 }, 30000);
