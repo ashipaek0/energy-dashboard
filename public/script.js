@@ -1,53 +1,3 @@
-// Theme handling
-function initTheme() {
-  const savedTheme = localStorage.getItem('theme');
-  const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  
-  if (savedTheme === 'dark' || (!savedTheme && systemPrefersDark)) {
-    document.documentElement.setAttribute('data-theme', 'dark');
-    document.getElementById('theme-toggle').innerHTML = '<span class="theme-icon">☀️</span>';
-  } else {
-    document.documentElement.setAttribute('data-theme', 'light');
-    document.getElementById('theme-toggle').innerHTML = '<span class="theme-icon">🌙</span>';
-  }
-}
-
-function toggleTheme() {
-  const currentTheme = document.documentElement.getAttribute('data-theme');
-  const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', newTheme);
-  localStorage.setItem('theme', newTheme);
-  document.getElementById('theme-toggle').innerHTML = newTheme === 'dark' 
-    ? '<span class="theme-icon">☀️</span>' 
-    : '<span class="theme-icon">🌙</span>';
-  
-  // Update chart colors to match new theme
-  updateChartColors();
-}
-
-function updateChartColors() {
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-  const gridColor = isDark ? '#334155' : '#cbd5e1';
-  const textColor = isDark ? '#f8fafc' : '#0f172a';
-  
-  if (powerChart) {
-    powerChart.options.scales.x.grid.color = gridColor;
-    powerChart.options.scales.y.grid.color = gridColor;
-    powerChart.options.plugins.legend.labels.color = textColor;
-    powerChart.update();
-  }
-  if (energyBarChart) {
-    energyBarChart.options.scales.x.grid.color = gridColor;
-    energyBarChart.options.scales.y.grid.color = gridColor;
-    energyBarChart.options.plugins.legend.labels.color = textColor;
-    energyBarChart.update();
-  }
-}
-
-// Charts initialization and other functions remain the same as before...
-// (Include all the existing functions: initCharts, updateCurrent, updateFlowArrows, 
-//  updateGridStatus, updateChart, updateEnergyBarChart, updateMonthly, loadBranding)
-
 let powerChart;
 let energyBarChart;
 const ctxPower = document.getElementById('powerChart').getContext('2d');
@@ -75,7 +25,7 @@ function initCharts() {
       maintainAspectRatio: false,
       interaction: { mode: 'index' },
       elements: {
-        line: { borderWidth: 1.5, tension: 0.3 },
+        line: { borderWidth: 1.5, tension: 0.3, fill: true },
         point: { radius: 0, hoverRadius: 4 }
       },
       scales: {
@@ -125,8 +75,47 @@ function initCharts() {
   });
 }
 
-// [Rest of the functions unchanged: updateCurrent, updateFlowArrows, updateGridStatus,
-//  updateChart, updateEnergyBarChart, updateMonthly, loadBranding, event listeners, intervals]
+// Helper to create gradient fills
+function applyGradientFills(chart) {
+  const ctx = chart.ctx;
+  const datasets = chart.data.datasets;
+  const yScale = chart.scales.y;
+  const chartArea = chart.chartArea;
+
+  datasets.forEach((dataset, i) => {
+    const meta = chart.getDatasetMeta(i);
+    if (!meta.hidden && dataset.data.length > 0) {
+      const gradient = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
+      
+      // Base color from dataset borderColor
+      let color = dataset.borderColor;
+      if (typeof color === 'string') {
+        // Convert hex to rgba for gradient stops
+        const hex = color.startsWith('#') ? color : 
+                   (color === 'var(--solar)' ? (document.documentElement.getAttribute('data-theme') === 'dark' ? '#fbbf24' : '#d97706') : 
+                    color === 'var(--battery)' ? (document.documentElement.getAttribute('data-theme') === 'dark' ? '#10b981' : '#059669') :
+                    color === 'var(--grid)' ? (document.documentElement.getAttribute('data-theme') === 'dark' ? '#ef4444' : '#dc2626') :
+                    color === 'var(--home)' ? (document.documentElement.getAttribute('data-theme') === 'dark' ? '#8b5cf6' : '#7c3aed') :
+                    color);
+        const r = parseInt(hex.slice(1,3), 16);
+        const g = parseInt(hex.slice(3,5), 16);
+        const b = parseInt(hex.slice(5,7), 16);
+        
+        gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.05)`);
+        gradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.2)`);
+        gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.4)`);
+      } else {
+        // Fallback
+        gradient.addColorStop(0, 'rgba(100,100,100,0.05)');
+        gradient.addColorStop(0.5, 'rgba(100,100,100,0.2)');
+        gradient.addColorStop(1, 'rgba(100,100,100,0.4)');
+      }
+      
+      dataset.backgroundColor = gradient;
+      dataset.fill = true;
+    }
+  });
+}
 
 async function updateCurrent() {
   try {
@@ -254,12 +243,12 @@ async function updateChart(days = 1) {
 
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     const newDatasets = [
-      { label: 'Load', data: [], borderColor: isDark ? '#8b5cf6' : '#7c3aed', backgroundColor: isDark ? '#8b5cf620' : '#7c3aed20', tension: 0.3, borderWidth: 1.5 },
-      { label: 'Solar PV', data: [], borderColor: isDark ? '#fbbf24' : '#d97706', backgroundColor: isDark ? '#fbbf2420' : '#d9770620', tension: 0.3, borderWidth: 1.5 },
-      { label: 'Battery Charge', data: [], borderColor: isDark ? '#10b981' : '#059669', backgroundColor: isDark ? '#10b98120' : '#05966920', tension: 0.3, borderWidth: 1.5 },
-      { label: 'Battery Discharge', data: [], borderColor: '#f59e0b', backgroundColor: '#f59e0b20', tension: 0.3, borderWidth: 1.5 },
-      { label: 'Grid Import', data: [], borderColor: isDark ? '#ef4444' : '#dc2626', backgroundColor: isDark ? '#ef444420' : '#dc262620', tension: 0.3, borderWidth: 1.5 },
-      { label: 'Grid Export', data: [], borderColor: '#3b82f6', backgroundColor: '#3b82f620', tension: 0.3, borderWidth: 1.5 }
+      { label: 'Load', data: [], borderColor: isDark ? '#8b5cf6' : '#7c3aed', tension: 0.3, borderWidth: 1.5, fill: true },
+      { label: 'Solar PV', data: [], borderColor: isDark ? '#fbbf24' : '#d97706', tension: 0.3, borderWidth: 1.5, fill: true },
+      { label: 'Battery Charge', data: [], borderColor: isDark ? '#10b981' : '#059669', tension: 0.3, borderWidth: 1.5, fill: true },
+      { label: 'Battery Discharge', data: [], borderColor: '#f59e0b', tension: 0.3, borderWidth: 1.5, fill: true },
+      { label: 'Grid Import', data: [], borderColor: isDark ? '#ef4444' : '#dc2626', tension: 0.3, borderWidth: 1.5, fill: true },
+      { label: 'Grid Export', data: [], borderColor: '#3b82f6', tension: 0.3, borderWidth: 1.5, fill: true }
     ];
 
     newDatasets.forEach(ds => {
@@ -278,6 +267,9 @@ async function updateChart(days = 1) {
 
     powerChart.data.datasets = newDatasets;
     powerChart.update();
+    
+    // Apply gradients after update
+    applyGradientFills(powerChart);
   } catch (e) {
     console.error(e);
   }
@@ -346,6 +338,65 @@ async function loadBranding() {
       document.getElementById('logo-img').style.display = 'inline';
     }
   } catch (e) {}
+}
+
+// Theme handling
+function initTheme() {
+  const savedTheme = localStorage.getItem('theme');
+  const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const themeToggle = document.getElementById('theme-toggle');
+  
+  if (savedTheme === 'dark' || (!savedTheme && systemPrefersDark)) {
+    document.documentElement.setAttribute('data-theme', 'dark');
+    themeToggle.innerHTML = '<span class="theme-icon">☀️</span>';
+  } else {
+    document.documentElement.setAttribute('data-theme', 'light');
+    themeToggle.innerHTML = '<span class="theme-icon">🌙</span>';
+  }
+}
+
+function toggleTheme() {
+  const currentTheme = document.documentElement.getAttribute('data-theme');
+  const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', newTheme);
+  localStorage.setItem('theme', newTheme);
+  const themeToggle = document.getElementById('theme-toggle');
+  themeToggle.innerHTML = newTheme === 'dark' 
+    ? '<span class="theme-icon">☀️</span>' 
+    : '<span class="theme-icon">🌙</span>';
+  
+  updateChartColors();
+  // Reapply gradients when theme changes
+  if (powerChart) applyGradientFills(powerChart);
+}
+
+function updateChartColors() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const gridColor = isDark ? '#334155' : '#cbd5e1';
+  const textColor = isDark ? '#f8fafc' : '#0f172a';
+  
+  if (powerChart) {
+    powerChart.options.scales.x.grid.color = gridColor;
+    powerChart.options.scales.y.grid.color = gridColor;
+    powerChart.options.plugins.legend.labels.color = textColor;
+    // Update dataset border colors for theme
+    powerChart.data.datasets.forEach((ds, i) => {
+      if (i === 0) ds.borderColor = isDark ? '#8b5cf6' : '#7c3aed';
+      else if (i === 1) ds.borderColor = isDark ? '#fbbf24' : '#d97706';
+      else if (i === 2) ds.borderColor = isDark ? '#10b981' : '#059669';
+      else if (i === 3) ds.borderColor = '#f59e0b';
+      else if (i === 4) ds.borderColor = isDark ? '#ef4444' : '#dc2626';
+      else if (i === 5) ds.borderColor = '#3b82f6';
+    });
+    powerChart.update();
+    applyGradientFills(powerChart);
+  }
+  if (energyBarChart) {
+    energyBarChart.options.scales.x.grid.color = gridColor;
+    energyBarChart.options.scales.y.grid.color = gridColor;
+    energyBarChart.options.plugins.legend.labels.color = textColor;
+    energyBarChart.update();
+  }
 }
 
 // Event listeners
