@@ -19,8 +19,7 @@ const authMiddleware = basicAuth({
   realm: 'Energy Dashboard Settings'
 });
 
-// Configure multer for file uploads (restore)
-const upload = multer({ 
+const upload = multer({
   dest: '/tmp/',
   fileFilter: (req, file, cb) => {
     if (file.originalname.endsWith('.db')) {
@@ -29,7 +28,7 @@ const upload = multer({
       cb(new Error('Only .db files are allowed'));
     }
   },
-  limits: { fileSize: 50 * 1024 * 1024 } // 50MB max
+  limits: { fileSize: 50 * 1024 * 1024 }
 });
 
 let db;
@@ -40,7 +39,6 @@ async function initializeDatabase() {
     filename: DB_PATH,
     driver: sqlite3.Database
   });
-  // History table
   await db.exec(`
     CREATE TABLE IF NOT EXISTS history (
       timestamp INTEGER PRIMARY KEY,
@@ -60,14 +58,12 @@ async function initializeDatabase() {
     );
     CREATE INDEX IF NOT EXISTS idx_timestamp ON history(timestamp);
   `);
-  // Grid status table
   await db.exec(`
     CREATE TABLE IF NOT EXISTS grid_status (
       timestamp INTEGER PRIMARY KEY,
       state INTEGER
     );
   `);
-  // Config table
   await db.exec(`
     CREATE TABLE IF NOT EXISTS config (
       key TEXT PRIMARY KEY,
@@ -83,7 +79,7 @@ async function initializeDatabase() {
     'mqtt_topic_daily_consumption', 'mqtt_topic_daily_solar', 'mqtt_topic_daily_battery_charge',
     'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export',
     'ha_entity_consumption', 'ha_entity_solar', 'ha_entity_battery_charge', 'ha_entity_battery_discharge',
-    'ha_entity_grid_import', 'ha_entity_grid_1000', 'ha_entity_daily_consumption', 'ha_entity_daily_solar',
+    'ha_entity_grid_import', 'ha_entity_grid_export', 'ha_entity_daily_consumption', 'ha_entity_daily_solar',
     'ha_entity_daily_battery_charge', 'ha_entity_daily_battery_discharge', 'ha_entity_daily_grid_import', 'ha_entity_daily_grid_export',
     'ha_entity_battery_soc', 'grid_status_entity',
     'savings_currency', 'savings_rate', 'dashboard_title', 'dashboard_logo'
@@ -94,7 +90,6 @@ async function initializeDatabase() {
       await db.run('INSERT INTO config (key, value) VALUES (?, ?)', [key, '']);
     }
   }
-  // Defaults
   const defaults = {
     ha_enabled: 'true',
     mqtt_enabled: 'false',
@@ -126,7 +121,6 @@ async function isSourceEnabled(source) {
   return val === 'true' || val === true;
 }
 
-// MQTT
 let mqttClient = null;
 const mqttValues = {
   consumption: 0, solar: 0, battery_charge: 0, battery_discharge: 0,
@@ -185,7 +179,6 @@ async function restartMqtt() {
   await setupMqtt();
 }
 
-// HA helpers
 async function getHAState(entityId, haUrl = null, haToken = null) {
   if (!haUrl) haUrl = await getConfig('ha_url');
   if (!haToken) haToken = await getConfig('ha_token');
@@ -198,7 +191,6 @@ async function getHAState(entityId, haUrl = null, haToken = null) {
   return parseFloat(data.state) || 0;
 }
 
-// Polling
 async function pollAndCache() {
   try {
     const haEnabled = await isSourceEnabled('ha_enabled');
@@ -239,7 +231,6 @@ async function pollAndCache() {
        dailyConsumption, dailySolar, dailyBattCharge, dailyBattDischarge, dailyGridImport, dailyGridExport]
     );
 
-    // Grid status
     const gridEntity = await getConfig('grid_status_entity');
     if (gridEntity) {
       try {
@@ -250,7 +241,7 @@ async function pollAndCache() {
           await db.run('INSERT INTO grid_status (timestamp, state) VALUES (?, ?)', [now, isOn]);
           console.log(`Grid state changed to ${isOn ? 'ON' : 'OFF'}`);
         }
-      } catch (e) { /* ignore */ }
+      } catch (e) {}
     }
 
     console.log(`Cached at ${new Date().toISOString()}`);
@@ -286,19 +277,14 @@ app.get('/api/public-config', async (req, res) => {
 app.get('/api/current', async (req, res) => {
   try {
     const latest = await db.get('SELECT * FROM history ORDER BY timestamp DESC LIMIT 1');
-    
     const rateRow = await db.get('SELECT value FROM config WHERE key = ?', 'savings_rate');
     const rate = parseFloat(rateRow?.value) || 0.30;
-    
     const allTimeSolar = await db.get(`
       SELECT SUM(daily_solar) as total FROM (
-        SELECT MAX(daily_solar) as daily_solar
-        FROM history
-        GROUP BY date(timestamp, 'unixepoch')
+        SELECT MAX(daily_solar) as daily_solar FROM history GROUP BY date(timestamp, 'unixepoch')
       )
     `);
     const allTimeSavings = (allTimeSolar?.total || 0) * rate;
-    
     if (latest) {
       const curr = await getConfig('savings_currency') || '€';
       res.json({
@@ -375,16 +361,14 @@ app.get('/api/monthly', async (req, res) => {
   try {
     const now = new Date();
     const months = [];
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     for (let i = 11; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const year = d.getFullYear();
-      const month = String(d.getMonth() + 1).padStart(2, '0');
       months.push({
-        key: `${year}-${month}`,
-        display: `${d.toLocaleString('default', { month: 'short' })} ${year.toString().slice(2)}`
+        key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+        display: `${monthNames[d.getMonth()]} ${d.getFullYear().toString().slice(2)}`
       });
     }
-
     const rows = await db.all(`
       WITH daily_max AS (
         SELECT 
@@ -411,15 +395,12 @@ app.get('/api/monthly', async (req, res) => {
       ORDER BY month DESC
       LIMIT 12
     `);
-
     const dataMap = {};
     rows.forEach(r => { dataMap[r.month] = r; });
-
     const result = months.map(m => {
       const data = dataMap[m.key] || {};
       return {
-        month: m.key,
-        month_display: m.display,
+        month: m.display,
         consumption_kwh: data.consumption_kwh || 0,
         solar_kwh: data.solar_kwh || 0,
         battery_charge_kwh: data.battery_charge_kwh || 0,
@@ -428,7 +409,6 @@ app.get('/api/monthly', async (req, res) => {
         grid_export_kwh: data.grid_export_kwh || 0
       };
     });
-
     res.json(result);
   } catch (err) {
     console.error('Monthly query error:', err);
@@ -486,15 +466,11 @@ app.get('/api/grid/hours', async (req, res) => {
     let lastState = null;
     let lastTime = startUnix;
     for (const row of rows) {
-      if (lastState === 1) {
-        hours += (row.timestamp - lastTime) / 3600;
-      }
+      if (lastState === 1) hours += (row.timestamp - lastTime) / 3600;
       lastState = row.state;
       lastTime = row.timestamp;
     }
-    if (lastState === 1) {
-      hours += (endUnix - lastTime) / 3600;
-    }
+    if (lastState === 1) hours += (endUnix - lastTime) / 3600;
     res.json({ period, hours: Math.round(hours * 10) / 10 });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -507,9 +483,7 @@ app.get('/api/backup', authMiddleware, async (req, res) => {
     await db.close();
     res.download(DB_PATH, `energy-dashboard-backup-${Date.now()}.db`, async (err) => {
       await initializeDatabase();
-      if (err) {
-        console.error('Backup download error:', err);
-      }
+      if (err) console.error('Backup download error:', err);
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -517,29 +491,18 @@ app.get('/api/backup', authMiddleware, async (req, res) => {
 });
 
 app.post('/api/restore', authMiddleware, upload.single('dbfile'), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
-  }
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const tempPath = req.file.path;
   try {
-    const testDb = await open({
-      filename: tempPath,
-      driver: sqlite3.Database
-    });
+    const testDb = await open({ filename: tempPath, driver: sqlite3.Database });
     await testDb.get('SELECT 1');
     await testDb.close();
-    
     await db.close();
-    if (mqttClient) {
-      mqttClient.end();
-      mqttClient = null;
-    }
-    
+    if (mqttClient) { mqttClient.end(); mqttClient = null; }
     fs.copyFileSync(tempPath, DB_PATH);
     await initializeDatabase();
     await setupMqtt();
     fs.unlinkSync(tempPath);
-    
     res.json({ success: true, message: 'Database restored successfully' });
   } catch (err) {
     try { fs.unlinkSync(tempPath); } catch (e) {}
@@ -644,9 +607,7 @@ app.get('/api/test-mqtt-topic', authMiddleware, async (req, res) => {
       res.status(500).json({ error: 'No message received within 5 seconds' });
     }
   }, 5000);
-  testClient.on('connect', () => {
-    testClient.subscribe(topic);
-  });
+  testClient.on('connect', () => { testClient.subscribe(topic); });
   testClient.on('message', (recTopic, message) => {
     if (recTopic === topic) {
       clearTimeout(timeout);
