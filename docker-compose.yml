@@ -1,11 +1,20 @@
 services:
   energy-dashboard:
-    build: .
+    image: irunmole/energy-dashboard:latest
     container_name: energy-dashboard
     restart: unless-stopped
     ports:
-      - "9000:3000"
+      - "8095:3000"
     volumes:
       - ./data:/app/data
     environment:
-      - SETTINGS_PASSWORD=spiceenergydashboard
+      - SETTINGS_PASSWORD=spiceenergy
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 300 energy-dashboard
+
