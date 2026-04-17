@@ -197,10 +197,10 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
 
   if (gridImport > gridExport) {
     gridArrow.style.color = 'var(--grid)';
-    gridArrow.textContent = '→';
+    gridArrow.textContent = '←';
   } else if (gridExport > gridImport) {
     gridArrow.style.color = '#3b82f6';
-    gridArrow.textContent = '←';
+    gridArrow.textContent = '→';
   } else {
     gridArrow.style.color = 'var(--text-secondary)';
     gridArrow.textContent = '⇄';
