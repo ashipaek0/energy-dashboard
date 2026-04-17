@@ -194,7 +194,7 @@ energy-dashboard/
 
 ## 📄 License
 
-MIT License – see LICENSE file for details.
+GNU General Public License V3 – see LICENSE file for details.
 
 ## 🙌 Acknowledgements
 
