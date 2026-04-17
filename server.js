@@ -88,7 +88,7 @@ async function initializeDatabase() {
     'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export',
     'ha_entity_consumption', 'ha_entity_solar', 'ha_entity_battery_charge', 'ha_entity_battery_discharge',
     'ha_entity_grid_import', 'ha_entity_grid_export', 'ha_entity_daily_consumption', 'ha_entity_daily_solar',
-    'ha_entity_daily_battery_charge', 'ha_entity_daily_battery_discharge', 'ha_entity_daily_grid_import', 'ha_entity_daily_grid_1000',
+    'ha_entity_daily_battery_charge', 'ha_entity_daily_battery_discharge', 'ha_entity_daily_grid_import', 'ha_entity_daily_grid_export',
     'ha_entity_battery_soc', 'grid_status_entity',
     'savings_currency', 'savings_rate', 'dashboard_title', 'dashboard_logo'
   ];
@@ -161,7 +161,7 @@ async function setupMqtt() {
       'mqtt_topic_consumption', 'mqtt_topic_solar', 'mqtt_topic_battery_charge',
       'mqtt_topic_battery_discharge', 'mqtt_topic_grid_import', 'mqtt_topic_grid_export',
       'mqtt_topic_battery_soc',
-      'mqtt_topic_daily_consumption', 'mqtt_topic_daily_solar', 'mqtt_topic_daily_battery_1000',
+      'mqtt_topic_daily_consumption', 'mqtt_topic_daily_solar', 'mqtt_topic_daily_battery_charge',
       'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export'
     ];
     const topics = [];
@@ -506,6 +506,20 @@ app.get('/api/grid/hours', async (req, res) => {
     }
     
     res.json({ period, hours: Math.round(hours * 10) / 10 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Diagnostic endpoint to view raw grid status data (protected)
+app.get('/api/grid/raw', authMiddleware, async (req, res) => {
+  try {
+    const rows = await db.all('SELECT timestamp, state FROM grid_status ORDER BY timestamp DESC LIMIT 50');
+    res.json(rows.map(r => ({
+      timestamp: r.timestamp,
+      datetime: new Date(r.timestamp * 1000).toISOString(),
+      state: r.state ? 'ON' : 'OFF'
+    })));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
