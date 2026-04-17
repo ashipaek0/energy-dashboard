@@ -3,6 +3,16 @@ let energyBarChart;
 const ctxPower = document.getElementById('powerChart').getContext('2d');
 const ctxEnergy = document.getElementById('energyBarChart').getContext('2d');
 
+// Store user's legend visibility preferences (keyed by dataset label)
+const visibilityPrefs = {
+  'Load': true,
+  'Solar PV': true,
+  'Battery Charge': false,
+  'Battery Discharge': false,
+  'Grid Import': false,
+  'Grid Export': false
+};
+
 function initCharts() {
   // Power line chart
   powerChart = new Chart(ctxPower, {
@@ -22,7 +32,20 @@ function initCharts() {
       },
       plugins: {
         tooltip: { mode: 'index' },
-        legend: { labels: { color: '#f8fafc' } }
+        legend: {
+          labels: { color: '#f8fafc' },
+          onClick: (e, legendItem, legend) => {
+            // Toggle visibility and store preference
+            const index = legendItem.datasetIndex;
+            const ci = legend.chart;
+            const meta = ci.getDatasetMeta(index);
+            meta.hidden = meta.hidden === null ? !ci.data.datasets[index].hidden : !meta.hidden;
+            ci.update();
+            // Save preference
+            const label = ci.data.datasets[index].label;
+            visibilityPrefs[label] = !meta.hidden;
+          }
+        }
       }
     }
   });
@@ -84,12 +107,16 @@ async function updateCurrent() {
 
     updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImport, gridExport);
 
+    // Get public config for currency/rate
+    const cfgRes = await fetch('/api/public-config');
+    const cfg = await cfgRes.json();
+    const currency = cfg.savings_currency || '€';
+    const rate = parseFloat(cfg.savings_rate) || 0.30;
+
     document.getElementById('daily-solar').textContent = d.daily_solar_kwh.toFixed(2) + ' kWh';
     document.getElementById('daily-load').textContent = d.daily_consumption_kwh.toFixed(2) + ' kWh';
     const sufficiency = d.daily_consumption_kwh > 0 ? (d.daily_solar_kwh / d.daily_consumption_kwh * 100).toFixed(1) : '0.0';
     document.getElementById('self-sufficiency').textContent = sufficiency + '%';
-    const currency = d.savings_currency || '€';
-    const rate = d.savings_rate || 0.30;
     const savings = (d.daily_solar_kwh * rate).toFixed(2);
     document.getElementById('savings').textContent = `${savings} ${currency}`;
   } catch (e) {
@@ -174,23 +201,21 @@ async function updateChart(days = 1) {
     if (days >= 30) timeUnit = 'week';
     powerChart.options.scales.x.time.unit = timeUnit;
 
-    // Preserve existing dataset hidden states
-    const existingDatasets = powerChart.data.datasets || [];
-    const hiddenState = existingDatasets.map(ds => ds.hidden || false);
-
+    // Build new datasets with visibility from preferences
     const newDatasets = [
       { label: 'Load', data: [], borderColor: '#8b5cf6', backgroundColor: '#8b5cf620', tension: 0.3, borderWidth: 1.5 },
       { label: 'Solar PV', data: [], borderColor: '#fbbf24', backgroundColor: '#fbbf2420', tension: 0.3, borderWidth: 1.5 },
-      { label: 'Battery Charge', data: [], borderColor: '#10b981', backgroundColor: '#10b98120', tension: 0.3, borderWidth: 1.5, hidden: true },
-      { label: 'Battery Discharge', data: [], borderColor: '#f59e0b', backgroundColor: '#f59e0b20', tension: 0.3, borderWidth: 1.5, hidden: true },
-      { label: 'Grid Import', data: [], borderColor: '#ef4444', backgroundColor: '#ef444420', tension: 0.3, borderWidth: 1.5, hidden: true },
-      { label: 'Grid Export', data: [], borderColor: '#3b82f6', backgroundColor: '#3b82f620', tension: 0.3, borderWidth: 1.5, hidden: true }
+      { label: 'Battery Charge', data: [], borderColor: '#10b981', backgroundColor: '#10b98120', tension: 0.3, borderWidth: 1.5 },
+      { label: 'Battery Discharge', data: [], borderColor: '#f59e0b', backgroundColor: '#f59e0b20', tension: 0.3, borderWidth: 1.5 },
+      { label: 'Grid Import', data: [], borderColor: '#ef4444', backgroundColor: '#ef444420', tension: 0.3, borderWidth: 1.5 },
+      { label: 'Grid Export', data: [], borderColor: '#3b82f6', backgroundColor: '#3b82f620', tension: 0.3, borderWidth: 1.5 }
     ];
 
-    // Restore hidden state if number of datasets matches
-    if (hiddenState.length === newDatasets.length) {
-      newDatasets.forEach((ds, i) => { ds.hidden = hiddenState[i]; });
-    }
+    // Apply saved visibility preferences
+    newDatasets.forEach(ds => {
+      const pref = visibilityPrefs[ds.label];
+      ds.hidden = (pref === false);
+    });
 
     data.forEach(d => {
       newDatasets[0].data.push({ x: d.timestamp, y: d.consumption_kw });
@@ -260,7 +285,7 @@ async function updateMonthly() {
 
 async function loadBranding() {
   try {
-    const res = await fetch('/api/settings');
+    const res = await fetch('/api/public-config');
     const cfg = await res.json();
     if (cfg.dashboard_title) {
       document.getElementById('dashboard-title').textContent = cfg.dashboard_title;
