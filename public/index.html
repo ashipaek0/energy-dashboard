@@ -25,26 +25,29 @@
         <div class="flow-label">Solar</div>
         <div class="flow-value" id="flow-solar">0 W</div>
       </div>
-      <div class="flow-arrow">→</div>
+      <div class="flow-arrow solar-home">→</div>
       <div class="flow-item battery">
         <div class="flow-icon">🔋</div>
         <div class="flow-label">Battery</div>
         <div class="flow-value" id="flow-battery-soc">--%</div>
         <div class="flow-sub" id="flow-battery-power">⚡ 0 W</div>
       </div>
-      <div class="flow-arrow">→</div>
+      <div class="flow-arrow battery">⇄</div>
       <div class="flow-item home">
         <div class="flow-icon">🏠</div>
         <div class="flow-label">Home</div>
         <div class="flow-value" id="flow-home">0 W</div>
       </div>
-      <div class="flow-arrow">⇄</div>
+      <div class="flow-arrow grid">⇄</div>
       <div class="flow-item grid">
         <div class="flow-icon">⚡</div>
         <div class="flow-label">Grid</div>
         <div class="flow-value" id="flow-grid">0 W</div>
         <div class="flow-sub" id="flow-grid-direction">Import</div>
       </div>
+    </div>
+    <div id="grid-to-battery" style="display:none; text-align:center; margin-top:-0.5rem; margin-bottom:1rem; color:#ef4444; font-size:0.9rem;">
+      ⚡ Grid charging battery ⚡
     </div>
 
     <!-- Quick Stats -->
