@@ -19,6 +19,14 @@ function formatCurrency(amount, currency) {
   });
 }
 
+function formatHoursToHMS(hours) {
+  const totalSeconds = Math.round(hours * 3600);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
 function initCharts() {
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
   const gridColor = isDark ? '#334155' : '#cbd5e1';
@@ -133,7 +141,7 @@ async function updateCurrent() {
     document.getElementById('flow-battery-soc').textContent = battSoc.toFixed(1) + '%';
 
     const battNet = battCharge - battDischarge;
-    // Battery power indicator: ↑ charging (power into battery), ↓ discharging
+    // Battery power indicator: ↑ charging, ↓ discharging
     const battSign = battNet >= 0 ? '↑' : '↓';
     const battColor = battNet >= 0 ? 'var(--battery)' : '#f59e0b';
     document.getElementById('flow-battery-power').innerHTML = `<span style="color:${battColor}">${battSign} ${Math.abs(battNet)} W</span>`;
@@ -175,7 +183,6 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
   const gridArrow = document.querySelector('.flow-arrow.grid');
   const gridToBatt = document.getElementById('grid-to-battery');
 
-  // Solar arrow: always points right (toward house/battery) if generating
   if (solar > 0) {
     solarArrow.style.color = 'var(--solar)';
     solarArrow.classList.add('flowing');
@@ -186,7 +193,6 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
     solarArrow.textContent = '→';
   }
 
-  // Battery arrow: discharge = → (to home), charge = ← (to battery)
   if (battDischarge > battCharge) {
     battArrow.style.color = '#f59e0b';
     battArrow.textContent = '→';
@@ -198,7 +204,6 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
     battArrow.textContent = '⇄';
   }
 
-  // Grid arrow: import = ← (toward home), export = → (toward grid)
   if (gridImport > gridExport) {
     gridArrow.style.color = 'var(--grid)';
     gridArrow.textContent = '←';
@@ -235,7 +240,7 @@ async function updateGridStatus() {
     for (const p of periods) {
       const hRes = await fetch(`/api/grid/hours?period=${p}`);
       const hData = await hRes.json();
-      document.getElementById(`grid-hours-${p}`).textContent = hData.hours.toFixed(1) + ' h';
+      document.getElementById(`grid-hours-${p}`).textContent = formatHoursToHMS(hData.hours);
     }
   } catch (e) {
     console.error('Grid error:', e);
