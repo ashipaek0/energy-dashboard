@@ -1,373 +1,250 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Settings - Energy Dashboard</title>
-  <link rel="stylesheet" href="style.css">
-  <style>
-    .settings-form {
-      background: var(--card-bg);
-      padding: 2rem;
-      border-radius: 1rem;
-      max-width: 900px;
-      margin: 2rem auto;
-      box-shadow: var(--shadow);
-      border: 1px solid var(--border);
-    }
-    .form-group { margin-bottom: 1.2rem; }
-    label { display: block; margin-bottom: 0.4rem; font-weight: 500; color: var(--text); }
-    input, select {
-      width: 100%;
-      padding: 0.75rem;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 0.5rem;
-      color: var(--text);
-      font-size: 1rem;
-    }
-    input::placeholder {
-      color: var(--text-secondary);
-      opacity: 0.6;
-    }
-    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-    button {
-      background: var(--accent);
-      color: white;
-      border: none;
-      padding: 0.75rem 2rem;
-      border-radius: 0.5rem;
-      font-size: 1rem;
-      cursor: pointer;
-      margin-right: 1rem;
-      transition: opacity 0.2s;
-    }
-    button:hover { opacity: 0.9; }
-    .back-link {
-      display: inline-block;
-      margin-bottom: 1rem;
-      color: var(--accent);
-      text-decoration: none;
-    }
-    .status { padding: 0.5rem; border-radius: 0.5rem; margin-top: 0.5rem; }
-    .success { background: #10b98120; color: #10b981; }
-    .error { background: #ef444420; color: #ef4444; }
-    .info { background: #3b82f620; color: #3b82f6; }
-    h3 {
-      margin: 2rem 0 1rem;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 0.5rem;
-      color: var(--text);
-    }
-    h4 { color: var(--text); margin: 1.5rem 0 0.5rem; }
-    .fetch-btn { background: var(--text-secondary); margin-top: 0.5rem; }
-    .toggle-group { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
-    .toggle-group label { margin-bottom: 0; color: var(--text); }
-    input[type="checkbox"] { width: auto; margin-right: 0.5rem; }
-    .test-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
-    .test-status { margin-left: 1rem; font-size: 0.9rem; }
-    .spinner {
-      display: inline-block;
-      width: 1rem;
-      height: 1rem;
-      border: 2px solid #fff3;
-      border-top-color: #fff;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .note { font-size: 0.85rem; opacity: 0.7; margin-top: 0.25rem; color: var(--text-secondary); }
-    
-    .settings-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 1rem;
-    }
-    .theme-toggle {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 0.5rem;
-      border-radius: 2rem;
-      cursor: pointer;
-      font-size: 1.2rem;
-      width: 40px;
-      height: 40px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: background 0.2s, border-color 0.2s;
-      box-shadow: var(--shadow);
-    }
-    .theme-toggle:hover {
-      background: var(--accent);
-      color: white;
-    }
-  </style>
-</head>
-<body>
-<div class="container">
-  <div class="settings-header">
-    <a href="/" class="back-link">← Back to Dashboard</a>
-    <button id="theme-toggle" class="theme-toggle" aria-label="Toggle dark/light mode">
-      <span class="theme-icon">🌙</span>
-    </button>
-  </div>
-  <div class="settings-form">
-    <h2>Configuration</h2>
-    <form id="settings-form">
-      <!-- Home Assistant -->
-      <h3>Home Assistant</h3>
-      <div class="toggle-group">
-        <label><input type="checkbox" name="ha_enabled" value="true"> Enable Home Assistant</label>
-      </div>
-      <div class="form-group">
-        <label>URL</label>
-        <input type="url" name="ha_url" placeholder="http://homeassistant.local:8123">
-      </div>
-      <div class="form-group">
-        <label>Long-Lived Access Token</label>
-        <input type="password" name="ha_token" placeholder="eyJhbGciOiJ...">
-      </div>
-      <button type="button" id="fetch-entities" class="fetch-btn">Fetch Entities from HA</button>
+const form = document.getElementById('settings-form');
+const saveStatus = document.getElementById('save-status');
+const backupStatus = document.getElementById('backup-status');
 
-      <h3>Entity Mapping (Home Assistant)</h3>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Consumption (W)</label>
-          <select name="ha_entity_consumption"></select>
-        </div>
-        <div class="form-group">
-          <label>Solar PV (W)</label>
-          <select name="ha_entity_solar"></select>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Battery Charge (W)</label>
-          <select name="ha_entity_battery_charge"></select>
-        </div>
-        <div class="form-group">
-          <label>Battery Discharge (W)</label>
-          <select name="ha_entity_battery_discharge"></select>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Grid Import (W)</label>
-          <select name="ha_entity_grid_import"></select>
-        </div>
-        <div class="form-group">
-          <label>Grid Export (W)</label>
-          <select name="ha_entity_grid_export"></select>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Battery SOC (%)</label>
-          <select name="ha_entity_battery_soc"></select>
-        </div>
-        <div class="form-group">
-          <label>Grid Status (ON/OFF)</label>
-          <select name="grid_status_entity"></select>
-        </div>
-      </div>
-      <h4>Daily Energy (kWh) – must reset at midnight</h4>
-      <div class="note">Use sensors that reset daily (e.g., utility meter or Riemann sum integral).</div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Daily Consumption</label>
-          <select name="ha_entity_daily_consumption"></select>
-        </div>
-        <div class="form-group">
-          <label>Daily Solar</label>
-          <select name="ha_entity_daily_solar"></select>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Daily Battery Charge</label>
-          <select name="ha_entity_daily_battery_charge"></select>
-        </div>
-        <div class="form-group">
-          <label>Daily Battery Discharge</label>
-          <select name="ha_entity_daily_battery_discharge"></select>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Daily Grid Import</label>
-          <select name="ha_entity_daily_grid_import"></select>
-        </div>
-        <div class="form-group">
-          <label>Daily Grid Export</label>
-          <select name="ha_entity_daily_grid_export"></select>
-        </div>
-      </div>
+function showStatus(element, msg, type) {
+  element.textContent = msg;
+  element.className = `status ${type}`;
+  if (type !== 'info') {
+    setTimeout(() => { element.textContent = ''; element.className = 'status'; }, 5000);
+  }
+}
 
-      <!-- MQTT -->
-      <h3>MQTT</h3>
-      <div class="toggle-group">
-        <label><input type="checkbox" name="mqtt_enabled" value="true"> Enable MQTT</label>
-      </div>
-      <div class="form-group">
-        <label>Broker URL</label>
-        <input type="text" name="mqtt_broker_url" placeholder="mqtt://broker.local:1883">
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Username</label>
-          <input type="text" name="mqtt_username">
-        </div>
-        <div class="form-group">
-          <label>Password</label>
-          <input type="password" name="mqtt_password">
-        </div>
-      </div>
-      <div class="test-row">
-        <button type="button" id="test-mqtt" class="fetch-btn">Test MQTT Broker Connection</button>
-        <span id="mqtt-test-status" class="test-status"></span>
-      </div>
-      <h4>MQTT Topics (leave empty to skip)</h4>
-      <div class="form-row">
-        <div class="form-group"><label>Consumption (W)</label><input name="mqtt_topic_consumption" placeholder="energy/consumption"></div>
-        <div class="form-group"><label>Solar PV (W)</label><input name="mqtt_topic_solar" placeholder="energy/solar"></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Battery Charge (W)</label><input name="mqtt_topic_battery_charge"></div>
-        <div class="form-group"><label>Battery Discharge (W)</label><input name="mqtt_topic_battery_discharge"></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Grid Import (W)</label><input name="mqtt_topic_grid_import"></div>
-        <div class="form-group"><label>Grid Export (W)</label><input name="mqtt_topic_grid_export"></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Battery SOC (%)</label><input name="mqtt_topic_battery_soc" placeholder="battery/soc"></div>
-      </div>
-      <h4>Daily Energy Topics (kWh)</h4>
-      <div class="form-row">
-        <div class="form-group"><label>Daily Consumption</label><input name="mqtt_topic_daily_consumption"></div>
-        <div class="form-group"><label>Daily Solar</label><input name="mqtt_topic_daily_solar"></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Daily Battery Charge</label><input name="mqtt_topic_daily_battery_charge"></div>
-        <div class="form-group"><label>Daily Battery Discharge</label><input name="mqtt_topic_daily_battery_discharge"></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Daily Grid Import</label><input name="mqtt_topic_daily_grid_import"></div>
-        <div class="form-group"><label>Daily Grid Export</label><input name="mqtt_topic_daily_grid_export"></div>
-      </div>
-      <div class="test-row" style="margin-top:1rem;">
-        <div class="form-group" style="flex:1; margin-bottom:0;">
-          <label>Test Topic (optional)</label>
-          <input type="text" id="test-topic" placeholder="energy/consumption">
-        </div>
-        <button type="button" id="test-mqtt-topic" class="fetch-btn">Test Topic</button>
-        <span id="topic-test-status" class="test-status"></span>
-      </div>
+async function loadSettings() {
+  try {
+    const res = await fetch('/api/settings');
+    const data = await res.json();
+    for (const [key, value] of Object.entries(data)) {
+      const input = form.querySelector(`[name="${key}"]`);
+      if (input) {
+        if (input.type === 'checkbox') {
+          input.checked = value === 'true';
+        } else {
+          input.value = value;
+        }
+      }
+    }
+  } catch (e) {
+    showStatus(saveStatus, 'Failed to load settings', 'error');
+  }
+}
 
-      <!-- Solar Forecast -->
-      <h3>Solar Forecast</h3>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Latitude</label>
-          <input name="solar_latitude" placeholder="e.g., 6.5244">
-        </div>
-        <div class="form-group">
-          <label>Longitude</label>
-          <input name="solar_longitude" placeholder="e.g., 3.3792">
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Panel Tilt (degrees)</label>
-          <input name="solar_tilt" value="30" placeholder="30">
-        </div>
-        <div class="form-group">
-          <label>Panel Azimuth (degrees)</label>
-          <input name="solar_azimuth" value="180" placeholder="180 (South)">
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>System Capacity (kWp)</label>
-          <input name="solar_capacity_kwp" placeholder="e.g., 5.0">
-        </div>
-        <div class="form-group">
-          <label>Solcast API Key (optional)</label>
-          <input type="password" name="solcast_api_key" placeholder="Leave empty for Open-Meteo fallback">
-        </div>
-      </div>
-      <div class="note">If Solcast key is provided, high‑accuracy forecasts will be used. Otherwise, Open‑Meteo (free) is used.</div>
+async function fetchEntities() {
+  const haUrl = form.querySelector('[name="ha_url"]').value.trim();
+  const haToken = form.querySelector('[name="ha_token"]').value.trim();
+  if (!haUrl || !haToken) {
+    showStatus(saveStatus, 'Please enter HA URL and Token first', 'error');
+    return;
+  }
+  showStatus(saveStatus, 'Fetching entities...', 'info');
+  try {
+    const res = await fetch(`/api/ha/entities?url=${encodeURIComponent(haUrl)}&token=${encodeURIComponent(haToken)}`);
+    if (!res.ok) throw new Error('Failed to fetch');
+    const entities = await res.json();
+    const selects = form.querySelectorAll('select');
+    selects.forEach(select => {
+      const currentVal = select.value;
+      select.innerHTML = '<option value="">-- Select entity --</option>';
+      entities.sort().forEach(id => {
+        const option = document.createElement('option');
+        option.value = id;
+        option.textContent = id;
+        select.appendChild(option);
+      });
+      if (currentVal) select.value = currentVal;
+    });
+    showStatus(saveStatus, 'Entities loaded!', 'success');
+  } catch (e) {
+    showStatus(saveStatus, 'Error fetching entities: ' + e.message, 'error');
+  }
+}
 
-      <!-- Savings -->
-      <h3>Savings Calculation</h3>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Currency Symbol</label>
-          <input name="savings_currency" value="€" placeholder="€">
-        </div>
-        <div class="form-group">
-          <label>Rate per kWh</label>
-          <input name="savings_rate" value="0.30" placeholder="0.30">
-        </div>
-      </div>
+document.getElementById('fetch-entities').addEventListener('click', fetchEntities);
 
-      <!-- Branding -->
-      <h3>Branding</h3>
-      <div class="form-group">
-        <label>Dashboard Title</label>
-        <input name="dashboard_title" placeholder="My Energy Dashboard" value="⚡ Energy Dashboard">
-      </div>
-      <div class="form-group">
-        <label>Logo URL (optional)</label>
-        <input name="dashboard_logo" placeholder="https://example.com/logo.png">
-      </div>
-
-      <!-- Backup & Restore -->
-      <h3>Backup & Restore</h3>
-      <div class="backup-row">
-        <button type="button" id="backup-btn" class="fetch-btn">⬇️ Download Backup</button>
-        <button type="button" id="restore-btn" class="fetch-btn">⬆️ Restore Backup</button>
-        <input type="file" id="restore-file" accept=".db">
-      </div>
-      <div id="backup-status" class="status"></div>
-
-      <button type="submit">Save All Settings</button>
-      <div id="save-status" class="status"></div>
-    </form>
-  </div>
-</div>
-<script>
-  function initTheme() {
-    const savedTheme = localStorage.getItem('theme');
-    const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const themeToggle = document.getElementById('theme-toggle');
-    
-    if (savedTheme === 'dark' || (!savedTheme && systemPrefersDark)) {
-      document.documentElement.setAttribute('data-theme', 'dark');
-      themeToggle.innerHTML = '<span class="theme-icon">☀️</span>';
+// MQTT broker test
+document.getElementById('test-mqtt').addEventListener('click', async function() {
+  const btn = this;
+  const statusEl = document.getElementById('mqtt-test-status');
+  const broker = form.querySelector('[name="mqtt_broker_url"]').value.trim();
+  const username = form.querySelector('[name="mqtt_username"]').value.trim();
+  const password = form.querySelector('[name="mqtt_password"]').value.trim();
+  
+  if (!broker) {
+    showStatus(statusEl, 'Please enter Broker URL', 'error');
+    return;
+  }
+  
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Testing...';
+  showStatus(statusEl, 'Testing connection...', 'info');
+  
+  const params = new URLSearchParams({ broker });
+  if (username) params.append('username', username);
+  if (password) params.append('password', password);
+  
+  try {
+    const res = await fetch(`/api/test-mqtt?${params.toString()}`);
+    const data = await res.json();
+    if (res.ok) {
+      showStatus(statusEl, '✅ Connected to MQTT broker!', 'success');
     } else {
-      document.documentElement.setAttribute('data-theme', 'light');
-      themeToggle.innerHTML = '<span class="theme-icon">🌙</span>';
+      showStatus(statusEl, `❌ ${data.error}`, 'error');
     }
+  } catch (e) {
+    showStatus(statusEl, `❌ Error: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Test MQTT Broker Connection';
+  }
+});
+
+// MQTT topic test
+document.getElementById('test-mqtt-topic').addEventListener('click', async function() {
+  const btn = this;
+  const statusEl = document.getElementById('topic-test-status');
+  const broker = form.querySelector('[name="mqtt_broker_url"]').value.trim();
+  const username = form.querySelector('[name="mqtt_username"]').value.trim();
+  const password = form.querySelector('[name="mqtt_password"]').value.trim();
+  const topic = document.getElementById('test-topic').value.trim();
+  
+  if (!broker) {
+    showStatus(statusEl, 'Please enter Broker URL first', 'error');
+    return;
+  }
+  if (!topic) {
+    showStatus(statusEl, 'Please enter a topic to test', 'error');
+    return;
   }
   
-  function toggleTheme() {
-    const currentTheme = document.documentElement.getAttribute('data-theme');
-    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', newTheme);
-    localStorage.setItem('theme', newTheme);
-    const themeToggle = document.getElementById('theme-toggle');
-    themeToggle.innerHTML = newTheme === 'dark' 
-      ? '<span class="theme-icon">☀️</span>' 
-      : '<span class="theme-icon">🌙</span>';
-  }
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Testing...';
+  showStatus(statusEl, `Waiting for message on "${topic}"...`, 'info');
   
-  initTheme();
-  document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
-</script>
-<script src="settings.js"></script>
-</body>
-</html>
+  const params = new URLSearchParams({ broker, topic });
+  if (username) params.append('username', username);
+  if (password) params.append('password', password);
+  
+  try {
+    const res = await fetch(`/api/test-mqtt-topic?${params.toString()}`);
+    const data = await res.json();
+    if (res.ok) {
+      if (data.value !== undefined && data.value !== null) {
+        showStatus(statusEl, `✅ Received: ${data.value}`, 'success');
+      } else {
+        showStatus(statusEl, `✅ Received (non-numeric): ${data.raw}`, 'success');
+      }
+    } else {
+      showStatus(statusEl, `❌ ${data.error}`, 'error');
+    }
+  } catch (e) {
+    showStatus(statusEl, `❌ Error: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Test Topic';
+  }
+});
+
+// Test Forecast
+document.getElementById('test-forecast').addEventListener('click', async function() {
+  const btn = this;
+  const statusEl = document.getElementById('forecast-test-status');
+  
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Testing...';
+  showStatus(statusEl, 'Fetching forecast...', 'info');
+  
+  try {
+    const res = await fetch('/api/test-forecast');
+    const data = await res.json();
+    if (res.ok) {
+      showStatus(statusEl, `✅ ${data.source}: Today ~${data.today_estimate_kwh} kWh, Peak ${data.peak_kw} kW`, 'success');
+    } else {
+      showStatus(statusEl, `❌ ${data.error}`, 'error');
+    }
+  } catch (e) {
+    showStatus(statusEl, `❌ Error: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Test Forecast';
+  }
+});
+
+// Backup & Restore
+document.getElementById('backup-btn').addEventListener('click', async function() {
+  const btn = this;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Preparing backup...';
+  showStatus(backupStatus, 'Generating backup file...', 'info');
+  
+  try {
+    window.location.href = '/api/backup';
+    showStatus(backupStatus, '✅ Backup download started', 'success');
+  } catch (e) {
+    showStatus(backupStatus, `❌ Error: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '⬇️ Download Backup';
+  }
+});
+
+document.getElementById('restore-btn').addEventListener('click', function() {
+  document.getElementById('restore-file').click();
+});
+
+document.getElementById('restore-file').addEventListener('change', async function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  
+  const btn = document.getElementById('restore-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Restoring...';
+  showStatus(backupStatus, 'Uploading and restoring database...', 'info');
+  
+  const formData = new FormData();
+  formData.append('dbfile', file);
+  
+  try {
+    const res = await fetch('/api/restore', {
+      method: 'POST',
+      body: formData
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showStatus(backupStatus, '✅ Database restored successfully! Reloading...', 'success');
+      setTimeout(() => { window.location.reload(); }, 2000);
+    } else {
+      showStatus(backupStatus, `❌ ${data.error}`, 'error');
+    }
+  } catch (e) {
+    showStatus(backupStatus, `❌ Error: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '⬆️ Restore Backup';
+    document.getElementById('restore-file').value = '';
+  }
+});
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const formData = new FormData(form);
+  const data = Object.fromEntries(formData.entries());
+  ['ha_enabled', 'mqtt_enabled', 'forecast_enabled'].forEach(key => {
+    data[key] = form.querySelector(`[name="${key}"]`)?.checked ? 'true' : 'false';
+  });
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (res.ok) {
+      showStatus(saveStatus, 'Settings saved successfully!', 'success');
+    } else {
+      showStatus(saveStatus, 'Failed to save settings', 'error');
+    }
+  } catch (e) {
+    showStatus(saveStatus, 'Error: ' + e.message, 'error');
+  }
+});
+
+loadSettings();

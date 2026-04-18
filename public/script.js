@@ -224,14 +224,18 @@ async function updateSavings() {
 }
 
 async function updateForecast() {
+  const banner = document.getElementById('forecast-banner');
+  
   try {
     const res = await fetch('/api/solar-forecast');
     const data = await res.json();
+    
     if (data.error) {
-      document.querySelector('.forecast-banner').style.display = 'none';
+      banner.style.display = 'none';
       return;
     }
-    document.querySelector('.forecast-banner').style.display = 'block';
+    
+    banner.style.display = 'block';
     
     const sourceEl = document.getElementById('forecast-source');
     sourceEl.textContent = data.source === 'solcast' ? '⚡ Solcast' : '☁️ Open-Meteo';
@@ -283,6 +287,7 @@ async function updateForecast() {
     }).join('');
   } catch (e) {
     console.error('Forecast error:', e);
+    banner.style.display = 'none';
   }
 }
 
