@@ -130,7 +130,14 @@ async function getConfig(key) {
 }
 
 async function setConfig(key, value) {
-  await db.run('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)', [key, String(value)]);
+  console.log(`[setConfig] Attempting to save: ${key} = ${value}`);
+  try {
+    const result = await db.run('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)', [key, String(value)]);
+    console.log(`[setConfig] Success: ${key} saved, changes: ${result.changes}`);
+  } catch (err) {
+    console.error(`[setConfig] ERROR for ${key}:`, err.message);
+    throw err;
+  }
 }
 
 async function isSourceEnabled(source) {
@@ -171,7 +178,7 @@ async function setupMqtt() {
       'mqtt_topic_battery_discharge', 'mqtt_topic_grid_import', 'mqtt_topic_grid_export',
       'mqtt_topic_battery_soc',
       'mqtt_topic_daily_consumption', 'mqtt_topic_daily_solar', 'mqtt_topic_daily_battery_charge',
-      'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_1000'
+      'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export'
     ];
     const topics = [];
     for (const k of topicKeys) {
@@ -395,7 +402,7 @@ app.get('/api/monthly', async (req, res) => {
           MAX(daily_battery_charge) as battery_charge,
           MAX(daily_battery_discharge) as battery_discharge,
           MAX(daily_grid_import) as grid_import,
-          MAX(daily_grid_export) as grid_1000
+          MAX(daily_grid_export) as grid_export
         FROM history
         GROUP BY day
       )
@@ -661,10 +668,10 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
     const lonStr = await getConfig('solar_longitude');
     const capStr = await getConfig('solar_capacity_kwp');
     
-    console.log('Test forecast config values:', { latStr, lonStr, capStr });
+    console.log('[Test Forecast] Config values:', { latStr, lonStr, capStr });
     
     if (!latStr || !lonStr || !capStr) {
-      console.warn('Missing required forecast config');
+      console.warn('[Test Forecast] Missing required forecast config');
       return res.status(400).json({ error: 'Latitude, longitude, and capacity are required' });
     }
     
@@ -679,7 +686,7 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'System capacity must be a positive number (kWp)' });
     }
     if (capacityKwp > 1000) {
-      console.warn(`Capacity ${capacityKwp} kWp seems very high. Did you enter watts?`);
+      console.warn(`[Test Forecast] Capacity ${capacityKwp} kWp seems very high. Did you enter watts?`);
     }
 
     const solcastKey = await getConfig('solcast_api_key');
@@ -694,7 +701,7 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
     if (solcastKey) {
       try {
         const url = `https://api.solcast.com.au/rooftop_sites/forecast?latitude=${lat}&longitude=${lon}&capacity=${capacityKwp}&tilt=${tilt}&azimuth=${azimuth}&format=json`;
-        console.log('Attempting Solcast fetch...');
+        console.log('[Test Forecast] Attempting Solcast fetch...');
         const response = await fetch(url, {
           headers: { 'Authorization': `Bearer ${solcastKey}` }
         });
@@ -709,13 +716,13 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
             }
           });
           source = 'solcast';
-          console.log('Solcast success, daily total:', dailyTotal);
+          console.log('[Test Forecast] Solcast success, daily total:', dailyTotal);
         } else {
           const errorText = await response.text();
-          console.warn('Solcast API error:', response.status, errorText);
+          console.warn('[Test Forecast] Solcast API error:', response.status, errorText);
         }
       } catch (e) {
-        console.warn('Solcast fetch failed:', e.message);
+        console.warn('[Test Forecast] Solcast fetch failed:', e.message);
       }
     }
 
@@ -723,7 +730,7 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
     if (source === 'none') {
       try {
         const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=1`;
-        console.log('Falling back to Open-Meteo...');
+        console.log('[Test Forecast] Falling back to Open-Meteo...');
         const response = await fetch(url);
         if (!response.ok) {
           throw new Error(`Open-Meteo API error: ${response.status}`);
@@ -745,9 +752,9 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
           throw new Error('No forecast data for today');
         }
         source = 'open-meteo';
-        console.log('Open-Meteo success, daily total:', dailyTotal);
+        console.log('[Test Forecast] Open-Meteo success, daily total:', dailyTotal);
       } catch (e) {
-        console.error('Open-Meteo fallback failed:', e.message);
+        console.error('[Test Forecast] Open-Meteo fallback failed:', e.message);
         return res.status(500).json({ error: `Forecast service unavailable: ${e.message}` });
       }
     }
@@ -759,7 +766,7 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
       peak_kw: peak.toFixed(2)
     });
   } catch (err) {
-    console.error('Test forecast error:', err);
+    console.error('[Test Forecast] Error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -810,15 +817,21 @@ app.get('/api/settings', async (req, res) => {
 
 app.post('/api/settings', async (req, res) => {
   const updates = req.body;
-  for (const [key, value] of Object.entries(updates)) {
-    await setConfig(key, String(value));
+  console.log('[Settings] Received update request with keys:', Object.keys(updates));
+  try {
+    for (const [key, value] of Object.entries(updates)) {
+      await setConfig(key, String(value));
+    }
+    console.log('[Settings] All settings saved successfully.');
+    if ('mqtt_broker_url' in updates || 'mqtt_username' in updates || 'mqtt_password' in updates || 'mqtt_enabled' in updates) {
+      await restartMqtt();
+    }
+    forecastCache = { data: null, timestamp: 0 };
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Settings] Save error:', err);
+    res.status(500).json({ error: err.message });
   }
-  if ('mqtt_broker_url' in updates || 'mqtt_username' in updates || 'mqtt_password' in updates || 'mqtt_enabled' in updates) {
-    await restartMqtt();
-  }
-  // Clear forecast cache when settings change
-  forecastCache = { data: null, timestamp: 0 };
-  res.json({ success: true });
 });
 
 app.get('/api/ha/entities', authMiddleware, async (req, res) => {
