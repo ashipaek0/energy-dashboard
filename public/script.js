@@ -1,7 +1,9 @@
 let powerChart;
 let energyBarChart;
+let forecastChart;
 const ctxPower = document.getElementById('powerChart').getContext('2d');
 const ctxEnergy = document.getElementById('energyBarChart').getContext('2d');
+const ctxForecast = document.getElementById('forecastChart').getContext('2d');
 
 const visibilityPrefs = {
   'Load': true,
@@ -39,26 +41,12 @@ function initCharts() {
       maintainAspectRatio: false,
       interaction: { mode: 'index' },
       elements: {
-        line: {
-          borderWidth: 1,        // thinner lines
-          tension: 0.5,          // smoother curves
-          fill: true
-        },
-        point: {
-          radius: 0,
-          hoverRadius: 4
-        }
+        line: { borderWidth: 1, tension: 0.4, fill: true },
+        point: { radius: 0, hoverRadius: 4 }
       },
       scales: {
-        x: {
-          type: 'time',
-          time: { unit: 'hour' },
-          grid: { color: gridColor }
-        },
-        y: {
-          title: { display: true, text: 'Power (kW)', color: textColor },
-          grid: { color: gridColor }
-        }
+        x: { type: 'time', time: { unit: 'hour' }, grid: { color: gridColor } },
+        y: { title: { display: true, text: 'Power (kW)', color: textColor }, grid: { color: gridColor } }
       },
       plugins: {
         tooltip: { mode: 'index' },
@@ -93,15 +81,42 @@ function initCharts() {
       maintainAspectRatio: false,
       scales: {
         x: { grid: { color: gridColor } },
-        y: {
-          title: { display: true, text: 'Energy (kWh)', color: textColor },
-          grid: { color: gridColor },
-          beginAtZero: true
-        }
+        y: { title: { display: true, text: 'Energy (kWh)', color: textColor }, grid: { color: gridColor }, beginAtZero: true }
       },
       plugins: {
         legend: { labels: { color: textColor } },
         tooltip: { mode: 'index' }
+      }
+    }
+  });
+
+  forecastChart = new Chart(ctxForecast, {
+    type: 'line',
+    data: { datasets: [] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index' },
+      elements: {
+        line: { borderWidth: 2, tension: 0.4 },
+        point: { radius: 0, hoverRadius: 4 }
+      },
+      scales: {
+        x: {
+          type: 'time',
+          time: { unit: 'hour', displayFormats: { hour: 'ha' } },
+          grid: { display: false },
+          ticks: { color: textColor, maxRotation: 0 }
+        },
+        y: {
+          beginAtZero: true,
+          grid: { color: gridColor },
+          ticks: { color: textColor, callback: (v) => v + ' kW' }
+        }
+      },
+      plugins: {
+        tooltip: { mode: 'index' },
+        legend: { display: false }
       }
     }
   });
@@ -205,6 +220,69 @@ async function updateSavings() {
     document.getElementById('savings-week').textContent = fallback;
     document.getElementById('savings-month').textContent = fallback;
     document.getElementById('savings-all').textContent = fallback;
+  }
+}
+
+async function updateForecast() {
+  try {
+    const res = await fetch('/api/solar-forecast');
+    const data = await res.json();
+    if (data.error) {
+      document.querySelector('.forecast-banner').style.display = 'none';
+      return;
+    }
+    document.querySelector('.forecast-banner').style.display = 'block';
+    
+    const sourceEl = document.getElementById('forecast-source');
+    sourceEl.textContent = data.source === 'solcast' ? '⚡ Solcast' : '☁️ Open-Meteo';
+    
+    const hourly = data.hourly;
+    const chartData = hourly.map(h => ({ x: new Date(h.period_end), y: h.pv_estimate }));
+    
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const gradient = ctxForecast.createLinearGradient(0, 0, 0, 160);
+    gradient.addColorStop(0, isDark ? '#fbbf2480' : '#d9770680');
+    gradient.addColorStop(1, isDark ? '#fbbf2400' : '#d9770600');
+    
+    forecastChart.data.datasets = [{
+      label: 'Solar Power',
+      data: chartData,
+      borderColor: isDark ? '#fbbf24' : '#d97706',
+      backgroundColor: gradient,
+      fill: true,
+      tension: 0.4,
+      borderWidth: 2
+    }];
+    forecastChart.update();
+    
+    const daily = data.daily;
+    const cardsContainer = document.getElementById('forecast-cards');
+    const today = new Date().toISOString().split('T')[0];
+    cardsContainer.innerHTML = daily.map((d, i) => {
+      const date = new Date(d.date + 'T12:00:00');
+      let dayLabel;
+      if (d.date === today) dayLabel = 'Today';
+      else if (i === 1) dayLabel = 'Tomorrow';
+      else dayLabel = date.toLocaleDateString(undefined, { weekday: 'short' });
+      
+      const peak = d.peak_kw;
+      const capacity = parseFloat(document.querySelector('[name="solar_capacity_kwp"]')?.value) || 5;
+      const ratio = peak / capacity;
+      let icon = '☀️';
+      if (ratio < 0.3) icon = '☁️';
+      else if (ratio < 0.6) icon = '⛅';
+      
+      return `
+        <div class="forecast-card">
+          <div class="day">${dayLabel}</div>
+          <div class="icon">${icon}</div>
+          <div class="kwh">${d.total_kwh.toFixed(1)} kWh</div>
+          <div class="peak">Peak: ${d.peak_kw.toFixed(1)} kW</div>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    console.error('Forecast error:', e);
   }
 }
 
@@ -482,6 +560,18 @@ function updateChartColors() {
     energyBarChart.options.plugins.legend.labels.color = textColor;
     energyBarChart.update();
   }
+  if (forecastChart) {
+    forecastChart.options.scales.x.ticks.color = textColor;
+    forecastChart.options.scales.y.grid.color = gridColor;
+    forecastChart.options.scales.y.ticks.color = textColor;
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    forecastChart.data.datasets[0].borderColor = isDark ? '#fbbf24' : '#d97706';
+    const gradient = ctxForecast.createLinearGradient(0, 0, 0, 160);
+    gradient.addColorStop(0, isDark ? '#fbbf2480' : '#d9770680');
+    gradient.addColorStop(1, isDark ? '#fbbf2400' : '#d9770600');
+    forecastChart.data.datasets[0].backgroundColor = gradient;
+    forecastChart.update();
+  }
 }
 
 document.getElementById('toggle-daily-details').addEventListener('click', () => {
@@ -513,6 +603,7 @@ initTheme();
 initCharts();
 updateCurrent();
 updateSavings();
+updateForecast();
 updateGridStatus();
 updateChart(1);
 updateEnergyBarChart();
@@ -523,6 +614,7 @@ loadBranding();
 setInterval(() => {
   updateCurrent();
   updateSavings();
+  updateForecast();
   updateGridStatus();
   updateChart(1);
   updateEnergyBarChart();
