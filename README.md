@@ -2,10 +2,11 @@
 
 A self‑hosted, real‑time energy monitoring dashboard that integrates with **Home Assistant** and **MQTT**. Designed for public displays – no login required for viewing, while settings are password‑protected.
 
-![Energy Dashboard Screenshot 1](https://github.com/user-attachments/assets/c3d12473-7d3b-4493-a01d-7d128b84e582)
-![Energy Dashboard Screenshot 2](https://github.com/user-attachments/assets/f8ab9a0a-4432-43f6-962c-6b0d6e4abf4b)
-![Energy Dashboard Screenshot 3](https://github.com/user-attachments/assets/a4a8ede7-925f-45e0-9fa1-62b75e573541)
-![Energy Dashboard Screenshot 4](https://github.com/user-attachments/assets/4f921b49-2ab9-44f2-bca9-14a016b40e26)
+<img width="1906" height="966" alt="Screenshot From 2026-04-18 18-51-15" src="https://github.com/user-attachments/assets/cd3c18bd-d68b-4f7a-9e2f-69147fe0e10e" />
+<img width="1906" height="966" alt="Screenshot From 2026-04-18 18-51-50" src="https://github.com/user-attachments/assets/bab68eea-c745-435e-9d83-d3633a6bc6e7" />
+<img width="1906" height="966" alt="Screenshot From 2026-04-18 18-52-06" src="https://github.com/user-attachments/assets/9c0ca697-97de-412d-8c99-bb915240079f" />
+<img width="1906" height="966" alt="Screenshot From 2026-04-18 18-52-42" src="https://github.com/user-attachments/assets/70c79572-30ef-49ad-b536-254f2304361b" />
+
 
 ## ✨ Features
 
