@@ -104,6 +104,15 @@
       background: var(--accent);
       color: white;
     }
+    .backup-row {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    #restore-file {
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -124,11 +133,11 @@
       </div>
       <div class="form-group">
         <label>URL</label>
-        <input type="url" name="ha_url" placeholder="http://homeassistant.local:8123">
+        <input type="url" name="ha_url" placeholder="http://homeassistant.local:8123" autocomplete="off">
       </div>
       <div class="form-group">
         <label>Long-Lived Access Token</label>
-        <input type="password" name="ha_token" placeholder="eyJhbGciOiJ...">
+        <input type="password" name="ha_token" placeholder="eyJhbGciOiJ..." autocomplete="off">
       </div>
       <button type="button" id="fetch-entities" class="fetch-btn">Fetch Entities from HA</button>
 
@@ -213,16 +222,16 @@
       </div>
       <div class="form-group">
         <label>Broker URL</label>
-        <input type="text" name="mqtt_broker_url" placeholder="mqtt://broker.local:1883">
+        <input type="text" name="mqtt_broker_url" placeholder="mqtt://broker.local:1883" autocomplete="off">
       </div>
       <div class="form-row">
         <div class="form-group">
           <label>Username</label>
-          <input type="text" name="mqtt_username">
+          <input type="text" name="mqtt_username" autocomplete="off">
         </div>
         <div class="form-group">
           <label>Password</label>
-          <input type="password" name="mqtt_password">
+          <input type="password" name="mqtt_password" autocomplete="off">
         </div>
       </div>
       <div class="test-row">
@@ -231,37 +240,37 @@
       </div>
       <h4>MQTT Topics (leave empty to skip)</h4>
       <div class="form-row">
-        <div class="form-group"><label>Consumption (W)</label><input name="mqtt_topic_consumption" placeholder="energy/consumption"></div>
-        <div class="form-group"><label>Solar PV (W)</label><input name="mqtt_topic_solar" placeholder="energy/solar"></div>
+        <div class="form-group"><label>Consumption (W)</label><input name="mqtt_topic_consumption" placeholder="energy/consumption" autocomplete="off"></div>
+        <div class="form-group"><label>Solar PV (W)</label><input name="mqtt_topic_solar" placeholder="energy/solar" autocomplete="off"></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>Battery Charge (W)</label><input name="mqtt_topic_battery_charge"></div>
-        <div class="form-group"><label>Battery Discharge (W)</label><input name="mqtt_topic_battery_discharge"></div>
+        <div class="form-group"><label>Battery Charge (W)</label><input name="mqtt_topic_battery_charge" autocomplete="off"></div>
+        <div class="form-group"><label>Battery Discharge (W)</label><input name="mqtt_topic_battery_discharge" autocomplete="off"></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>Grid Import (W)</label><input name="mqtt_topic_grid_import"></div>
-        <div class="form-group"><label>Grid Export (W)</label><input name="mqtt_topic_grid_export"></div>
+        <div class="form-group"><label>Grid Import (W)</label><input name="mqtt_topic_grid_import" autocomplete="off"></div>
+        <div class="form-group"><label>Grid Export (W)</label><input name="mqtt_topic_grid_export" autocomplete="off"></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>Battery SOC (%)</label><input name="mqtt_topic_battery_soc" placeholder="battery/soc"></div>
+        <div class="form-group"><label>Battery SOC (%)</label><input name="mqtt_topic_battery_soc" placeholder="battery/soc" autocomplete="off"></div>
       </div>
       <h4>Daily Energy Topics (kWh)</h4>
       <div class="form-row">
-        <div class="form-group"><label>Daily Consumption</label><input name="mqtt_topic_daily_consumption"></div>
-        <div class="form-group"><label>Daily Solar</label><input name="mqtt_topic_daily_solar"></div>
+        <div class="form-group"><label>Daily Consumption</label><input name="mqtt_topic_daily_consumption" autocomplete="off"></div>
+        <div class="form-group"><label>Daily Solar</label><input name="mqtt_topic_daily_solar" autocomplete="off"></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>Daily Battery Charge</label><input name="mqtt_topic_daily_battery_charge"></div>
-        <div class="form-group"><label>Daily Battery Discharge</label><input name="mqtt_topic_daily_battery_discharge"></div>
+        <div class="form-group"><label>Daily Battery Charge</label><input name="mqtt_topic_daily_battery_charge" autocomplete="off"></div>
+        <div class="form-group"><label>Daily Battery Discharge</label><input name="mqtt_topic_daily_battery_discharge" autocomplete="off"></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>Daily Grid Import</label><input name="mqtt_topic_daily_grid_import"></div>
-        <div class="form-group"><label>Daily Grid Export</label><input name="mqtt_topic_daily_grid_export"></div>
+        <div class="form-group"><label>Daily Grid Import</label><input name="mqtt_topic_daily_grid_import" autocomplete="off"></div>
+        <div class="form-group"><label>Daily Grid Export</label><input name="mqtt_topic_daily_grid_export" autocomplete="off"></div>
       </div>
       <div class="test-row" style="margin-top:1rem;">
         <div class="form-group" style="flex:1; margin-bottom:0;">
           <label>Test Topic (optional)</label>
-          <input type="text" id="test-topic" placeholder="energy/consumption">
+          <input type="text" id="test-topic" placeholder="energy/consumption" autocomplete="off">
         </div>
         <button type="button" id="test-mqtt-topic" class="fetch-btn">Test Topic</button>
         <span id="topic-test-status" class="test-status"></span>
@@ -269,48 +278,55 @@
 
       <!-- Solar Forecast -->
       <h3>Solar Forecast</h3>
+      <div class="toggle-group">
+        <label><input type="checkbox" name="forecast_enabled" value="true"> Enable Solar Forecast</label>
+      </div>
       <div class="form-row">
         <div class="form-group">
           <label>Latitude</label>
-          <input name="solar_latitude" placeholder="e.g., 6.5244">
+          <input name="solar_latitude" placeholder="e.g., 6.5244" autocomplete="off">
         </div>
         <div class="form-group">
           <label>Longitude</label>
-          <input name="solar_longitude" placeholder="e.g., 3.3792">
+          <input name="solar_longitude" placeholder="e.g., 3.3792" autocomplete="off">
         </div>
       </div>
       <div class="form-row">
         <div class="form-group">
           <label>Panel Tilt (degrees)</label>
-          <input name="solar_tilt" value="30" placeholder="30">
+          <input name="solar_tilt" value="30" placeholder="30" autocomplete="off">
         </div>
         <div class="form-group">
           <label>Panel Azimuth (degrees)</label>
-          <input name="solar_azimuth" value="180" placeholder="180 (South)">
+          <input name="solar_azimuth" value="180" placeholder="180 (South)" autocomplete="off">
         </div>
       </div>
       <div class="form-row">
         <div class="form-group">
           <label>System Capacity (kWp)</label>
-          <input name="solar_capacity_kwp" placeholder="e.g., 5.0">
+          <input name="solar_capacity_kwp" placeholder="e.g., 5.0" autocomplete="off">
         </div>
         <div class="form-group">
           <label>Solcast API Key (optional)</label>
-          <input type="password" name="solcast_api_key" placeholder="Leave empty for Open-Meteo fallback">
+          <input type="password" name="solcast_api_key" placeholder="Leave empty for Open-Meteo" autocomplete="off">
         </div>
       </div>
       <div class="note">If Solcast key is provided, high‑accuracy forecasts will be used. Otherwise, Open‑Meteo (free) is used.</div>
+      <div class="test-row">
+        <button type="button" id="test-forecast" class="fetch-btn">Test Forecast</button>
+        <span id="forecast-test-status" class="test-status"></span>
+      </div>
 
       <!-- Savings -->
       <h3>Savings Calculation</h3>
       <div class="form-row">
         <div class="form-group">
           <label>Currency Symbol</label>
-          <input name="savings_currency" value="€" placeholder="€">
+          <input name="savings_currency" value="€" placeholder="€" autocomplete="off">
         </div>
         <div class="form-group">
           <label>Rate per kWh</label>
-          <input name="savings_rate" value="0.30" placeholder="0.30">
+          <input name="savings_rate" value="0.30" placeholder="0.30" autocomplete="off">
         </div>
       </div>
 
@@ -318,11 +334,11 @@
       <h3>Branding</h3>
       <div class="form-group">
         <label>Dashboard Title</label>
-        <input name="dashboard_title" placeholder="My Energy Dashboard" value="⚡ Energy Dashboard">
+        <input name="dashboard_title" placeholder="My Energy Dashboard" value="⚡ Energy Dashboard" autocomplete="off">
       </div>
       <div class="form-group">
         <label>Logo URL (optional)</label>
-        <input name="dashboard_logo" placeholder="https://example.com/logo.png">
+        <input name="dashboard_logo" placeholder="https://example.com/logo.png" autocomplete="off">
       </div>
 
       <!-- Backup & Restore -->

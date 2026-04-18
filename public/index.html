@@ -57,7 +57,7 @@
     </div>
 
     <!-- Solar Forecast Banner -->
-    <div class="forecast-banner" style="display:none;">
+    <div class="forecast-banner" id="forecast-banner" style="display:none;">
       <div class="forecast-header">
         <h3>☀️ Solar Forecast</h3>
         <span id="forecast-source" class="forecast-source"></span>
@@ -65,7 +65,35 @@
       <div class="forecast-chart-container">
         <canvas id="forecastChart"></canvas>
       </div>
-      <div class="forecast-cards" id="forecast-cards"></div>
+      <div class="forecast-cards" id="forecast-cards">
+        <div class="forecast-card">
+          <div class="day">Today</div>
+          <div class="icon">--</div>
+          <div class="kwh">-- kWh</div>
+          <div class="peak">Peak: -- kW</div>
+        </div>
+        <div class="forecast-card">
+          <div class="day">Tomorrow</div>
+          <div class="icon">--</div>
+          <div class="kwh">-- kWh</div>
+          <div class="peak">Peak: -- kW</div>
+        </div>
+        <div class="forecast-card">
+          <div class="day">--</div>
+          <div class="icon">--</div>
+          <div class="kwh">-- kWh</div>
+          <div class="peak">Peak: -- kW</div>
+        </div>
+        <div class="forecast-card">
+          <div class="day">--</div>
+          <div class="icon">--</div>
+          <div class="kwh">-- kWh</div>
+          <div class="peak">Peak: -- kW</div>
+        </div>
+      </div>
+      <div id="forecast-error" style="display:none; text-align:center; padding:1rem; color:var(--text-secondary);">
+        Configure location and capacity in Settings to see solar forecast.
+      </div>
     </div>
 
     <!-- Quick Stats Row -->
