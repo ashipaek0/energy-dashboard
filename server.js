@@ -91,7 +91,8 @@ async function initializeDatabase() {
     'ha_entity_daily_battery_charge', 'ha_entity_daily_battery_discharge', 'ha_entity_daily_grid_import', 'ha_entity_daily_grid_export',
     'ha_entity_battery_soc', 'grid_status_entity',
     'savings_currency', 'savings_rate', 'dashboard_title', 'dashboard_logo',
-    'solar_latitude', 'solar_longitude', 'solar_tilt', 'solar_azimuth', 'solar_capacity_kwp', 'solcast_api_key'
+    'solar_latitude', 'solar_longitude', 'solar_tilt', 'solar_azimuth', 'solar_capacity_kwp', 'solcast_api_key',
+    'forecast_enabled'
   ];
   for (const key of essentialKeys) {
     const exists = await db.get('SELECT value FROM config WHERE key = ?', key);
@@ -102,6 +103,7 @@ async function initializeDatabase() {
   const defaults = {
     ha_enabled: 'true',
     mqtt_enabled: 'false',
+    forecast_enabled: 'false',
     dashboard_title: '⚡ Energy Dashboard',
     savings_currency: '€',
     savings_rate: '0.30'
@@ -111,10 +113,16 @@ async function initializeDatabase() {
     if (!row || !row.value) await db.run('UPDATE config SET value = ? WHERE key = ?', [val, key]);
   }
   console.log('Database initialized');
-  setupMqtt();
+  await setupMqtt();
 }
 
-initializeDatabase();
+// Wait for DB to be ready before starting server
+(async () => {
+  await initializeDatabase();
+  // Start polling only after DB is ready
+  pollAndCache();
+  setInterval(pollAndCache, 30000);
+})();
 
 async function getConfig(key) {
   const row = await db.get('SELECT value FROM config WHERE key = ?', key);
@@ -163,7 +171,7 @@ async function setupMqtt() {
       'mqtt_topic_battery_discharge', 'mqtt_topic_grid_import', 'mqtt_topic_grid_export',
       'mqtt_topic_battery_soc',
       'mqtt_topic_daily_consumption', 'mqtt_topic_daily_solar', 'mqtt_topic_daily_battery_charge',
-      'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export'
+      'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_1000'
     ];
     const topics = [];
     for (const k of topicKeys) {
@@ -262,9 +270,6 @@ async function pollAndCache() {
   }
 }
 
-pollAndCache();
-setInterval(pollAndCache, 30000);
-
 // --- Public API ---
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -312,7 +317,7 @@ app.get('/api/current', async (req, res) => {
         daily_battery_charge_kwh: latest.daily_battery_charge,
         daily_battery_discharge_kwh: latest.daily_battery_discharge,
         daily_grid_import_kwh: latest.daily_grid_import,
-        daily_grid_export_kwh: latest.daily_grid_1000,
+        daily_grid_export_kwh: latest.daily_grid_export,
         savings_currency: curr,
         savings_rate: rate,
         today_savings: latest.daily_solar * rate,
@@ -390,7 +395,7 @@ app.get('/api/monthly', async (req, res) => {
           MAX(daily_battery_charge) as battery_charge,
           MAX(daily_battery_discharge) as battery_discharge,
           MAX(daily_grid_import) as grid_import,
-          MAX(daily_grid_export) as grid_export
+          MAX(daily_grid_export) as grid_1000
         FROM history
         GROUP BY day
       )
@@ -568,6 +573,11 @@ const FORECAST_CACHE_MS = 3 * 60 * 60 * 1000; // 3 hours
 
 app.get('/api/solar-forecast', async (req, res) => {
   try {
+    const forecastEnabled = await isSourceEnabled('forecast_enabled');
+    if (!forecastEnabled) {
+      return res.json({ error: 'Forecast disabled' });
+    }
+
     const now = Date.now();
     if (forecastCache.data && (now - forecastCache.timestamp) < FORECAST_CACHE_MS) {
       return res.json(forecastCache.data);
@@ -644,6 +654,75 @@ app.get('/api/solar-forecast', async (req, res) => {
   }
 });
 
+// Test forecast endpoint (protected)
+app.get('/api/test-forecast', authMiddleware, async (req, res) => {
+  try {
+    const lat = parseFloat(await getConfig('solar_latitude')) || null;
+    const lon = parseFloat(await getConfig('solar_longitude')) || null;
+    const capacityKwp = parseFloat(await getConfig('solar_capacity_kwp')) || 0;
+    const solcastKey = await getConfig('solcast_api_key');
+    const tilt = parseFloat(await getConfig('solar_tilt')) || 30;
+    const azimuth = parseFloat(await getConfig('solar_azimuth')) || 180;
+
+    if (!lat || !lon || capacityKwp <= 0) {
+      return res.status(400).json({ error: 'Location or capacity not configured' });
+    }
+
+    let source = 'none';
+    let dailyTotal = 0;
+    let peak = 0;
+
+    // Try Solcast first if API key exists
+    if (solcastKey) {
+      try {
+        const url = `https://api.solcast.com.au/rooftop_sites/forecast?latitude=${lat}&longitude=${lon}&capacity=${capacityKwp}&tilt=${tilt}&azimuth=${azimuth}&format=json`;
+        const response = await fetch(url, {
+          headers: { 'Authorization': `Bearer ${solcastKey}` }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const forecasts = data.forecasts || [];
+          const today = new Date().toISOString().split('T')[0];
+          forecasts.forEach(f => {
+            if (f.period_end.startsWith(today)) {
+              dailyTotal += f.pv_estimate;
+              peak = Math.max(peak, f.pv_estimate);
+            }
+          });
+          source = 'solcast';
+        }
+      } catch (e) { /* fallback */ }
+    }
+
+    // Fallback to Open-Meteo
+    if (source === 'none') {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=1`;
+      const response = await fetch(url);
+      const data = await response.json();
+      const conversionFactor = capacityKwp / 1000 * 0.2;
+      const hourly = data.hourly;
+      const today = new Date().toISOString().split('T')[0];
+      hourly.time.forEach((t, i) => {
+        if (t.startsWith(today)) {
+          const pv = (hourly.shortwave_radiation[i] * conversionFactor) / 1000;
+          dailyTotal += pv;
+          peak = Math.max(peak, pv);
+        }
+      });
+      source = 'open-meteo';
+    }
+
+    res.json({
+      success: true,
+      source,
+      today_estimate_kwh: dailyTotal.toFixed(2),
+      peak_kw: peak.toFixed(2)
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- Backup & Restore (protected) ---
 app.get('/api/backup', authMiddleware, async (req, res) => {
   try {
@@ -696,6 +775,8 @@ app.post('/api/settings', async (req, res) => {
   if ('mqtt_broker_url' in updates || 'mqtt_username' in updates || 'mqtt_password' in updates || 'mqtt_enabled' in updates) {
     await restartMqtt();
   }
+  // Clear forecast cache when settings change
+  forecastCache = { data: null, timestamp: 0 };
   res.json({ success: true });
 });
 
