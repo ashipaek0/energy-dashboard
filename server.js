@@ -119,7 +119,6 @@ async function initializeDatabase() {
 // Wait for DB to be ready before starting server
 (async () => {
   await initializeDatabase();
-  // Start polling only after DB is ready
   pollAndCache();
   setInterval(pollAndCache, 30000);
 })();
@@ -628,15 +627,15 @@ app.get('/api/solar-forecast', async (req, res) => {
       const response = await fetch(url);
       const data = await response.json();
       
-      // Convert irradiance (W/m²) to power (kW) using simple model
-      // Assume panel efficiency ~20%, 1 kWp ≈ 5 m² → conversion factor
-      const conversionFactor = capacityKwp / 1000 * 0.2;
+      // Correct conversion: kW = irradiance (W/m²) × (capacityKwp / 1000)
+      const conversionFactor = capacityKwp / 1000;
       const hourly = data.hourly;
       forecastData = hourly.time.map((t, i) => ({
         period_end: new Date(t).toISOString(),
-        pv_estimate: (hourly.shortwave_radiation[i] * conversionFactor) / 1000
+        pv_estimate: hourly.shortwave_radiation[i] * conversionFactor
       }));
       source = 'open-meteo';
+      console.log(`[Forecast] Open-Meteo factor: ${conversionFactor}, first: ${forecastData[0]?.pv_estimate}`);
     }
 
     // Aggregate to daily totals
@@ -661,7 +660,7 @@ app.get('/api/solar-forecast', async (req, res) => {
   }
 });
 
-// Test forecast endpoint (protected) - WITH LOGGING
+// Test forecast endpoint (protected)
 app.get('/api/test-forecast', authMiddleware, async (req, res) => {
   try {
     const latStr = await getConfig('solar_latitude');
@@ -736,13 +735,13 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
           throw new Error(`Open-Meteo API error: ${response.status}`);
         }
         const data = await response.json();
-        const conversionFactor = capacityKwp / 1000 * 0.2;
+        const conversionFactor = capacityKwp / 1000;
         const hourly = data.hourly;
         const today = new Date().toISOString().split('T')[0];
         let found = false;
         hourly.time.forEach((t, i) => {
           if (t.startsWith(today)) {
-            const pv = (hourly.shortwave_radiation[i] * conversionFactor) / 1000;
+            const pv = hourly.shortwave_radiation[i] * conversionFactor;
             dailyTotal += pv;
             peak = Math.max(peak, pv);
             found = true;
@@ -752,7 +751,7 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
           throw new Error('No forecast data for today');
         }
         source = 'open-meteo';
-        console.log('[Test Forecast] Open-Meteo success, daily total:', dailyTotal);
+        console.log(`[Test Forecast] Open-Meteo success, daily total: ${dailyTotal}, peak: ${peak}, factor: ${conversionFactor}`);
       } catch (e) {
         console.error('[Test Forecast] Open-Meteo fallback failed:', e.message);
         return res.status(500).json({ error: `Forecast service unavailable: ${e.message}` });
