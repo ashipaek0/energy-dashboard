@@ -511,15 +511,50 @@ app.get('/api/grid/hours', async (req, res) => {
   }
 });
 
-// Diagnostic endpoint to view raw grid status data (protected)
-app.get('/api/grid/raw', authMiddleware, async (req, res) => {
+// Savings endpoint
+app.get('/api/savings', async (req, res) => {
   try {
-    const rows = await db.all('SELECT timestamp, state FROM grid_status ORDER BY timestamp DESC LIMIT 50');
-    res.json(rows.map(r => ({
-      timestamp: r.timestamp,
-      datetime: new Date(r.timestamp * 1000).toISOString(),
-      state: r.state ? 'ON' : 'OFF'
-    })));
+    const rateRow = await db.get('SELECT value FROM config WHERE key = ?', 'savings_rate');
+    const rate = parseFloat(rateRow?.value) || 0.30;
+    const currency = await getConfig('savings_currency') || '€';
+
+    const now = new Date();
+    
+    // Today
+    const todayStart = new Date(now); todayStart.setHours(0,0,0,0);
+    const todayUnix = Math.floor(todayStart.getTime() / 1000);
+    const todaySolar = await db.get('SELECT MAX(daily_solar) as val FROM history WHERE timestamp >= ?', [todayUnix]);
+    const todaySavings = (todaySolar?.val || 0) * rate;
+
+    // This Month
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthUnix = Math.floor(monthStart.getTime() / 1000);
+    const monthRows = await db.all(`
+      SELECT MAX(daily_solar) as daily FROM history WHERE timestamp >= ? GROUP BY date(timestamp, 'unixepoch')
+    `, [monthUnix]);
+    const monthSavings = monthRows.reduce((sum, r) => sum + (r.daily || 0), 0) * rate;
+
+    // This Year
+    const yearStart = new Date(now.getFullYear(), 0, 1);
+    const yearUnix = Math.floor(yearStart.getTime() / 1000);
+    const yearRows = await db.all(`
+      SELECT MAX(daily_solar) as daily FROM history WHERE timestamp >= ? GROUP BY date(timestamp, 'unixepoch')
+    `, [yearUnix]);
+    const yearSavings = yearRows.reduce((sum, r) => sum + (r.daily || 0), 0) * rate;
+
+    // All-Time
+    const allTimeRows = await db.all(`
+      SELECT MAX(daily_solar) as daily FROM history GROUP BY date(timestamp, 'unixepoch')
+    `);
+    const allTimeSavings = allTimeRows.reduce((sum, r) => sum + (r.daily || 0), 0) * rate;
+
+    res.json({
+      currency,
+      today: todaySavings,
+      month: monthSavings,
+      year: yearSavings,
+      all: allTimeSavings
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
