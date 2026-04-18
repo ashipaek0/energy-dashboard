@@ -104,15 +104,6 @@
       background: var(--accent);
       color: white;
     }
-    .backup-row {
-      display: flex;
-      gap: 1rem;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-    #restore-file {
-      display: none;
-    }
   </style>
 </head>
 <body>
@@ -275,6 +266,40 @@
         <button type="button" id="test-mqtt-topic" class="fetch-btn">Test Topic</button>
         <span id="topic-test-status" class="test-status"></span>
       </div>
+
+      <!-- Solar Forecast -->
+      <h3>Solar Forecast</h3>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Latitude</label>
+          <input name="solar_latitude" placeholder="e.g., 6.5244">
+        </div>
+        <div class="form-group">
+          <label>Longitude</label>
+          <input name="solar_longitude" placeholder="e.g., 3.3792">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Panel Tilt (degrees)</label>
+          <input name="solar_tilt" value="30" placeholder="30">
+        </div>
+        <div class="form-group">
+          <label>Panel Azimuth (degrees)</label>
+          <input name="solar_azimuth" value="180" placeholder="180 (South)">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>System Capacity (kWp)</label>
+          <input name="solar_capacity_kwp" placeholder="e.g., 5.0">
+        </div>
+        <div class="form-group">
+          <label>Solcast API Key (optional)</label>
+          <input type="password" name="solcast_api_key" placeholder="Leave empty for Open-Meteo fallback">
+        </div>
+      </div>
+      <div class="note">If Solcast key is provided, high‑accuracy forecasts will be used. Otherwise, Open‑Meteo (free) is used.</div>
 
       <!-- Savings -->
       <h3>Savings Calculation</h3>

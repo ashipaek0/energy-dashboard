@@ -152,7 +152,6 @@ document.getElementById('backup-btn').addEventListener('click', async function()
   showStatus(backupStatus, 'Generating backup file...', 'info');
   
   try {
-    // Trigger download
     window.location.href = '/api/backup';
     showStatus(backupStatus, '✅ Backup download started', 'success');
   } catch (e) {
