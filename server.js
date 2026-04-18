@@ -92,7 +92,7 @@ async function initializeDatabase() {
     'ha_entity_battery_soc', 'grid_status_entity',
     'savings_currency', 'savings_rate', 'dashboard_title', 'dashboard_logo',
     'solar_latitude', 'solar_longitude', 'solar_tilt', 'solar_azimuth', 'solar_capacity_kwp', 'solcast_api_key',
-    'forecast_enabled'
+    'forecast_enabled', 'solar_loss_factor', 'solar_install_date'
   ];
   for (const key of essentialKeys) {
     const exists = await db.get('SELECT value FROM config WHERE key = ?', key);
@@ -106,7 +106,9 @@ async function initializeDatabase() {
     forecast_enabled: 'false',
     dashboard_title: '⚡ Energy Dashboard',
     savings_currency: '€',
-    savings_rate: '0.30'
+    savings_rate: '0.30',
+    solar_loss_factor: '0.9',
+    solar_install_date: new Date().toISOString().split('T')[0]
   };
   for (const [key, val] of Object.entries(defaults)) {
     const row = await db.get('SELECT value FROM config WHERE key = ?', key);
@@ -595,6 +597,8 @@ app.get('/api/solar-forecast', async (req, res) => {
     const azimuth = parseFloat(await getConfig('solar_azimuth')) || 180;
     const capacityKwp = parseFloat(await getConfig('solar_capacity_kwp')) || 0;
     const solcastKey = await getConfig('solcast_api_key');
+    const lossFactor = parseFloat(await getConfig('solar_loss_factor')) || 0.9;
+    const installDate = await getConfig('solar_install_date') || '2020-01-01';
 
     if (!lat || !lon || capacityKwp <= 0) {
       return res.json({ error: 'Location or capacity not configured' });
@@ -603,22 +607,25 @@ app.get('/api/solar-forecast', async (req, res) => {
     let forecastData = null;
     let source = 'none';
 
-    // Try Solcast first if API key exists
+    // Try Solcast first if API key exists (corrected endpoint)
     if (solcastKey) {
       try {
-        const url = `https://api.solcast.com.au/rooftop_sites/forecast?latitude=${lat}&longitude=${lon}&capacity=${capacityKwp}&tilt=${tilt}&azimuth=${azimuth}&format=json`;
-        const response = await fetch(url, {
-          headers: { 'Authorization': `Bearer ${solcastKey}` }
-        });
+        const url = `https://api.solcast.com.au/world_pv_power/forecasts?latitude=${lat}&longitude=${lon}&capacity=${capacityKwp}&tilt=${tilt}&azimuth=${azimuth}&loss_factor=${lossFactor}&install_date=${installDate}&format=json&api_key=${solcastKey}`;
+        console.log('[Forecast] Attempting Solcast fetch...');
+        const response = await fetch(url);
         if (response.ok) {
           const data = await response.json();
           forecastData = data.forecasts.map(f => ({
             period_end: f.period_end,
-            pv_estimate: f.pv_estimate
+            pv_estimate: f.pv_estimate   // already in kW
           }));
           source = 'solcast';
+          console.log('[Forecast] Solcast success');
+        } else {
+          const errorText = await response.text();
+          console.warn('Solcast API error:', response.status, errorText);
         }
-      } catch (e) { console.warn('Solcast fetch failed, falling back to Open-Meteo'); }
+      } catch (e) { console.warn('Solcast fetch failed, falling back to Open-Meteo:', e.message); }
     }
 
     // Fallback to Open-Meteo
@@ -691,6 +698,8 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
     const solcastKey = await getConfig('solcast_api_key');
     const tilt = parseFloat(await getConfig('solar_tilt')) || 30;
     const azimuth = parseFloat(await getConfig('solar_azimuth')) || 180;
+    const lossFactor = parseFloat(await getConfig('solar_loss_factor')) || 0.9;
+    const installDate = await getConfig('solar_install_date') || '2020-01-01';
 
     let source = 'none';
     let dailyTotal = 0;
@@ -699,11 +708,9 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
     // Try Solcast first if API key exists
     if (solcastKey) {
       try {
-        const url = `https://api.solcast.com.au/rooftop_sites/forecast?latitude=${lat}&longitude=${lon}&capacity=${capacityKwp}&tilt=${tilt}&azimuth=${azimuth}&format=json`;
+        const url = `https://api.solcast.com.au/world_pv_power/forecasts?latitude=${lat}&longitude=${lon}&capacity=${capacityKwp}&tilt=${tilt}&azimuth=${azimuth}&loss_factor=${lossFactor}&install_date=${installDate}&format=json&api_key=${solcastKey}`;
         console.log('[Test Forecast] Attempting Solcast fetch...');
-        const response = await fetch(url, {
-          headers: { 'Authorization': `Bearer ${solcastKey}` }
-        });
+        const response = await fetch(url);
         if (response.ok) {
           const data = await response.json();
           const forecasts = data.forecasts || [];
