@@ -39,12 +39,26 @@ function initCharts() {
       maintainAspectRatio: false,
       interaction: { mode: 'index' },
       elements: {
-        line: { borderWidth: 1.5, tension: 0.3, fill: true },
-        point: { radius: 0, hoverRadius: 4 }
+        line: {
+          borderWidth: 1,        // thinner lines
+          tension: 0.5,          // smoother curves
+          fill: true
+        },
+        point: {
+          radius: 0,
+          hoverRadius: 4
+        }
       },
       scales: {
-        x: { type: 'time', time: { unit: 'hour' }, grid: { color: gridColor } },
-        y: { title: { display: true, text: 'Power (kW)', color: textColor }, grid: { color: gridColor } }
+        x: {
+          type: 'time',
+          time: { unit: 'hour' },
+          grid: { color: gridColor }
+        },
+        y: {
+          title: { display: true, text: 'Power (kW)', color: textColor },
+          grid: { color: gridColor }
+        }
       },
       plugins: {
         tooltip: { mode: 'index' },
@@ -79,7 +93,11 @@ function initCharts() {
       maintainAspectRatio: false,
       scales: {
         x: { grid: { color: gridColor } },
-        y: { title: { display: true, text: 'Energy (kWh)', color: textColor }, grid: { color: gridColor }, beginAtZero: true }
+        y: {
+          title: { display: true, text: 'Energy (kWh)', color: textColor },
+          grid: { color: gridColor },
+          beginAtZero: true
+        }
       },
       plugins: {
         legend: { labels: { color: textColor } },
@@ -286,12 +304,12 @@ async function updateChart(days = 1) {
 
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     const newDatasets = [
-      { label: 'Load', data: [], borderColor: isDark ? '#8b5cf6' : '#7c3aed', tension: 0.3, borderWidth: 1.5, fill: true },
-      { label: 'Solar PV', data: [], borderColor: isDark ? '#fbbf24' : '#d97706', tension: 0.3, borderWidth: 1.5, fill: true },
-      { label: 'Battery Charge', data: [], borderColor: isDark ? '#10b981' : '#059669', tension: 0.3, borderWidth: 1.5, fill: true },
-      { label: 'Battery Discharge', data: [], borderColor: '#f59e0b', tension: 0.3, borderWidth: 1.5, fill: true },
-      { label: 'Grid Import', data: [], borderColor: isDark ? '#ef4444' : '#dc2626', tension: 0.3, borderWidth: 1.5, fill: true },
-      { label: 'Grid Export', data: [], borderColor: '#3b82f6', tension: 0.3, borderWidth: 1.5, fill: true }
+      { label: 'Load', data: [], borderColor: isDark ? '#8b5cf6' : '#7c3aed', tension: 0.4, borderWidth: 1, fill: true },
+      { label: 'Solar PV', data: [], borderColor: isDark ? '#fbbf24' : '#d97706', tension: 0.4, borderWidth: 1, fill: true },
+      { label: 'Battery Charge', data: [], borderColor: isDark ? '#10b981' : '#059669', tension: 0.4, borderWidth: 1, fill: true },
+      { label: 'Battery Discharge', data: [], borderColor: '#f59e0b', tension: 0.4, borderWidth: 1, fill: true },
+      { label: 'Grid Import', data: [], borderColor: isDark ? '#ef4444' : '#dc2626', tension: 0.4, borderWidth: 1, fill: true },
+      { label: 'Grid Export', data: [], borderColor: '#3b82f6', tension: 0.4, borderWidth: 1, fill: true }
     ];
 
     newDatasets.forEach(ds => {
@@ -452,7 +470,7 @@ function updateChartColors() {
       else if (i === 1) ds.borderColor = isDark ? '#fbbf24' : '#d97706';
       else if (i === 2) ds.borderColor = isDark ? '#10b981' : '#059669';
       else if (i === 3) ds.borderColor = '#f59e0b';
-      else if (i === 4) ds.borderColor = isDark ? '#ef4444' : '#0f172a';
+      else if (i === 4) ds.borderColor = isDark ? '#ef4444' : '#dc2626';
       else if (i === 5) ds.borderColor = '#3b82f6';
     });
     powerChart.update();
