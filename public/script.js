@@ -19,12 +19,11 @@ function formatCurrency(amount, currency) {
   });
 }
 
-function formatHoursToHMS(hours) {
-  const totalSeconds = Math.round(hours * 3600);
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const s = totalSeconds % 60;
-  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+function formatHoursToHM(hours) {
+  const totalMinutes = Math.round(hours * 60);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 }
 
 function initCharts() {
@@ -158,21 +157,28 @@ async function updateCurrent() {
     const cfgRes = await fetch('/api/public-config');
     const cfg = await cfgRes.json();
     const currency = cfg.savings_currency || '€';
-    const rate = parseFloat(cfg.savings_rate) || 0.30;
 
     document.getElementById('daily-solar').textContent = d.daily_solar_kwh.toFixed(2) + ' kWh';
     document.getElementById('daily-load').textContent = d.daily_consumption_kwh.toFixed(2) + ' kWh';
+    document.getElementById('daily-grid-import').textContent = d.daily_grid_import_kwh.toFixed(2) + ' kWh';
     const sufficiency = d.daily_consumption_kwh > 0 ? (d.daily_solar_kwh / d.daily_consumption_kwh * 100).toFixed(1) : '0.0';
     document.getElementById('self-sufficiency').textContent = sufficiency + '%';
-
-    const todaySavings = d.today_savings || (d.daily_solar_kwh * rate);
-    const allTimeSavings = d.all_time_savings || 0;
-    document.getElementById('savings').innerHTML = `
-      <div style="font-size: 1.2rem;">${formatCurrency(todaySavings, currency)}</div>
-      <div style="font-size: 0.8rem; opacity: 0.7;">All-time: ${formatCurrency(allTimeSavings, currency)}</div>
-    `;
   } catch (e) {
     console.error(e);
+  }
+}
+
+async function updateSavings() {
+  try {
+    const res = await fetch('/api/savings');
+    const d = await res.json();
+    const curr = d.currency || '€';
+    document.getElementById('savings-today').textContent = formatCurrency(d.today, curr);
+    document.getElementById('savings-month').textContent = formatCurrency(d.month, curr);
+    document.getElementById('savings-year').textContent = formatCurrency(d.year, curr);
+    document.getElementById('savings-all').textContent = formatCurrency(d.all, curr);
+  } catch (e) {
+    console.error('Savings fetch error:', e);
   }
 }
 
@@ -182,7 +188,6 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
   const gridArrow = document.querySelector('.flow-arrow.grid');
   const gridToBatt = document.getElementById('grid-to-battery');
 
-  // Solar arrow: always points right if generating
   if (solar > 0) {
     solarArrow.style.color = 'var(--solar)';
     solarArrow.classList.add('flowing');
@@ -198,18 +203,14 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
   const isGridChargingBattery = gridImport > 0 && isCharging;
   const isSolarChargingBattery = solar > 0 && isCharging && !isGridChargingBattery;
 
-  // Determine battery arrow direction and color
   if (isDischarging) {
-    // Battery discharging to house
     battArrow.style.color = '#f59e0b';
     battArrow.textContent = '→';
   } else if (isCharging) {
-    // Battery charging: arrow points to house (→) unless grid is charging it
     if (isGridChargingBattery) {
       battArrow.style.color = 'var(--grid)';
       battArrow.textContent = '←';
     } else {
-      // Charging from solar or other: arrow still points to house (→)
       if (isSolarChargingBattery) {
         battArrow.style.color = 'var(--solar)';
       } else {
@@ -222,7 +223,6 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
     battArrow.textContent = '⇄';
   }
 
-  // Grid arrow: import = ← (toward home), export = → (toward grid)
   if (gridImport > gridExport) {
     gridArrow.style.color = 'var(--grid)';
     gridArrow.textContent = '←';
@@ -234,7 +234,6 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
     gridArrow.textContent = '⇄';
   }
 
-  // Show grid-to-battery indicator when grid is actively charging battery
   if (isGridChargingBattery) {
     gridToBatt.style.display = 'block';
   } else {
@@ -259,7 +258,7 @@ async function updateGridStatus() {
     for (const p of periods) {
       const hRes = await fetch(`/api/grid/hours?period=${p}`);
       const hData = await hRes.json();
-      document.getElementById(`grid-hours-${p}`).textContent = formatHoursToHMS(hData.hours);
+      document.getElementById(`grid-hours-${p}`).textContent = formatHoursToHM(hData.hours);
     }
   } catch (e) {
     console.error('Grid error:', e);
@@ -487,6 +486,7 @@ document.querySelectorAll('.chart-controls button').forEach(btn => {
 initTheme();
 initCharts();
 updateCurrent();
+updateSavings();
 updateGridStatus();
 updateChart(1);
 updateEnergyBarChart();
@@ -496,6 +496,7 @@ loadBranding();
 
 setInterval(() => {
   updateCurrent();
+  updateSavings();
   updateGridStatus();
   updateChart(1);
   updateEnergyBarChart();
