@@ -141,7 +141,6 @@ async function updateCurrent() {
     document.getElementById('flow-battery-soc').textContent = battSoc.toFixed(1) + '%';
 
     const battNet = battCharge - battDischarge;
-    // Battery power indicator: ↑ charging, ↓ discharging
     const battSign = battNet >= 0 ? '↑' : '↓';
     const battColor = battNet >= 0 ? 'var(--battery)' : '#f59e0b';
     document.getElementById('flow-battery-power').innerHTML = `<span style="color:${battColor}">${battSign} ${Math.abs(battNet)} W</span>`;
@@ -183,6 +182,7 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
   const gridArrow = document.querySelector('.flow-arrow.grid');
   const gridToBatt = document.getElementById('grid-to-battery');
 
+  // Solar arrow: always points right if generating
   if (solar > 0) {
     solarArrow.style.color = 'var(--solar)';
     solarArrow.classList.add('flowing');
@@ -193,17 +193,32 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
     solarArrow.textContent = '→';
   }
 
-  if (battDischarge > battCharge) {
+  // Battery arrow direction and color based on net flow and charging source
+  const isCharging = battCharge > battDischarge;
+  const isDischarging = battDischarge > battCharge;
+  const isGridChargingBattery = gridImport > 0 && isCharging;
+  const isSolarChargingBattery = solar > 0 && isCharging && !isGridChargingBattery;
+
+  if (isDischarging) {
+    // Power from battery to home
     battArrow.style.color = '#f59e0b';
     battArrow.textContent = '→';
-  } else if (battCharge > battDischarge) {
-    battArrow.style.color = 'var(--battery)';
+  } else if (isCharging) {
+    // Power into battery: determine source for color
+    if (isGridChargingBattery) {
+      battArrow.style.color = 'var(--grid)';
+    } else if (isSolarChargingBattery) {
+      battArrow.style.color = 'var(--solar)';
+    } else {
+      battArrow.style.color = 'var(--battery)';
+    }
     battArrow.textContent = '←';
   } else {
     battArrow.style.color = 'var(--text-secondary)';
     battArrow.textContent = '⇄';
   }
 
+  // Grid arrow: import = ← (toward home), export = → (toward grid)
   if (gridImport > gridExport) {
     gridArrow.style.color = 'var(--grid)';
     gridArrow.textContent = '←';
@@ -215,7 +230,7 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
     gridArrow.textContent = '⇄';
   }
 
-  const isGridChargingBattery = gridImport > 0 && battCharge > battDischarge && battCharge > 0;
+  // Show grid-to-battery indicator when grid is actively charging battery
   if (isGridChargingBattery) {
     gridToBatt.style.display = 'block';
   } else {
