@@ -173,12 +173,20 @@ async function updateSavings() {
     const res = await fetch('/api/savings');
     const d = await res.json();
     const curr = d.currency || '€';
-    document.getElementById('savings-today').textContent = formatCurrency(d.today, curr);
-    document.getElementById('savings-week').textContent = formatCurrency(d.week, curr);
-    document.getElementById('savings-month').textContent = formatCurrency(d.month, curr);
-    document.getElementById('savings-all').textContent = formatCurrency(d.all, curr);
+    
+    const safeFormat = (val) => formatCurrency(val || 0, curr);
+    
+    document.getElementById('savings-today').textContent = safeFormat(d.today);
+    document.getElementById('savings-week').textContent = safeFormat(d.week);
+    document.getElementById('savings-month').textContent = safeFormat(d.month);
+    document.getElementById('savings-all').textContent = safeFormat(d.all);
   } catch (e) {
     console.error('Savings fetch error:', e);
+    const fallback = '--';
+    document.getElementById('savings-today').textContent = fallback;
+    document.getElementById('savings-week').textContent = fallback;
+    document.getElementById('savings-month').textContent = fallback;
+    document.getElementById('savings-all').textContent = fallback;
   }
 }
 

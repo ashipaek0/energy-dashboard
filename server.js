@@ -85,7 +85,7 @@ async function initializeDatabase() {
     'mqtt_topic_battery_discharge', 'mqtt_topic_grid_import', 'mqtt_topic_grid_export',
     'mqtt_topic_battery_soc',
     'mqtt_topic_daily_consumption', 'mqtt_topic_daily_solar', 'mqtt_topic_daily_battery_charge',
-    'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export',
+    'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_1000', 'mqtt_topic_daily_grid_export',
     'ha_entity_consumption', 'ha_entity_solar', 'ha_entity_battery_charge', 'ha_entity_battery_discharge',
     'ha_entity_grid_import', 'ha_entity_grid_export', 'ha_entity_daily_consumption', 'ha_entity_daily_solar',
     'ha_entity_daily_battery_charge', 'ha_entity_daily_battery_discharge', 'ha_entity_daily_grid_import', 'ha_entity_daily_grid_export',
@@ -511,7 +511,7 @@ app.get('/api/grid/hours', async (req, res) => {
   }
 });
 
-// Savings endpoint
+// Savings endpoint (robust)
 app.get('/api/savings', async (req, res) => {
   try {
     const rateRow = await db.get('SELECT value FROM config WHERE key = ?', 'savings_rate');
@@ -520,42 +520,43 @@ app.get('/api/savings', async (req, res) => {
 
     const now = new Date();
     
-    // Today
+    async function getTotalSolarSince(startDate) {
+      const startUnix = Math.floor(startDate.getTime() / 1000);
+      const rows = await db.all(`
+        SELECT MAX(daily_solar) as daily FROM history WHERE timestamp >= ? GROUP BY date(timestamp, 'unixepoch')
+      `, [startUnix]);
+      return rows.reduce((sum, r) => sum + (r.daily || 0), 0);
+    }
+
     const todayStart = new Date(now); todayStart.setHours(0,0,0,0);
-    const todayUnix = Math.floor(todayStart.getTime() / 1000);
-    const todaySolar = await db.get('SELECT MAX(daily_solar) as val FROM history WHERE timestamp >= ?', [todayUnix]);
-    const todaySavings = (todaySolar?.val || 0) * rate;
+    const todaySolar = await getTotalSolarSince(todayStart);
+    const todaySavings = todaySolar * rate;
 
-    // This Month
+    const day = now.getDay();
+    const diff = (day === 0 ? 6 : day - 1);
+    const weekStart = new Date(now); weekStart.setDate(now.getDate() - diff); weekStart.setHours(0,0,0,0);
+    const weekSolar = await getTotalSolarSince(weekStart);
+    const weekSavings = weekSolar * rate;
+
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const monthUnix = Math.floor(monthStart.getTime() / 1000);
-    const monthRows = await db.all(`
-      SELECT MAX(daily_solar) as daily FROM history WHERE timestamp >= ? GROUP BY date(timestamp, 'unixepoch')
-    `, [monthUnix]);
-    const monthSavings = monthRows.reduce((sum, r) => sum + (r.daily || 0), 0) * rate;
+    const monthSolar = await getTotalSolarSince(monthStart);
+    const monthSavings = monthSolar * rate;
 
-    // This Year
-    const yearStart = new Date(now.getFullYear(), 0, 1);
-    const yearUnix = Math.floor(yearStart.getTime() / 1000);
-    const yearRows = await db.all(`
-      SELECT MAX(daily_solar) as daily FROM history WHERE timestamp >= ? GROUP BY date(timestamp, 'unixepoch')
-    `, [yearUnix]);
-    const yearSavings = yearRows.reduce((sum, r) => sum + (r.daily || 0), 0) * rate;
-
-    // All-Time
     const allTimeRows = await db.all(`
       SELECT MAX(daily_solar) as daily FROM history GROUP BY date(timestamp, 'unixepoch')
     `);
-    const allTimeSavings = allTimeRows.reduce((sum, r) => sum + (r.daily || 0), 0) * rate;
+    const allTimeSolar = allTimeRows.reduce((sum, r) => sum + (r.daily || 0), 0);
+    const allTimeSavings = allTimeSolar * rate;
 
     res.json({
       currency,
-      today: todaySavings,
-      month: monthSavings,
-      year: yearSavings,
-      all: allTimeSavings
+      today: todaySavings || 0,
+      week: weekSavings || 0,
+      month: monthSavings || 0,
+      all: allTimeSavings || 0
     });
   } catch (err) {
+    console.error('Savings error:', err);
     res.status(500).json({ error: err.message });
   }
 });
