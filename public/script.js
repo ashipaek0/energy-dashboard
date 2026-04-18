@@ -174,8 +174,8 @@ async function updateSavings() {
     const d = await res.json();
     const curr = d.currency || '€';
     document.getElementById('savings-today').textContent = formatCurrency(d.today, curr);
+    document.getElementById('savings-week').textContent = formatCurrency(d.week, curr);
     document.getElementById('savings-month').textContent = formatCurrency(d.month, curr);
-    document.getElementById('savings-year').textContent = formatCurrency(d.year, curr);
     document.getElementById('savings-all').textContent = formatCurrency(d.all, curr);
   } catch (e) {
     console.error('Savings fetch error:', e);
@@ -444,7 +444,7 @@ function updateChartColors() {
       else if (i === 1) ds.borderColor = isDark ? '#fbbf24' : '#d97706';
       else if (i === 2) ds.borderColor = isDark ? '#10b981' : '#059669';
       else if (i === 3) ds.borderColor = '#f59e0b';
-      else if (i === 4) ds.borderColor = isDark ? '#ef4444' : '#dc2626';
+      else if (i === 4) ds.borderColor = isDark ? '#ef4444' : '#0f172a';
       else if (i === 5) ds.borderColor = '#3b82f6';
     });
     powerChart.update();
