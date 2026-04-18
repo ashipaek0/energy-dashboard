@@ -62,15 +62,14 @@ The dashboard will be available at `http://localhost:3000` (or your server's IP)
 
 ### 4. Configure Data Sources
 
-Open `http://your-server-ip:3000/settings`
-
-- Log in with username `admin` and the password you set.
-- Configure Home Assistant (URL and Long‑Lived Access Token).
-- Click **Fetch Entities from HA** to load all available sensors.
-- Map each measurement (consumption, solar, battery, grid, etc.) to the appropriate sensor.
-- Optionally enable MQTT and fill in broker details and topics.
-- Customise Savings Calculation (currency and rate) and Branding (title and logo).
-- Click **Save All Settings**.
+1. Open `http://your-server-ip:3000/settings`
+2. Log in with username `admin` and the password you set.
+3. Configure Home Assistant (URL and Long‑Lived Access Token).
+4. Click **Fetch Entities from HA** to load all available sensors.
+5. Map each measurement (consumption, solar, battery, grid, etc.) to the appropriate sensor.
+6. Optionally enable MQTT and fill in broker details and topics.
+7. Customise Savings Calculation (currency and rate) and Branding (title and logo).
+8. Click **Save All Settings**.
 
 The dashboard will immediately begin displaying data.
 
@@ -78,18 +77,18 @@ The dashboard will immediately begin displaying data.
 
 ### Home Assistant
 
-- **URL**: Your Home Assistant instance (e.g., `http://homeassistant.local:8123`)
+- **URL**: Your Home Assistant instance (e.g., `http://homeassistant.local:8123`).
 - **Token**: Generate a Long‑Lived Access Token in your Home Assistant profile.
 - **Entities**: After fetching, select the sensors for:
-  - Power (Watts): consumption, solar, battery charge/discharge, grid import/export
-  - Battery SOC (%)
-  - Grid status (binary sensor – ON/OFF)
-  - Daily energy (kWh) – must reset at midnight (use utility meter or Riemann sum integral sensors)
+  - Power (Watts): consumption, solar, battery charge/discharge, grid import/export.
+  - Battery SOC (%).
+  - Grid status (binary sensor – ON/OFF).
+  - Daily energy (kWh) – must reset at midnight (use utility meter or Riemann sum integral sensors).
 
 ### MQTT
 
 - **Broker URL**: `mqtt://your-broker:1883`
-- **Username / Password**: Optional
+- **Username / Password**: Optional.
 - **Topics**: Map each measurement to its MQTT topic. Leave empty to skip.
 
 ### Solar Forecast
@@ -118,19 +117,23 @@ This is especially useful before reinstalling or migrating the dashboard.
 ## 📊 Dashboard Usage
 
 - **Public View**: `http://your-server:3000/` – No login required.
-- **Settings**: `http://your-server:3000/settings` – Protected by HTTP Basic Auth (admin / your password).
-- **Data Refresh**: Automatically updates every 30 seconds without page reload.
+- **Settings**: `http://your-server:3000/settings` – Protected by HTTP Basic Auth (`admin` / your password).
+- **Data Refresh**: Automatic every 30 seconds without page reload.
 
 ## 🐳 Docker Image on Docker Hub
 
-A pre‑built image is available on Docker Hub: `ashipaek0/energy-dashboard:latest`
+A pre‑built image is available on Docker Hub:
+
+```
+irunmole/energy-dashboard:latest
+```
 
 You can use it directly in your `docker-compose.yml`:
 
 ```yaml
 services:
   energy-dashboard:
-    image: ashipaek0/energy-dashboard:latest
+    image: irunmole/energy-dashboard:latest
     container_name: energy-dashboard
     restart: unless-stopped
     ports:
@@ -143,7 +146,7 @@ services:
 
 ## 🔄 Automatic Updates (CI/CD)
 
-This repository includes a GitHub Actions workflow that automatically builds and pushes a Docker image to Docker Hub on every push to main.
+This repository includes a GitHub Actions workflow that automatically builds and pushes a Docker image to Docker Hub on every push to `main`.
 
 To automatically update the running container on your server, add Watchtower to your `docker-compose.yml`:
 
@@ -198,7 +201,7 @@ energy-dashboard/
 
 ### Daily energy values grow exponentially
 
-The sensors selected for Daily Energy must reset to zero at midnight. Use Home Assistant's Utility Meter or Riemann sum integration to create resetting sensors.
+The sensors selected for **Daily Energy** must reset to zero at midnight. Use Home Assistant's **Utility Meter** or **Riemann sum** integration to create resetting sensors.
 
 ### Grid status shows "Not configured"
 
@@ -209,10 +212,9 @@ Select a binary sensor in the settings that reports grid availability (e.g., `bi
 - Ensure Latitude, Longitude, and System Capacity are correctly filled.
 - If using Solcast, verify your API key is valid and the hobbyist tier has remaining calls.
 - Check the server logs for detailed error messages:
-
-```bash
-docker compose logs energy-dashboard | grep -i forecast
-```
+  ```bash
+  docker compose logs energy-dashboard | grep -i forecast
+  ```
 
 ### Login popup appears on main page
 
