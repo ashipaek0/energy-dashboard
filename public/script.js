@@ -193,26 +193,30 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
     solarArrow.textContent = '→';
   }
 
-  // Battery arrow direction and color based on net flow and charging source
   const isCharging = battCharge > battDischarge;
   const isDischarging = battDischarge > battCharge;
   const isGridChargingBattery = gridImport > 0 && isCharging;
   const isSolarChargingBattery = solar > 0 && isCharging && !isGridChargingBattery;
 
+  // Determine battery arrow direction and color
   if (isDischarging) {
-    // Power from battery to home
+    // Battery discharging to house
     battArrow.style.color = '#f59e0b';
     battArrow.textContent = '→';
   } else if (isCharging) {
-    // Power into battery: determine source for color
+    // Battery charging: arrow points to house (→) unless grid is charging it
     if (isGridChargingBattery) {
       battArrow.style.color = 'var(--grid)';
-    } else if (isSolarChargingBattery) {
-      battArrow.style.color = 'var(--solar)';
+      battArrow.textContent = '←';
     } else {
-      battArrow.style.color = 'var(--battery)';
+      // Charging from solar or other: arrow still points to house (→)
+      if (isSolarChargingBattery) {
+        battArrow.style.color = 'var(--solar)';
+      } else {
+        battArrow.style.color = 'var(--battery)';
+      }
+      battArrow.textContent = '→';
     }
-    battArrow.textContent = '←';
   } else {
     battArrow.style.color = 'var(--text-secondary)';
     battArrow.textContent = '⇄';
