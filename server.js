@@ -85,12 +85,13 @@ async function initializeDatabase() {
     'mqtt_topic_battery_discharge', 'mqtt_topic_grid_import', 'mqtt_topic_grid_export',
     'mqtt_topic_battery_soc',
     'mqtt_topic_daily_consumption', 'mqtt_topic_daily_solar', 'mqtt_topic_daily_battery_charge',
-    'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_1000', 'mqtt_topic_daily_grid_export',
+    'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export',
     'ha_entity_consumption', 'ha_entity_solar', 'ha_entity_battery_charge', 'ha_entity_battery_discharge',
     'ha_entity_grid_import', 'ha_entity_grid_export', 'ha_entity_daily_consumption', 'ha_entity_daily_solar',
     'ha_entity_daily_battery_charge', 'ha_entity_daily_battery_discharge', 'ha_entity_daily_grid_import', 'ha_entity_daily_grid_export',
     'ha_entity_battery_soc', 'grid_status_entity',
-    'savings_currency', 'savings_rate', 'dashboard_title', 'dashboard_logo'
+    'savings_currency', 'savings_rate', 'dashboard_title', 'dashboard_logo',
+    'solar_latitude', 'solar_longitude', 'solar_tilt', 'solar_azimuth', 'solar_capacity_kwp', 'solcast_api_key'
   ];
   for (const key of essentialKeys) {
     const exists = await db.get('SELECT value FROM config WHERE key = ?', key);
@@ -311,7 +312,7 @@ app.get('/api/current', async (req, res) => {
         daily_battery_charge_kwh: latest.daily_battery_charge,
         daily_battery_discharge_kwh: latest.daily_battery_discharge,
         daily_grid_import_kwh: latest.daily_grid_import,
-        daily_grid_export_kwh: latest.daily_grid_export,
+        daily_grid_export_kwh: latest.daily_grid_1000,
         savings_currency: curr,
         savings_rate: rate,
         today_savings: latest.daily_solar * rate,
@@ -511,7 +512,7 @@ app.get('/api/grid/hours', async (req, res) => {
   }
 });
 
-// Savings endpoint (robust)
+// Savings endpoint
 app.get('/api/savings', async (req, res) => {
   try {
     const rateRow = await db.get('SELECT value FROM config WHERE key = ?', 'savings_rate');
@@ -557,6 +558,88 @@ app.get('/api/savings', async (req, res) => {
     });
   } catch (err) {
     console.error('Savings error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Solar Forecast endpoint (cached)
+let forecastCache = { data: null, timestamp: 0 };
+const FORECAST_CACHE_MS = 3 * 60 * 60 * 1000; // 3 hours
+
+app.get('/api/solar-forecast', async (req, res) => {
+  try {
+    const now = Date.now();
+    if (forecastCache.data && (now - forecastCache.timestamp) < FORECAST_CACHE_MS) {
+      return res.json(forecastCache.data);
+    }
+
+    const lat = parseFloat(await getConfig('solar_latitude')) || null;
+    const lon = parseFloat(await getConfig('solar_longitude')) || null;
+    const tilt = parseFloat(await getConfig('solar_tilt')) || 30;
+    const azimuth = parseFloat(await getConfig('solar_azimuth')) || 180;
+    const capacityKwp = parseFloat(await getConfig('solar_capacity_kwp')) || 0;
+    const solcastKey = await getConfig('solcast_api_key');
+
+    if (!lat || !lon || capacityKwp <= 0) {
+      return res.json({ error: 'Location or capacity not configured' });
+    }
+
+    let forecastData = null;
+    let source = 'none';
+
+    // Try Solcast first if API key exists
+    if (solcastKey) {
+      try {
+        const url = `https://api.solcast.com.au/rooftop_sites/forecast?latitude=${lat}&longitude=${lon}&capacity=${capacityKwp}&tilt=${tilt}&azimuth=${azimuth}&format=json`;
+        const response = await fetch(url, {
+          headers: { 'Authorization': `Bearer ${solcastKey}` }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          forecastData = data.forecasts.map(f => ({
+            period_end: f.period_end,
+            pv_estimate: f.pv_estimate
+          }));
+          source = 'solcast';
+        }
+      } catch (e) { console.warn('Solcast fetch failed, falling back to Open-Meteo'); }
+    }
+
+    // Fallback to Open-Meteo
+    if (!forecastData) {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=4`;
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      // Convert irradiance (W/m²) to power (kW) using simple model
+      // Assume panel efficiency ~20%, 1 kWp ≈ 5 m² → conversion factor
+      const conversionFactor = capacityKwp / 1000 * 0.2;
+      const hourly = data.hourly;
+      forecastData = hourly.time.map((t, i) => ({
+        period_end: new Date(t).toISOString(),
+        pv_estimate: (hourly.shortwave_radiation[i] * conversionFactor) / 1000
+      }));
+      source = 'open-meteo';
+    }
+
+    // Aggregate to daily totals
+    const dailyMap = new Map();
+    forecastData.forEach(f => {
+      const date = f.period_end.split('T')[0];
+      const existing = dailyMap.get(date) || { date, total_kwh: 0, peak_kw: 0, source };
+      existing.total_kwh += f.pv_estimate;
+      existing.peak_kw = Math.max(existing.peak_kw, f.pv_estimate);
+      dailyMap.set(date, existing);
+    });
+
+    const daily = Array.from(dailyMap.values()).slice(0, 4);
+    const hourly = forecastData.slice(0, 96);
+
+    const result = { daily, hourly, source };
+    forecastCache = { data: result, timestamp: now };
+    res.json(result);
+  } catch (err) {
+    console.error('Solar forecast error:', err);
     res.status(500).json({ error: err.message });
   }
 });
