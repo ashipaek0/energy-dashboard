@@ -657,16 +657,31 @@ app.get('/api/solar-forecast', async (req, res) => {
 // Test forecast endpoint (protected)
 app.get('/api/test-forecast', authMiddleware, async (req, res) => {
   try {
-    const lat = parseFloat(await getConfig('solar_latitude')) || null;
-    const lon = parseFloat(await getConfig('solar_longitude')) || null;
-    const capacityKwp = parseFloat(await getConfig('solar_capacity_kwp')) || 0;
+    const latStr = await getConfig('solar_latitude');
+    const lonStr = await getConfig('solar_longitude');
+    const capStr = await getConfig('solar_capacity_kwp');
+    
+    if (!latStr || !lonStr || !capStr) {
+      return res.status(400).json({ error: 'Latitude, longitude, and capacity are required' });
+    }
+    
+    const lat = parseFloat(latStr);
+    const lon = parseFloat(lonStr);
+    const capacityKwp = parseFloat(capStr);
+    
+    if (isNaN(lat) || isNaN(lon)) {
+      return res.status(400).json({ error: 'Invalid latitude or longitude format' });
+    }
+    if (isNaN(capacityKwp) || capacityKwp <= 0) {
+      return res.status(400).json({ error: 'System capacity must be a positive number (kWp)' });
+    }
+    if (capacityKwp > 1000) {
+      console.warn(`Capacity ${capacityKwp} kWp seems very high. Did you enter watts?`);
+    }
+
     const solcastKey = await getConfig('solcast_api_key');
     const tilt = parseFloat(await getConfig('solar_tilt')) || 30;
     const azimuth = parseFloat(await getConfig('solar_azimuth')) || 180;
-
-    if (!lat || !lon || capacityKwp <= 0) {
-      return res.status(400).json({ error: 'Location or capacity not configured' });
-    }
 
     let source = 'none';
     let dailyTotal = 0;
@@ -690,26 +705,44 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
             }
           });
           source = 'solcast';
+        } else {
+          const errorText = await response.text();
+          console.warn('Solcast API error:', response.status, errorText);
         }
-      } catch (e) { /* fallback */ }
+      } catch (e) {
+        console.warn('Solcast fetch failed:', e.message);
+      }
     }
 
     // Fallback to Open-Meteo
     if (source === 'none') {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=1`;
-      const response = await fetch(url);
-      const data = await response.json();
-      const conversionFactor = capacityKwp / 1000 * 0.2;
-      const hourly = data.hourly;
-      const today = new Date().toISOString().split('T')[0];
-      hourly.time.forEach((t, i) => {
-        if (t.startsWith(today)) {
-          const pv = (hourly.shortwave_radiation[i] * conversionFactor) / 1000;
-          dailyTotal += pv;
-          peak = Math.max(peak, pv);
+      try {
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=1`;
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`Open-Meteo API error: ${response.status}`);
         }
-      });
-      source = 'open-meteo';
+        const data = await response.json();
+        const conversionFactor = capacityKwp / 1000 * 0.2;
+        const hourly = data.hourly;
+        const today = new Date().toISOString().split('T')[0];
+        let found = false;
+        hourly.time.forEach((t, i) => {
+          if (t.startsWith(today)) {
+            const pv = (hourly.shortwave_radiation[i] * conversionFactor) / 1000;
+            dailyTotal += pv;
+            peak = Math.max(peak, pv);
+            found = true;
+          }
+        });
+        if (!found) {
+          throw new Error('No forecast data for today');
+        }
+        source = 'open-meteo';
+      } catch (e) {
+        console.error('Open-Meteo fallback failed:', e.message);
+        return res.status(500).json({ error: `Forecast service unavailable: ${e.message}` });
+      }
     }
 
     res.json({
@@ -719,6 +752,7 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
       peak_kw: peak.toFixed(2)
     });
   } catch (err) {
+    console.error('Test forecast error:', err);
     res.status(500).json({ error: err.message });
   }
 });
