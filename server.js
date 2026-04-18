@@ -654,14 +654,17 @@ app.get('/api/solar-forecast', async (req, res) => {
   }
 });
 
-// Test forecast endpoint (protected)
+// Test forecast endpoint (protected) - WITH LOGGING
 app.get('/api/test-forecast', authMiddleware, async (req, res) => {
   try {
     const latStr = await getConfig('solar_latitude');
     const lonStr = await getConfig('solar_longitude');
     const capStr = await getConfig('solar_capacity_kwp');
     
+    console.log('Test forecast config values:', { latStr, lonStr, capStr });
+    
     if (!latStr || !lonStr || !capStr) {
+      console.warn('Missing required forecast config');
       return res.status(400).json({ error: 'Latitude, longitude, and capacity are required' });
     }
     
@@ -691,6 +694,7 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
     if (solcastKey) {
       try {
         const url = `https://api.solcast.com.au/rooftop_sites/forecast?latitude=${lat}&longitude=${lon}&capacity=${capacityKwp}&tilt=${tilt}&azimuth=${azimuth}&format=json`;
+        console.log('Attempting Solcast fetch...');
         const response = await fetch(url, {
           headers: { 'Authorization': `Bearer ${solcastKey}` }
         });
@@ -705,6 +709,7 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
             }
           });
           source = 'solcast';
+          console.log('Solcast success, daily total:', dailyTotal);
         } else {
           const errorText = await response.text();
           console.warn('Solcast API error:', response.status, errorText);
@@ -718,6 +723,7 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
     if (source === 'none') {
       try {
         const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=1`;
+        console.log('Falling back to Open-Meteo...');
         const response = await fetch(url);
         if (!response.ok) {
           throw new Error(`Open-Meteo API error: ${response.status}`);
@@ -739,6 +745,7 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
           throw new Error('No forecast data for today');
         }
         source = 'open-meteo';
+        console.log('Open-Meteo success, daily total:', dailyTotal);
       } catch (e) {
         console.error('Open-Meteo fallback failed:', e.message);
         return res.status(500).json({ error: `Forecast service unavailable: ${e.message}` });
