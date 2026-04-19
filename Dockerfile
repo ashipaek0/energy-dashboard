@@ -13,8 +13,14 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --only=production
 
-# Rebuild native modules to match the container's glibc
-RUN npm rebuild sqlite3 --update-binary
+# Force sqlite3 to rebuild from source
+RUN npm rebuild sqlite3 --build-from-source
+
+# Remove build tools to reduce image size
+RUN apt-get purge -y python3 make g++ && \
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY . .
 
