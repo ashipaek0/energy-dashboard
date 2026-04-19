@@ -179,7 +179,7 @@ h1 {
   100% { opacity: 0.5; transform: scale(1); }
 }
 
-/* Unified Sky & Solar Banner */
+/* Unified Weather & Forecast Banner */
 .sky-solar-banner {
   background: var(--card-bg);
   border-radius: 2rem;
@@ -287,13 +287,13 @@ h1 {
 }
 
 .solar-sparkline-container {
-  height: 80px;
+  height: 100px;
   margin-bottom: 0.75rem;
 }
 
 .solar-cards-mini {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 0.5rem;
 }
 
@@ -551,6 +551,6 @@ h1 {
     height: 350px;
   }
   .solar-cards-mini {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
   }
 }
