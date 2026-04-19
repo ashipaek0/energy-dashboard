@@ -502,12 +502,16 @@ app.get('/api/grid/hours', async (req, res) => {
   
   const startUnix = Math.floor(start.getTime() / 1000);
   const endUnix = Math.floor(end.getTime() / 1000);
+  const currentUnix = Math.floor(now.getTime() / 1000);
+  
+  // For ongoing periods, cap the end at the current time
+  const effectiveEndUnix = Math.min(endUnix, currentUnix);
   
   try {
     const initialState = getGridStateAt(startUnix);
     const rows = db.prepare(
       `SELECT timestamp, state FROM grid_status WHERE timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC`
-    ).all(startUnix, endUnix);
+    ).all(startUnix, effectiveEndUnix);
     
     let hours = 0;
     let lastState = initialState;
@@ -522,7 +526,7 @@ app.get('/api/grid/hours', async (req, res) => {
     }
     
     if (lastState === 1) {
-      hours += (endUnix - lastTime) / 3600;
+      hours += (effectiveEndUnix - lastTime) / 3600;
     }
     
     res.json({ period, hours: Math.round(hours * 10) / 10 });
