@@ -1,8 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const fetch = require('node-fetch');
-const sqlite3 = require('sqlite3').verbose();
-const { open } = require('sqlite');
+const Database = require('better-sqlite3');
 const path = require('path');
 const basicAuth = require('express-basic-auth');
 const mqtt = require('mqtt');
@@ -31,8 +30,8 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 }
 });
 
-let db;
 const DB_PATH = './data/energy.db';
+let db;
 
 function parseGridState(state) {
   if (state === null || state === undefined) return 0;
@@ -42,12 +41,17 @@ function parseGridState(state) {
   return 0;
 }
 
-async function initializeDatabase() {
-  db = await open({
-    filename: DB_PATH,
-    driver: sqlite3.Database
-  });
-  await db.exec(`
+function initializeDatabase() {
+  // Ensure data directory exists
+  const dataDir = path.dirname(DB_PATH);
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+
+  db = new Database(DB_PATH);
+  db.pragma('journal_mode = WAL'); // Better concurrency
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS history (
       timestamp INTEGER PRIMARY KEY,
       consumption REAL,
@@ -66,18 +70,21 @@ async function initializeDatabase() {
     );
     CREATE INDEX IF NOT EXISTS idx_timestamp ON history(timestamp);
   `);
-  await db.exec(`
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS grid_status (
       timestamp INTEGER PRIMARY KEY,
       state INTEGER
     );
   `);
-  await db.exec(`
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS config (
       key TEXT PRIMARY KEY,
       value TEXT
     );
   `);
+
   const essentialKeys = [
     'ha_url', 'ha_token', 'ha_enabled',
     'mqtt_broker_url', 'mqtt_username', 'mqtt_password', 'mqtt_enabled',
@@ -88,18 +95,18 @@ async function initializeDatabase() {
     'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export',
     'ha_entity_consumption', 'ha_entity_solar', 'ha_entity_battery_charge', 'ha_entity_battery_discharge',
     'ha_entity_grid_import', 'ha_entity_grid_export', 'ha_entity_daily_consumption', 'ha_entity_daily_solar',
-    'ha_entity_daily_battery_1000', 'ha_entity_daily_battery_discharge', 'ha_entity_daily_grid_import', 'ha_entity_daily_grid_export',
+    'ha_entity_daily_battery_charge', 'ha_entity_daily_battery_discharge', 'ha_entity_daily_grid_import', 'ha_entity_daily_grid_export',
     'ha_entity_battery_soc', 'grid_status_entity',
     'savings_currency', 'savings_rate', 'dashboard_title', 'dashboard_logo',
     'solar_latitude', 'solar_longitude', 'solar_tilt', 'solar_azimuth', 'solar_capacity_kwp', 'solcast_api_key',
     'forecast_enabled', 'solar_loss_factor', 'solar_install_date'
   ];
+
+  const insertConfig = db.prepare('INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)');
   for (const key of essentialKeys) {
-    const exists = await db.get('SELECT value FROM config WHERE key = ?', key);
-    if (!exists) {
-      await db.run('INSERT INTO config (key, value) VALUES (?, ?)', [key, '']);
-    }
+    insertConfig.run(key, '');
   }
+
   const defaults = {
     ha_enabled: 'true',
     mqtt_enabled: 'false',
@@ -110,29 +117,28 @@ async function initializeDatabase() {
     solar_loss_factor: '0.9',
     solar_install_date: new Date().toISOString().split('T')[0]
   };
+
+  const updateConfig = db.prepare('UPDATE config SET value = ? WHERE key = ? AND value = ?');
   for (const [key, val] of Object.entries(defaults)) {
-    const row = await db.get('SELECT value FROM config WHERE key = ?', key);
-    if (!row || !row.value) await db.run('UPDATE config SET value = ? WHERE key = ?', [val, key]);
+    updateConfig.run(val, key, '');
   }
+
   console.log('Database initialized');
-  await setupMqtt();
+  setupMqtt();
 }
 
-// Wait for DB to be ready before starting server
-(async () => {
-  await initializeDatabase();
-  pollAndCache();
-  setInterval(pollAndCache, 30000);
-})();
+// Initialize database synchronously
+initializeDatabase();
 
-async function getConfig(key) {
-  const row = await db.get('SELECT value FROM config WHERE key = ?', key);
+function getConfig(key) {
+  const row = db.prepare('SELECT value FROM config WHERE key = ?').get(key);
   return row ? row.value : '';
 }
 
-async function setConfig(key, value) {
+function setConfig(key, value) {
   try {
-    await db.run('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)', [key, String(value)]);
+    const stmt = db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)');
+    stmt.run(key, String(value));
   } catch (err) {
     console.error(`[setConfig] ERROR for ${key}:`, err.message);
     throw err;
@@ -140,7 +146,7 @@ async function setConfig(key, value) {
 }
 
 async function isSourceEnabled(source) {
-  const val = await getConfig(source);
+  const val = getConfig(source);
   return val === 'true' || val === true;
 }
 
@@ -161,11 +167,11 @@ async function setupMqtt() {
   for (let k in topicKeyMap) delete topicKeyMap[k];
   const enabled = await isSourceEnabled('mqtt_enabled');
   if (!enabled) return;
-  const brokerUrl = await getConfig('mqtt_broker_url');
+  const brokerUrl = getConfig('mqtt_broker_url');
   if (!brokerUrl) return;
   const options = {};
-  const username = await getConfig('mqtt_username');
-  const password = await getConfig('mqtt_password');
+  const username = getConfig('mqtt_username');
+  const password = getConfig('mqtt_password');
   if (username) options.username = username;
   if (password) options.password = password;
 
@@ -181,7 +187,7 @@ async function setupMqtt() {
     ];
     const topics = [];
     for (const k of topicKeys) {
-      const topic = await getConfig(k);
+      const topic = getConfig(k);
       if (topic) {
         topics.push(topic);
         topicKeyMap[topic] = k.replace('mqtt_topic_', '');
@@ -203,8 +209,8 @@ async function restartMqtt() {
 }
 
 async function getHAState(entityId, haUrl = null, haToken = null) {
-  if (!haUrl) haUrl = await getConfig('ha_url');
-  if (!haToken) haToken = await getConfig('ha_token');
+  if (!haUrl) haUrl = getConfig('ha_url');
+  if (!haToken) haToken = getConfig('ha_token');
   if (!haUrl || !haToken || !entityId) return 0;
   const res = await fetch(`${haUrl}/api/states/${entityId}`, {
     headers: { 'Authorization': `Bearer ${haToken}` }
@@ -222,7 +228,7 @@ async function pollAndCache() {
     async function getValue(mqttKey, haEntityKey) {
       if (mqttEnabled && mqttValues[mqttKey] !== undefined) return mqttValues[mqttKey];
       if (haEnabled) {
-        const entity = await getConfig(haEntityKey);
+        const entity = getConfig(haEntityKey);
         if (entity) {
           const raw = await getHAState(entity).catch(() => 0);
           return parseFloat(raw) || 0;
@@ -248,23 +254,23 @@ async function pollAndCache() {
     const dailyGridExport = await getValue('daily_grid_export', 'ha_entity_daily_grid_export');
 
     const now = Math.floor(Date.now() / 1000);
-    await db.run(
-      `INSERT OR REPLACE INTO history 
-       (timestamp, consumption, solar, battery_charge, battery_discharge, grid_import, grid_export, battery_soc,
-        daily_consumption, daily_solar, daily_battery_charge, daily_battery_discharge, daily_grid_import, daily_grid_export)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [now, consumption, solarPower, battCharge, battDischarge, gridImport, gridExport, batterySoc,
-       dailyConsumption, dailySolar, dailyBattCharge, dailyBattDischarge, dailyGridImport, dailyGridExport]
-    );
+    const insertHistory = db.prepare(`
+      INSERT OR REPLACE INTO history 
+      (timestamp, consumption, solar, battery_charge, battery_discharge, grid_import, grid_export, battery_soc,
+       daily_consumption, daily_solar, daily_battery_charge, daily_battery_discharge, daily_grid_import, daily_grid_export)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertHistory.run(now, consumption, solarPower, battCharge, battDischarge, gridImport, gridExport, batterySoc,
+      dailyConsumption, dailySolar, dailyBattCharge, dailyBattDischarge, dailyGridImport, dailyGridExport);
 
-    const gridEntity = await getConfig('grid_status_entity');
+    const gridEntity = getConfig('grid_status_entity');
     if (gridEntity) {
       try {
         const rawState = await getHAState(gridEntity);
         const isOn = parseGridState(rawState);
-        const lastRecord = await db.get('SELECT state FROM grid_status ORDER BY timestamp DESC LIMIT 1');
+        const lastRecord = db.prepare('SELECT state FROM grid_status ORDER BY timestamp DESC LIMIT 1').get();
         if (!lastRecord || lastRecord.state !== isOn) {
-          await db.run('INSERT INTO grid_status (timestamp, state) VALUES (?, ?)', [now, isOn]);
+          db.prepare('INSERT INTO grid_status (timestamp, state) VALUES (?, ?)').run(now, isOn);
           console.log(`Grid state changed to ${isOn ? 'ON' : 'OFF'} (raw: ${rawState})`);
         }
       } catch (e) { console.error('Grid status polling error:', e); }
@@ -276,6 +282,9 @@ async function pollAndCache() {
   }
 }
 
+pollAndCache();
+setInterval(pollAndCache, 30000);
+
 // --- Public API ---
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -286,7 +295,7 @@ app.get('/api/public-config', async (req, res) => {
     const keys = ['dashboard_title', 'dashboard_logo', 'savings_currency', 'savings_rate'];
     const config = {};
     for (const key of keys) {
-      config[key] = await getConfig(key);
+      config[key] = getConfig(key);
     }
     config.dashboard_title = config.dashboard_title || '⚡ Energy Dashboard';
     config.savings_currency = config.savings_currency || '€';
@@ -299,17 +308,17 @@ app.get('/api/public-config', async (req, res) => {
 
 app.get('/api/current', async (req, res) => {
   try {
-    const latest = await db.get('SELECT * FROM history ORDER BY timestamp DESC LIMIT 1');
-    const rateRow = await db.get('SELECT value FROM config WHERE key = ?', 'savings_rate');
+    const latest = db.prepare('SELECT * FROM history ORDER BY timestamp DESC LIMIT 1').get();
+    const rateRow = db.prepare('SELECT value FROM config WHERE key = ?').get('savings_rate');
     const rate = parseFloat(rateRow?.value) || 0.30;
-    const allTimeSolar = await db.get(`
+    const allTimeSolar = db.prepare(`
       SELECT SUM(daily_solar) as total FROM (
         SELECT MAX(daily_solar) as daily_solar FROM history GROUP BY date(timestamp, 'unixepoch')
       )
-    `);
+    `).get();
     const allTimeSavings = (allTimeSolar?.total || 0) * rate;
     if (latest) {
-      const curr = await getConfig('savings_currency') || '€';
+      const curr = getConfig('savings_currency') || '€';
       res.json({
         consumption_kw: latest.consumption / 1000,
         solar_kw: latest.solar / 1000,
@@ -323,7 +332,7 @@ app.get('/api/current', async (req, res) => {
         daily_battery_charge_kwh: latest.daily_battery_charge,
         daily_battery_discharge_kwh: latest.daily_battery_discharge,
         daily_grid_import_kwh: latest.daily_grid_import,
-        daily_grid_export_kwh: latest.daily_grid_export,
+        daily_grid_export_kwh: latest.daily_grid_1000,
         savings_currency: curr,
         savings_rate: rate,
         today_savings: latest.daily_solar * rate,
@@ -343,7 +352,7 @@ app.get('/api/history', async (req, res) => {
   const now = Math.floor(Date.now() / 1000);
   const since = now - (days * 24 * 3600);
   try {
-    const rows = await db.all(`SELECT * FROM history WHERE timestamp >= ? ORDER BY timestamp ASC`, [since]);
+    const rows = db.prepare(`SELECT * FROM history WHERE timestamp >= ? ORDER BY timestamp ASC`).all(since);
     res.json(rows.map(r => ({
       ...r,
       consumption_kw: r.consumption / 1000,
@@ -364,7 +373,7 @@ app.get('/api/daily', async (req, res) => {
   const now = Math.floor(Date.now() / 1000);
   const since = now - (days * 24 * 3600);
   try {
-    const rows = await db.all(`
+    const rows = db.prepare(`
       SELECT date(timestamp, 'unixepoch') as day,
         MAX(daily_consumption) as consumption_kwh,
         MAX(daily_solar) as solar_kwh,
@@ -373,7 +382,8 @@ app.get('/api/daily', async (req, res) => {
         MAX(daily_grid_import) as grid_import_kwh,
         MAX(daily_grid_export) as grid_export_kwh
       FROM history WHERE timestamp >= ?
-      GROUP BY day ORDER BY day ASC`, [since]);
+      GROUP BY day ORDER BY day ASC
+    `).all(since);
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -392,7 +402,7 @@ app.get('/api/monthly', async (req, res) => {
         display: `${monthNames[d.getMonth()]} ${d.getFullYear().toString().slice(2)}`
       });
     }
-    const rows = await db.all(`
+    const rows = db.prepare(`
       WITH daily_max AS (
         SELECT 
           date(timestamp, 'unixepoch') as day,
@@ -417,7 +427,7 @@ app.get('/api/monthly', async (req, res) => {
       GROUP BY month
       ORDER BY month DESC
       LIMIT 12
-    `);
+    `).all();
     const dataMap = {};
     rows.forEach(r => { dataMap[r.month] = r; });
     const result = months.map(m => {
@@ -441,12 +451,12 @@ app.get('/api/monthly', async (req, res) => {
 
 app.get('/api/grid/status', async (req, res) => {
   try {
-    const entity = await getConfig('grid_status_entity');
+    const entity = getConfig('grid_status_entity');
     if (!entity) return res.json({ configured: false });
     const rawState = await getHAState(entity).catch(() => 0);
     const current = parseGridState(rawState);
-    const lastOn = await db.get("SELECT timestamp FROM grid_status WHERE state = 1 ORDER BY timestamp DESC LIMIT 1");
-    const lastOff = await db.get("SELECT timestamp FROM grid_status WHERE state = 0 ORDER BY timestamp DESC LIMIT 1");
+    const lastOn = db.prepare("SELECT timestamp FROM grid_status WHERE state = 1 ORDER BY timestamp DESC LIMIT 1").get();
+    const lastOff = db.prepare("SELECT timestamp FROM grid_status WHERE state = 0 ORDER BY timestamp DESC LIMIT 1").get();
     res.json({
       configured: true,
       current: current === 1,
@@ -458,11 +468,10 @@ app.get('/api/grid/status', async (req, res) => {
   }
 });
 
-async function getGridStateAt(timestamp) {
-  const row = await db.get(
-    'SELECT state FROM grid_status WHERE timestamp <= ? ORDER BY timestamp DESC LIMIT 1',
-    [timestamp]
-  );
+function getGridStateAt(timestamp) {
+  const row = db.prepare(
+    'SELECT state FROM grid_status WHERE timestamp <= ? ORDER BY timestamp DESC LIMIT 1'
+  ).get(timestamp);
   return row ? row.state : 0;
 }
 
@@ -471,7 +480,6 @@ app.get('/api/grid/hours', async (req, res) => {
   const now = new Date();
   let start, end;
   
-  // Use local time boundaries (container timezone)
   if (period === 'day') {
     start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
     end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
@@ -501,13 +509,12 @@ app.get('/api/grid/hours', async (req, res) => {
   console.log(`[Grid Hours] End:   ${end.toString()} (Unix: ${endUnix})`);
   
   try {
-    const initialState = await getGridStateAt(startUnix);
+    const initialState = getGridStateAt(startUnix);
     console.log(`[Grid Hours] Initial state at period start: ${initialState}`);
     
-    const rows = await db.all(
-      `SELECT timestamp, state FROM grid_status WHERE timestamp > ? AND timestamp <= ? ORDER BY timestamp ASC`,
-      [startUnix, endUnix]
-    );
+    const rows = db.prepare(
+      `SELECT timestamp, state FROM grid_status WHERE timestamp > ? AND timestamp <= ? ORDER BY timestamp ASC`
+    ).all(startUnix, endUnix);
     console.log(`[Grid Hours] Found ${rows.length} state changes within period`);
     
     let hours = 0;
@@ -539,7 +546,6 @@ app.get('/api/grid/hours', async (req, res) => {
   }
 });
 
-// Debug endpoint to check container timezone
 app.get('/api/debug/timezone', async (req, res) => {
   const now = new Date();
   res.json({
@@ -552,40 +558,39 @@ app.get('/api/debug/timezone', async (req, res) => {
   });
 });
 
-// Savings endpoint
 app.get('/api/savings', async (req, res) => {
   try {
-    const rateRow = await db.get('SELECT value FROM config WHERE key = ?', 'savings_rate');
+    const rateRow = db.prepare('SELECT value FROM config WHERE key = ?').get('savings_rate');
     const rate = parseFloat(rateRow?.value) || 0.30;
-    const currency = await getConfig('savings_currency') || '€';
+    const currency = getConfig('savings_currency') || '€';
 
     const now = new Date();
     
-    async function getTotalSolarSince(startDate) {
+    function getTotalSolarSince(startDate) {
       const startUnix = Math.floor(startDate.getTime() / 1000);
-      const rows = await db.all(`
+      const rows = db.prepare(`
         SELECT MAX(daily_solar) as daily FROM history WHERE timestamp >= ? GROUP BY date(timestamp, 'unixepoch')
-      `, [startUnix]);
+      `).all(startUnix);
       return rows.reduce((sum, r) => sum + (r.daily || 0), 0);
     }
 
     const todayStart = new Date(now); todayStart.setHours(0,0,0,0);
-    const todaySolar = await getTotalSolarSince(todayStart);
+    const todaySolar = getTotalSolarSince(todayStart);
     const todaySavings = todaySolar * rate;
 
     const day = now.getDay();
     const diff = (day === 0 ? 6 : day - 1);
     const weekStart = new Date(now); weekStart.setDate(now.getDate() - diff); weekStart.setHours(0,0,0,0);
-    const weekSolar = await getTotalSolarSince(weekStart);
+    const weekSolar = getTotalSolarSince(weekStart);
     const weekSavings = weekSolar * rate;
 
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const monthSolar = await getTotalSolarSince(monthStart);
+    const monthSolar = getTotalSolarSince(monthStart);
     const monthSavings = monthSolar * rate;
 
-    const allTimeRows = await db.all(`
+    const allTimeRows = db.prepare(`
       SELECT MAX(daily_solar) as daily FROM history GROUP BY date(timestamp, 'unixepoch')
-    `);
+    `).all();
     const allTimeSolar = allTimeRows.reduce((sum, r) => sum + (r.daily || 0), 0);
     const allTimeSavings = allTimeSolar * rate;
 
@@ -618,14 +623,14 @@ app.get('/api/solar-forecast', async (req, res) => {
       return res.json(forecastCache.data);
     }
 
-    const lat = parseFloat(await getConfig('solar_latitude')) || null;
-    const lon = parseFloat(await getConfig('solar_longitude')) || null;
-    const tilt = parseFloat(await getConfig('solar_tilt')) || 30;
-    const azimuth = parseFloat(await getConfig('solar_azimuth')) || 180;
-    const capacityKwp = parseFloat(await getConfig('solar_capacity_kwp')) || 0;
-    const solcastKey = await getConfig('solcast_api_key');
-    const lossFactor = parseFloat(await getConfig('solar_loss_factor')) || 0.9;
-    const installDate = await getConfig('solar_install_date') || '2020-01-01';
+    const lat = parseFloat(getConfig('solar_latitude')) || null;
+    const lon = parseFloat(getConfig('solar_longitude')) || null;
+    const tilt = parseFloat(getConfig('solar_tilt')) || 30;
+    const azimuth = parseFloat(getConfig('solar_azimuth')) || 180;
+    const capacityKwp = parseFloat(getConfig('solar_capacity_kwp')) || 0;
+    const solcastKey = getConfig('solcast_api_key');
+    const lossFactor = parseFloat(getConfig('solar_loss_factor')) || 0.9;
+    const installDate = getConfig('solar_install_date') || '2020-01-01';
 
     if (!lat || !lon || capacityKwp <= 0) {
       return res.json({ error: 'Location or capacity not configured' });
@@ -684,12 +689,11 @@ app.get('/api/solar-forecast', async (req, res) => {
   }
 });
 
-// Test forecast endpoint (protected)
 app.get('/api/test-forecast', authMiddleware, async (req, res) => {
   try {
-    const latStr = await getConfig('solar_latitude');
-    const lonStr = await getConfig('solar_longitude');
-    const capStr = await getConfig('solar_capacity_kwp');
+    const latStr = getConfig('solar_latitude');
+    const lonStr = getConfig('solar_longitude');
+    const capStr = getConfig('solar_capacity_kwp');
     
     if (!latStr || !lonStr || !capStr) {
       return res.status(400).json({ error: 'Latitude, longitude, and capacity are required' });
@@ -706,11 +710,11 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'System capacity must be a positive number (kWp)' });
     }
 
-    const solcastKey = await getConfig('solcast_api_key');
-    const tilt = parseFloat(await getConfig('solar_tilt')) || 30;
-    const azimuth = parseFloat(await getConfig('solar_azimuth')) || 180;
-    const lossFactor = parseFloat(await getConfig('solar_loss_factor')) || 0.9;
-    const installDate = await getConfig('solar_install_date') || '2020-01-01';
+    const solcastKey = getConfig('solcast_api_key');
+    const tilt = parseFloat(getConfig('solar_tilt')) || 30;
+    const azimuth = parseFloat(getConfig('solar_azimuth')) || 180;
+    const lossFactor = parseFloat(getConfig('solar_loss_factor')) || 0.9;
+    const installDate = getConfig('solar_install_date') || '2020-01-01';
 
     let source = 'none';
     let dailyTotal = 0;
@@ -770,11 +774,13 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
 });
 
 // --- Backup & Restore (protected) ---
-app.get('/api/backup', authMiddleware, async (req, res) => {
+app.get('/api/backup', authMiddleware, (req, res) => {
   try {
-    await db.close();
-    res.download(DB_PATH, `energy-dashboard-backup-${Date.now()}.db`, async (err) => {
-      await initializeDatabase();
+    // Close DB connection before download
+    if (db) db.close();
+    res.download(DB_PATH, `energy-dashboard-backup-${Date.now()}.db`, (err) => {
+      // Reopen database after download completes
+      initializeDatabase();
       if (err) console.error('Backup download error:', err);
     });
   } catch (err) {
@@ -786,19 +792,27 @@ app.post('/api/restore', authMiddleware, upload.single('dbfile'), async (req, re
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const tempPath = req.file.path;
   try {
-    const testDb = await open({ filename: tempPath, driver: sqlite3.Database });
-    await testDb.get('SELECT 1');
-    await testDb.close();
-    await db.close();
+    // Validate uploaded file
+    const testDb = new Database(tempPath);
+    testDb.prepare('SELECT 1').get();
+    testDb.close();
+    
+    // Close current DB
+    if (db) db.close();
     if (mqttClient) { mqttClient.end(); mqttClient = null; }
+    
+    // Replace database file
     fs.copyFileSync(tempPath, DB_PATH);
-    await initializeDatabase();
+    
+    // Reinitialize
+    initializeDatabase();
     await setupMqtt();
     fs.unlinkSync(tempPath);
+    
     res.json({ success: true, message: 'Database restored successfully' });
   } catch (err) {
     try { fs.unlinkSync(tempPath); } catch (e) {}
-    try { await initializeDatabase(); } catch (e) {}
+    try { initializeDatabase(); } catch (e) {}
     res.status(500).json({ error: 'Invalid database file: ' + err.message });
   }
 });
@@ -807,7 +821,7 @@ app.post('/api/restore', authMiddleware, upload.single('dbfile'), async (req, re
 app.use('/api/settings', authMiddleware);
 
 app.get('/api/settings', async (req, res) => {
-  const rows = await db.all('SELECT key, value FROM config');
+  const rows = db.prepare('SELECT key, value FROM config').all();
   const config = {};
   rows.forEach(r => { config[r.key] = r.value; });
   res.json(config);
@@ -816,8 +830,9 @@ app.get('/api/settings', async (req, res) => {
 app.post('/api/settings', async (req, res) => {
   const updates = req.body;
   try {
+    const stmt = db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)');
     for (const [key, value] of Object.entries(updates)) {
-      await setConfig(key, String(value));
+      stmt.run(key, String(value));
     }
     if ('mqtt_broker_url' in updates || 'mqtt_username' in updates || 'mqtt_password' in updates || 'mqtt_enabled' in updates) {
       await restartMqtt();
@@ -834,8 +849,8 @@ app.get('/api/ha/entities', authMiddleware, async (req, res) => {
   let haUrl = req.query.url;
   let haToken = req.query.token;
   if (!haUrl || !haToken) {
-    haUrl = await getConfig('ha_url');
-    haToken = await getConfig('ha_token');
+    haUrl = getConfig('ha_url');
+    haToken = getConfig('ha_token');
   }
   if (!haUrl || !haToken) return res.status(400).json({ error: 'HA not configured' });
   try {
@@ -853,11 +868,11 @@ app.get('/api/ha/entities', authMiddleware, async (req, res) => {
 
 app.get('/api/test-mqtt', authMiddleware, async (req, res) => {
   let brokerUrl = req.query.broker;
-  if (!brokerUrl) brokerUrl = await getConfig('mqtt_broker_url');
+  if (!brokerUrl) brokerUrl = getConfig('mqtt_broker_url');
   if (!brokerUrl) return res.status(400).json({ error: 'MQTT broker URL not configured' });
   const options = {};
-  const username = req.query.username || await getConfig('mqtt_username');
-  const password = req.query.password || await getConfig('mqtt_password');
+  const username = req.query.username || getConfig('mqtt_username');
+  const password = req.query.password || getConfig('mqtt_password');
   if (username) options.username = username;
   if (password) options.password = password;
   const testClient = mqtt.connect(brokerUrl, options);
@@ -888,13 +903,13 @@ app.get('/api/test-mqtt', authMiddleware, async (req, res) => {
 
 app.get('/api/test-mqtt-topic', authMiddleware, async (req, res) => {
   let brokerUrl = req.query.broker;
-  if (!brokerUrl) brokerUrl = await getConfig('mqtt_broker_url');
+  if (!brokerUrl) brokerUrl = getConfig('mqtt_broker_url');
   if (!brokerUrl) return res.status(400).json({ error: 'MQTT broker URL not configured' });
   const topic = req.query.topic;
   if (!topic) return res.status(400).json({ error: 'Topic required' });
   const options = {};
-  const username = req.query.username || await getConfig('mqtt_username');
-  const password = req.query.password || await getConfig('mqtt_password');
+  const username = req.query.username || getConfig('mqtt_username');
+  const password = req.query.password || getConfig('mqtt_password');
   if (username) options.username = username;
   if (password) options.password = password;
   const testClient = mqtt.connect(brokerUrl, options);
