@@ -400,18 +400,18 @@ async function loadBranding() {
   } catch (e) {}
 }
 
-// WMO Weather interpretation codes (Open-Meteo)
+// Weather & Solar combined update (Open-Meteo only)
 function getWeatherIconWMO(code, isDay = true) {
-  // WMO codes: https://www.nodc.noaa.gov/archive/arc0021/0007199/1.1/data/0-data/HTML/WMO-CODE/WMO4677.HTM
-  if (code === 0) return isDay ? '☀️' : '🌙';          // Clear sky
-  if (code === 1) return isDay ? '🌤️' : '🌙';          // Mainly clear
-  if (code === 2) return '⛅';                          // Partly cloudy
-  if (code === 3) return '☁️';                          // Overcast
-  if (code === 45 || code === 48) return '🌫️';         // Fog
+  // WMO Weather interpretation codes (Open-Meteo)
+  if (code === 0) return isDay ? '☀️' : '🌙'; // Clear sky
+  if (code === 1) return isDay ? '🌤️' : '🌙'; // Mainly clear
+  if (code === 2) return '⛅'; // Partly cloudy
+  if (code === 3) return '☁️'; // Overcast
+  if (code === 45 || code === 48) return '🌫️'; // Fog
   if (code === 51 || code === 53 || code === 55) return '🌦️'; // Drizzle
   if (code === 61 || code === 63 || code === 65) return '🌧️'; // Rain
   if (code === 71 || code === 73 || code === 75) return '❄️'; // Snow
-  if (code === 80 || code === 81 || code === 82) return '🌧️'; // Rain showers
+  if (code === 80 || code === 81 || code === 82) return '🌦️'; // Rain showers
   if (code === 95 || code === 96 || code === 99) return '⛈️'; // Thunderstorm
   return '🌡️';
 }
@@ -422,11 +422,11 @@ function getConditionTextWMO(code, isDay = true) {
   if (code === 2) return 'Partly Cloudy';
   if (code === 3) return 'Cloudy';
   if (code === 45 || code === 48) return 'Foggy';
-  if (code === 51 || code === 53 || code === 55) return 'Drizzle';
-  if (code === 61 || code === 63 || code === 65) return 'Rain';
-  if (code === 71 || code === 73 || code === 75) return 'Snow';
-  if (code === 80 || code === 81 || code === 82) return 'Rain Showers';
-  if (code === 95 || code === 96 || code === 99) return 'Thunderstorm';
+  if (code >= 51 && code <= 55) return 'Drizzle';
+  if (code >= 61 && code <= 65) return 'Rain';
+  if (code >= 71 && code <= 75) return 'Snow';
+  if (code >= 80 && code <= 82) return 'Rain Showers';
+  if (code >= 95 && code <= 99) return 'Thunderstorm';
   return 'Unknown';
 }
 
@@ -456,11 +456,12 @@ async function updateSkySolar() {
     const sourceEl = document.getElementById('sky-solar-source');
     const wSource = weatherData.source || 'Open-Meteo';
     const sSource = solarData.source === 'solcast' ? 'Solcast' : (solarData.source || 'Open-Meteo');
-    sourceEl.textContent = `🌍 ${wSource} · ☀️ ${sSource}`;
+    sourceEl.textContent = `${wSource} · ${sSource}`;
 
-    // --- Weather Side ---
+    // --- Weather Side (Open-Meteo) ---
     if (!weatherData.error) {
       const cur = weatherData.current;
+      // Open-Meteo uses 'weather_code' (WMO) and 'is_day'
       const icon = getWeatherIconWMO(cur.weather_code, cur.is_day);
       const conditionText = getConditionTextWMO(cur.weather_code, cur.is_day);
       const conditionClass = getConditionClassWMO(cur.weather_code, cur.is_day);
@@ -476,7 +477,7 @@ async function updateSkySolar() {
       document.getElementById('weather-wind').textContent = `${cur.wind_speed?.toFixed(1) || '--'} m/s`;
     }
 
-    // --- Solar Side ---
+    // --- Solar Side (3 cards: Today, Tomorrow, Day After) ---
     const errorDiv = document.getElementById('solar-error');
     const sparklineContainer = document.querySelector('.solar-sparkline-container');
     const cardsContainer = document.getElementById('solar-cards-mini');
@@ -496,6 +497,8 @@ async function updateSkySolar() {
       const hourly = solarData.hourly;
       const chartData = hourly.map(h => ({ x: new Date(h.period_end), y: h.pv_estimate }));
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      
+      // Update sparkline
       solarSparkline.data.datasets = [{
         data: chartData,
         borderColor: isDark ? '#fbbf24' : '#d97706',
@@ -506,9 +509,10 @@ async function updateSkySolar() {
       }];
       solarSparkline.update();
 
+      // Only show 3 cards (Today, Tomorrow, Day After)
       const daily = solarData.daily;
       let cardsHtml = '';
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 3; i++) {
         const d = daily[i] || { date: '', total_kwh: 0, peak_kw: 0 };
         let dayLabel;
         if (i === 0) dayLabel = 'Today';
