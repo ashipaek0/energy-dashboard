@@ -179,6 +179,97 @@ h1 {
   100% { opacity: 0.5; transform: scale(1); }
 }
 
+/* Weather Widget */
+.weather-widget {
+  background: var(--card-bg);
+  border-radius: 2rem;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+}
+
+.weather-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.weather-header h3 {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.weather-source {
+  font-size: 0.8rem;
+  opacity: 0.6;
+}
+
+.weather-current {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.weather-icon-large {
+  font-size: 4rem;
+  line-height: 1;
+}
+
+.weather-temp {
+  font-size: 3rem;
+  font-weight: 300;
+  color: var(--text);
+}
+
+.weather-details {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.weather-forecast {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+  gap: 0.5rem;
+}
+
+.forecast-day {
+  text-align: center;
+  padding: 0.5rem;
+  border-radius: 1rem;
+  background: var(--bg);
+}
+
+.forecast-day .day {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.forecast-day .icon {
+  font-size: 1.8rem;
+  margin: 0.25rem 0;
+}
+
+.forecast-day .temps {
+  font-size: 0.85rem;
+}
+
+.forecast-day .temp-max {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.forecast-day .temp-min {
+  color: var(--text-secondary);
+  margin-left: 0.3rem;
+}
+
 /* Solar Forecast Banner */
 .forecast-banner {
   background: var(--card-bg);
@@ -488,5 +579,11 @@ h1 {
   }
   .forecast-chart-container {
     height: 120px;
+  }
+  .weather-current {
+    gap: 1rem;
+  }
+  .weather-temp {
+    font-size: 2.5rem;
   }
 }

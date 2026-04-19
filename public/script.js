@@ -511,6 +511,73 @@ async function loadBranding() {
   } catch (e) {}
 }
 
+// Weather functions
+function getWeatherIcon(weatherCode, isDay = true) {
+  const code = weatherCode;
+  if (code >= 200 && code < 300) return '⛈️';
+  if (code >= 300 && code < 400) return '🌦️';
+  if (code >= 500 && code < 600) return '🌧️';
+  if (code >= 600 && code < 700) return '❄️';
+  if (code >= 700 && code < 800) return '🌫️';
+  if (code === 800) return isDay ? '☀️' : '🌙';
+  if (code === 801) return '🌤️';
+  if (code === 802) return '⛅';
+  if (code === 803 || code === 804) return '☁️';
+  return '🌡️';
+}
+
+function getDayName(dateStr, offset = 0) {
+  const date = new Date(dateStr + 'T12:00:00');
+  date.setDate(date.getDate() + offset);
+  if (offset === 0) return 'Today';
+  if (offset === 1) return 'Tomorrow';
+  return date.toLocaleDateString(undefined, { weekday: 'short' });
+}
+
+async function updateWeather() {
+  const widget = document.getElementById('weather-widget');
+  try {
+    const res = await fetch('/api/weather');
+    const data = await res.json();
+    if (data.error) {
+      widget.style.display = 'none';
+      return;
+    }
+    widget.style.display = 'block';
+
+    const sourceEl = document.getElementById('weather-source');
+    sourceEl.textContent = data.source === 'openweathermap' ? '🌍 OpenWeatherMap' : '☁️ Open-Meteo';
+
+    const cur = data.current;
+    document.getElementById('weather-icon').textContent = getWeatherIcon(cur.weather_code, cur.is_day);
+    document.getElementById('weather-temp').textContent = `${Math.round(cur.temp)}°C`;
+    document.getElementById('weather-feels').textContent = `${Math.round(cur.feels_like)}°C`;
+    document.getElementById('weather-humidity').textContent = cur.humidity;
+    document.getElementById('weather-wind').textContent = cur.wind_speed?.toFixed(1) || '--';
+    const desc = cur.weather_description || cur.weather_main || '';
+    document.getElementById('weather-desc').textContent = desc;
+
+    const forecast = data.forecast.slice(0, 5);
+    const forecastContainer = document.getElementById('weather-forecast');
+    forecastContainer.innerHTML = forecast.map((day, i) => {
+      const icon = getWeatherIcon(day.weather_code, true);
+      return `
+        <div class="forecast-day">
+          <div class="day">${getDayName(day.date, i)}</div>
+          <div class="icon">${icon}</div>
+          <div class="temps">
+            <span class="temp-max">${Math.round(day.temp_max)}°</span>
+            <span class="temp-min">${Math.round(day.temp_min)}°</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    console.error('Weather error:', e);
+    widget.style.display = 'none';
+  }
+}
+
 function initTheme() {
   const savedTheme = localStorage.getItem('theme');
   const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -609,6 +676,7 @@ initCharts();
 updateCurrent();
 updateSavings();
 updateForecast();
+updateWeather();
 updateGridStatus();
 updateChart(1);
 updateEnergyBarChart();
@@ -620,6 +688,7 @@ setInterval(() => {
   updateCurrent();
   updateSavings();
   updateForecast();
+  updateWeather();
   updateGridStatus();
   updateChart(1);
   updateEnergyBarChart();
