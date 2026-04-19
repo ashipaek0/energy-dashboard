@@ -400,38 +400,38 @@ async function loadBranding() {
   } catch (e) {}
 }
 
-// Weather & Solar combined update (Open-Meteo only)
-function getWeatherIconWMO(code, isDay = true) {
-  // WMO Weather interpretation codes (Open-Meteo)
-  if (code === 0) return isDay ? '☀️' : '🌙'; // Clear sky
-  if (code === 1) return isDay ? '🌤️' : '🌙'; // Mainly clear
-  if (code === 2) return '⛅'; // Partly cloudy
-  if (code === 3) return '☁️'; // Overcast
-  if (code === 45 || code === 48) return '🌫️'; // Fog
-  if (code === 51 || code === 53 || code === 55) return '🌦️'; // Drizzle
-  if (code === 61 || code === 63 || code === 65) return '🌧️'; // Rain
-  if (code === 71 || code === 73 || code === 75) return '❄️'; // Snow
-  if (code === 80 || code === 81 || code === 82) return '🌦️'; // Rain showers
-  if (code === 95 || code === 96 || code === 99) return '⛈️'; // Thunderstorm
+// Weather & Solar combined update
+function getWeatherIcon(weatherCode, isDay = true) {
+  const code = weatherCode;
+  if (code >= 200 && code < 300) return '⛈️';
+  if (code >= 300 && code < 400) return '🌦️';
+  if (code >= 500 && code < 600) return '🌧️';
+  if (code >= 600 && code < 700) return '❄️';
+  if (code >= 700 && code < 800) return '🌫️';
+  if (code === 800) return isDay ? '☀️' : '🌙';
+  if (code === 801) return isDay ? '🌤️' : '🌙';
+  if (code === 802) return '⛅';
+  if (code === 803 || code === 804) return '☁️';
   return '🌡️';
 }
 
-function getConditionTextWMO(code, isDay = true) {
-  if (code === 0) return isDay ? 'Sunny' : 'Clear';
-  if (code === 1) return isDay ? 'Mostly Sunny' : 'Mostly Clear';
-  if (code === 2) return 'Partly Cloudy';
-  if (code === 3) return 'Cloudy';
-  if (code === 45 || code === 48) return 'Foggy';
-  if (code >= 51 && code <= 55) return 'Drizzle';
-  if (code >= 61 && code <= 65) return 'Rain';
-  if (code >= 71 && code <= 75) return 'Snow';
-  if (code >= 80 && code <= 82) return 'Rain Showers';
-  if (code >= 95 && code <= 99) return 'Thunderstorm';
+function getConditionText(weatherCode, isDay = true) {
+  const code = weatherCode;
+  if (code >= 200 && code < 300) return 'Thunderstorm';
+  if (code >= 300 && code < 400) return 'Drizzle';
+  if (code >= 500 && code < 600) return 'Rain';
+  if (code >= 600 && code < 700) return 'Snow';
+  if (code >= 700 && code < 800) return 'Foggy';
+  if (code === 800) return isDay ? 'Sunny' : 'Clear';
+  if (code === 801) return isDay ? 'Mostly Sunny' : 'Partly Clear';
+  if (code === 802) return 'Partly Cloudy';
+  if (code === 803) return 'Mostly Cloudy';
+  if (code === 804) return 'Cloudy';
   return 'Unknown';
 }
 
-function getConditionClassWMO(code, isDay) {
-  const text = getConditionTextWMO(code, isDay).toLowerCase();
+function getConditionClass(weatherCode, isDay) {
+  const text = getConditionText(weatherCode, isDay).toLowerCase();
   if (text.includes('sunny') || text.includes('clear')) return 'sunny';
   if (text.includes('rain') || text.includes('drizzle')) return 'rain';
   if (text.includes('cloud')) return 'cloudy';
@@ -454,17 +454,16 @@ async function updateSkySolar() {
     banner.style.display = 'block';
 
     const sourceEl = document.getElementById('sky-solar-source');
-    const wSource = weatherData.source || 'Open-Meteo';
+    const wSource = weatherData.source || '?';
     const sSource = solarData.source === 'solcast' ? 'Solcast' : (solarData.source || 'Open-Meteo');
-    sourceEl.textContent = `${wSource} · ${sSource}`;
+    sourceEl.textContent = `🌍 ${wSource} · ☀️ ${sSource}`;
 
-    // --- Weather Side (Open-Meteo) ---
+    // --- Weather Side ---
     if (!weatherData.error) {
       const cur = weatherData.current;
-      // Open-Meteo uses 'weather_code' (WMO) and 'is_day'
-      const icon = getWeatherIconWMO(cur.weather_code, cur.is_day);
-      const conditionText = getConditionTextWMO(cur.weather_code, cur.is_day);
-      const conditionClass = getConditionClassWMO(cur.weather_code, cur.is_day);
+      const icon = getWeatherIcon(cur.weather_code, cur.is_day);
+      const conditionText = getConditionText(cur.weather_code, cur.is_day);
+      const conditionClass = getConditionClass(cur.weather_code, cur.is_day);
       
       const iconEl = document.getElementById('weather-condition-icon');
       iconEl.textContent = icon;
@@ -477,7 +476,7 @@ async function updateSkySolar() {
       document.getElementById('weather-wind').textContent = `${cur.wind_speed?.toFixed(1) || '--'} m/s`;
     }
 
-    // --- Solar Side (3 cards: Today, Tomorrow, Day After) ---
+    // --- Solar Side ---
     const errorDiv = document.getElementById('solar-error');
     const sparklineContainer = document.querySelector('.solar-sparkline-container');
     const cardsContainer = document.getElementById('solar-cards-mini');
@@ -497,8 +496,6 @@ async function updateSkySolar() {
       const hourly = solarData.hourly;
       const chartData = hourly.map(h => ({ x: new Date(h.period_end), y: h.pv_estimate }));
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-      
-      // Update sparkline
       solarSparkline.data.datasets = [{
         data: chartData,
         borderColor: isDark ? '#fbbf24' : '#d97706',
@@ -509,7 +506,6 @@ async function updateSkySolar() {
       }];
       solarSparkline.update();
 
-      // Only show 3 cards (Today, Tomorrow, Day After)
       const daily = solarData.daily;
       let cardsHtml = '';
       for (let i = 0; i < 3; i++) {
