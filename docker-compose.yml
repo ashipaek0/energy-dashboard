@@ -4,12 +4,12 @@ services:
     container_name: energy-dashboard
     restart: unless-stopped
     ports:
-      - "8095:3000"
+      - "3000:3000"
     volumes:
       - ./data:/app/data
     environment:
-      - SETTINGS_PASSWORD=spiceenergy
-      - TZ=Africa/Lagos   # Set your timezone here
+      - SETTINGS_PASSWORD=your_secure_password_here
+      - TZ=??   # Set your timezone here
 
   watchtower:
     image: containrrr/watchtower:latest
