@@ -108,7 +108,7 @@ function initializeDatabase() {
     'ha_entity_battery_soc', 'grid_status_entity',
     'savings_currency', 'savings_rate', 'dashboard_title', 'dashboard_logo',
     'solar_latitude', 'solar_longitude', 'solar_tilt', 'solar_azimuth', 'solar_capacity_kwp', 'solcast_api_key',
-    'forecast_enabled', 'solar_loss_factor', 'solar_install_date'
+    'forecast_enabled', 'solar_loss_factor', 'solar_install_date', 'solcast_resource_id'
   ];
 
   const insertConfig = db.prepare('INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)');
@@ -182,7 +182,7 @@ async function setupMqtt() {
       'mqtt_topic_battery_discharge', 'mqtt_topic_grid_import', 'mqtt_topic_grid_export',
       'mqtt_topic_battery_soc',
       'mqtt_topic_daily_consumption', 'mqtt_topic_daily_solar', 'mqtt_topic_daily_battery_charge',
-      'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export'
+      'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_1000', 'mqtt_topic_daily_grid_export'
     ];
     const topics = [];
     for (const k of topicKeys) {
@@ -597,6 +597,36 @@ app.get('/api/savings', async (req, res) => {
   }
 });
 
+// Helper function for Open-Meteo forecast
+async function fetchOpenMeteoForecast(res, lat, lon, capacityKwp) {
+  if (!lat || !lon || capacityKwp <= 0) {
+    return res.json({ error: 'Location or capacity not configured' });
+  }
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=4`;
+  const response = await fetch(url);
+  const data = await response.json();
+  
+  const conversionFactor = capacityKwp / 1000;
+  const hourly = data.hourly;
+  const forecastData = hourly.time.map((t, i) => ({
+    period_end: new Date(t).toISOString(),
+    pv_estimate: hourly.shortwave_radiation[i] * conversionFactor
+  }));
+  
+  const dailyMap = new Map();
+  forecastData.forEach(f => {
+    const date = f.period_end.split('T')[0];
+    const existing = dailyMap.get(date) || { date, total_kwh: 0, peak_kw: 0, source: 'open-meteo' };
+    existing.total_kwh += f.pv_estimate;
+    existing.peak_kw = Math.max(existing.peak_kw, f.pv_estimate);
+    dailyMap.set(date, existing);
+  });
+  
+  const daily = Array.from(dailyMap.values()).slice(0, 4);
+  const hourlyOut = forecastData.slice(0, 96);
+  return res.json({ daily, hourly: hourlyOut, source: 'open-meteo' });
+}
+
 // Solar Forecast endpoint (cached)
 let forecastCache = { data: null, timestamp: 0 };
 const FORECAST_CACHE_MS = 3 * 60 * 60 * 1000;
@@ -615,22 +645,47 @@ app.get('/api/solar-forecast', async (req, res) => {
 
     const lat = parseFloat(getConfig('solar_latitude')) || null;
     const lon = parseFloat(getConfig('solar_longitude')) || null;
-    const tilt = parseFloat(getConfig('solar_tilt')) || 30;
-    const azimuth = parseFloat(getConfig('solar_azimuth')) || 180;
     const capacityKwp = parseFloat(getConfig('solar_capacity_kwp')) || 0;
     const solcastKey = getConfig('solcast_api_key');
+    const resourceId = getConfig('solcast_resource_id');
     const lossFactor = parseFloat(getConfig('solar_loss_factor')) || 0.9;
     const installDate = getConfig('solar_install_date') || '2020-01-01';
 
-    if (!lat || !lon || capacityKwp <= 0) {
-      return res.json({ error: 'Location or capacity not configured' });
+    if (!solcastKey || capacityKwp <= 0) {
+      return await fetchOpenMeteoForecast(res, lat, lon, capacityKwp);
+    }
+
+    if (!resourceId && (!lat || !lon)) {
+      return res.json({ error: 'Location (lat/lon) or Resource ID required' });
     }
 
     let forecastData = null;
     let source = 'none';
 
-    if (solcastKey) {
+    // Try Solcast with resource ID (preferred)
+    if (resourceId) {
       try {
+        const url = `https://api.solcast.com.au/rooftop_sites/${resourceId}/forecasts?format=json&api_key=${solcastKey}`;
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          forecastData = data.forecasts.map(f => ({
+            period_end: f.period_end,
+            pv_estimate: f.pv_estimate
+          }));
+          source = 'solcast';
+        } else {
+          const errorText = await response.text();
+          console.warn('Solcast (resource) fetch failed:', response.status, errorText);
+        }
+      } catch (e) { console.warn('Solcast (resource) error:', e.message); }
+    }
+
+    // Fallback to lat/lon if resource ID not provided or failed
+    if (!forecastData && lat && lon) {
+      try {
+        const tilt = parseFloat(getConfig('solar_tilt')) || 30;
+        const azimuth = parseFloat(getConfig('solar_azimuth')) || 180;
         const url = `https://api.solcast.com.au/world_pv_power/forecasts?latitude=${lat}&longitude=${lon}&capacity=${capacityKwp}&tilt=${tilt}&azimuth=${azimuth}&loss_factor=${lossFactor}&install_date=${installDate}&format=json&api_key=${solcastKey}`;
         const response = await fetch(url);
         if (response.ok) {
@@ -641,23 +696,15 @@ app.get('/api/solar-forecast', async (req, res) => {
           }));
           source = 'solcast';
         }
-      } catch (e) { console.warn('Solcast fetch failed, falling back to Open-Meteo:', e.message); }
+      } catch (e) { console.warn('Solcast (lat/lon) error:', e.message); }
     }
 
+    // If Solcast failed, fall back to Open-Meteo
     if (!forecastData) {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=4`;
-      const response = await fetch(url);
-      const data = await response.json();
-      
-      const conversionFactor = capacityKwp / 1000;
-      const hourly = data.hourly;
-      forecastData = hourly.time.map((t, i) => ({
-        period_end: new Date(t).toISOString(),
-        pv_estimate: hourly.shortwave_radiation[i] * conversionFactor
-      }));
-      source = 'open-meteo';
+      return await fetchOpenMeteoForecast(res, lat, lon, capacityKwp);
     }
 
+    // Aggregate to daily totals
     const dailyMap = new Map();
     forecastData.forEach(f => {
       const date = f.period_end.split('T')[0];
@@ -701,6 +748,7 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
     }
 
     const solcastKey = getConfig('solcast_api_key');
+    const resourceId = getConfig('solcast_resource_id');
     const tilt = parseFloat(getConfig('solar_tilt')) || 30;
     const azimuth = parseFloat(getConfig('solar_azimuth')) || 180;
     const lossFactor = parseFloat(getConfig('solar_loss_factor')) || 0.9;
@@ -711,25 +759,48 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
     let peak = 0;
 
     if (solcastKey) {
-      try {
-        const url = `https://api.solcast.com.au/world_pv_power/forecasts?latitude=${lat}&longitude=${lon}&capacity=${capacityKwp}&tilt=${tilt}&azimuth=${azimuth}&loss_factor=${lossFactor}&install_date=${installDate}&format=json&api_key=${solcastKey}`;
-        const response = await fetch(url);
-        if (response.ok) {
-          const data = await response.json();
-          const forecasts = data.forecasts || [];
-          const today = new Date().toISOString().split('T')[0];
-          forecasts.forEach(f => {
-            if (f.period_end.startsWith(today)) {
-              dailyTotal += f.pv_estimate;
-              peak = Math.max(peak, f.pv_estimate);
-            }
-          });
-          source = 'solcast';
-        }
-      } catch (e) { console.warn('Solcast test fetch failed:', e.message); }
+      // Try resource ID first
+      if (resourceId) {
+        try {
+          const url = `https://api.solcast.com.au/rooftop_sites/${resourceId}/forecasts?format=json&api_key=${solcastKey}`;
+          const response = await fetch(url);
+          if (response.ok) {
+            const data = await response.json();
+            const forecasts = data.forecasts || [];
+            const today = new Date().toISOString().split('T')[0];
+            forecasts.forEach(f => {
+              if (f.period_end.startsWith(today)) {
+                dailyTotal += f.pv_estimate;
+                peak = Math.max(peak, f.pv_estimate);
+              }
+            });
+            source = 'solcast';
+          }
+        } catch (e) { console.warn('Solcast (resource) test failed:', e.message); }
+      }
+      // Fallback to lat/lon
+      if (source === 'none') {
+        try {
+          const url = `https://api.solcast.com.au/world_pv_power/forecasts?latitude=${lat}&longitude=${lon}&capacity=${capacityKwp}&tilt=${tilt}&azimuth=${azimuth}&loss_factor=${lossFactor}&install_date=${installDate}&format=json&api_key=${solcastKey}`;
+          const response = await fetch(url);
+          if (response.ok) {
+            const data = await response.json();
+            const forecasts = data.forecasts || [];
+            const today = new Date().toISOString().split('T')[0];
+            forecasts.forEach(f => {
+              if (f.period_end.startsWith(today)) {
+                dailyTotal += f.pv_estimate;
+                peak = Math.max(peak, f.pv_estimate);
+              }
+            });
+            source = 'solcast';
+          }
+        } catch (e) { console.warn('Solcast (lat/lon) test failed:', e.message); }
+      }
     }
 
     if (source === 'none') {
+      // Open-Meteo fallback
       try {
         const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=1`;
         const response = await fetch(url);
