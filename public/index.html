@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Energy Monitor</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%233b82f6'/%3E%3Ctext x='50' y='70' font-size='50' text-anchor='middle' fill='white'%3E⚡%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <img id="logo-img" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%233b82f6'/%3E%3Ctext x='50' y='70' font-size='50' text-anchor='middle' fill='white'%3E⚡%3C/text%3E%3C/svg%3E" alt="Logo" style="height:40px; margin-right:1rem;">
+        <h1 id="dashboard-title">⚡ Energy Dashboard</h1>
+      </div>
+      <div class="header-right">
+        <button id="theme-toggle" class="theme-toggle" aria-label="Toggle dark/light mode">
+          <span class="theme-icon">🌙</span>
+        </button>
+        <a href="/settings" class="settings-link">⚙️ Settings</a>
+      </div>
+    </header>
+
+    <!-- Flow Card -->
+    <div class="flow-card">
+      <div class="flow-item solar">
+        <div class="flow-icon">☀️</div>
+        <div class="flow-label">Solar</div>
+        <div class="flow-value" id="flow-solar">0 W</div>
+      </div>
+      <div class="flow-arrow solar-home">→</div>
+      <div class="flow-item battery">
+        <div class="flow-icon">🔋</div>
+        <div class="flow-label">Battery</div>
+        <div class="flow-value" id="flow-battery-soc">--%</div>
+        <div class="flow-sub" id="flow-battery-power">⚡ 0 W</div>
+      </div>
+      <div class="flow-arrow battery">⇄</div>
+      <div class="flow-item home">
+        <div class="flow-icon">🏠</div>
+        <div class="flow-label">Home</div>
+        <div class="flow-value" id="flow-home">0 W</div>
+      </div>
+      <div class="flow-arrow grid">⇄</div>
+      <div class="flow-item grid">
+        <div class="flow-icon">⚡</div>
+        <div class="flow-label">Grid</div>
+        <div class="flow-value" id="flow-grid">0 W</div>
+        <div class="flow-sub" id="flow-grid-direction">Import</div>
+      </div>
+    </div>
+    <div id="grid-to-battery" style="display:none; text-align:center; margin-top:-0.5rem; margin-bottom:1rem; color:var(--grid); font-size:0.9rem;">
+      <span id="grid-to-battery-arrow">↓</span> Grid charging battery <span id="grid-to-battery-arrow">↓</span>
+    </div>
+
+    <!-- Solar Forecast Banner -->
+    <div class="forecast-banner" id="forecast-banner" style="display:none;">
+      <div class="forecast-header">
+        <h3>☀️ Solar Forecast</h3>
+        <span id="forecast-source" class="forecast-source"></span>
+      </div>
+      <div class="forecast-chart-container">
+        <canvas id="forecastChart"></canvas>
+      </div>
+      <div class="forecast-cards" id="forecast-cards">
+        <div class="forecast-card">
+          <div class="day">Today</div>
+          <div class="icon">--</div>
+          <div class="kwh">-- kWh</div>
+          <div class="peak">Peak: -- kW</div>
+        </div>
+        <div class="forecast-card">
+          <div class="day">Tomorrow</div>
+          <div class="icon">--</div>
+          <div class="kwh">-- kWh</div>
+          <div class="peak">Peak: -- kW</div>
+        </div>
+        <div class="forecast-card">
+          <div class="day">--</div>
+          <div class="icon">--</div>
+          <div class="kwh">-- kWh</div>
+          <div class="peak">Peak: -- kW</div>
+        </div>
+        <div class="forecast-card">
+          <div class="day">--</div>
+          <div class="icon">--</div>
+          <div class="kwh">-- kWh</div>
+          <div class="peak">Peak: -- kW</div>
+        </div>
+      </div>
+      <div id="forecast-error" style="display:none; text-align:center; padding:1rem; color:var(--text-secondary);">
+        Configure location and capacity in Settings to see solar forecast.
+      </div>
+    </div>
+
+    <!-- Quick Stats Row -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Today's Solar</div>
+        <div class="stat-value" id="daily-solar">-- kWh</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Today's Usage</div>
+        <div class="stat-value" id="daily-load">-- kWh</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Today's Grid</div>
+        <div class="stat-value" id="daily-grid-import">-- kWh</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Self-sufficiency</div>
+        <div class="stat-value" id="self-sufficiency">--%</div>
+      </div>
+    </div>
+
+    <!-- Savings Summary Row -->
+    <div class="stats-grid" id="savings-summary-row">
+      <div class="stat-card">
+        <div class="stat-label">PV Savings Today</div>
+        <div class="stat-value" id="savings-today">--</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">PV Savings This Week</div>
+        <div class="stat-value" id="savings-week">--</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">PV Savings This Month</div>
+        <div class="stat-value" id="savings-month">--</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">PV Savings All-Time</div>
+        <div class="stat-value" id="savings-all">--</div>
+      </div>
+    </div>
+
+    <!-- Grid Status -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Grid Status</div>
+        <div class="stat-value" id="grid-state">--</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Today's Grid</div>
+        <div class="stat-value" id="grid-hours-day">--</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">This Week</div>
+        <div class="stat-value" id="grid-hours-week">--</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">This Month</div>
+        <div class="stat-value" id="grid-hours-month">--</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">This Year</div>
+        <div class="stat-value" id="grid-hours-year">--</div>
+      </div>
+    </div>
+    <div class="stats-footer" style="margin-bottom:1rem;">
+      <span>Grid Last On: <span id="grid-last-on">--</span></span>
+      <span>Grid Last Off: <span id="grid-last-off">--</span></span>
+    </div>
+
+    <!-- Power Overview Chart -->
+    <div class="chart-container">
+      <div class="chart-header">
+        <h3>Power Overview</h3>
+        <div class="chart-controls">
+          <button data-range="1" class="active">24h</button>
+          <button data-range="7">7d</button>
+          <button data-range="30">30d</button>
+          <button data-range="90">90d</button>
+        </div>
+      </div>
+      <canvas id="powerChart"></canvas>
+    </div>
+
+    <!-- Daily Energy Bar Chart -->
+    <div class="chart-container">
+      <div class="chart-header">
+        <h3>Daily Energy (Last 7 Days)</h3>
+      </div>
+      <canvas id="energyBarChart"></canvas>
+    </div>
+
+    <!-- Daily Energy Breakdown (Last 30 Days) -->
+    <div class="daily-breakdown-container" style="margin-bottom:1rem;">
+      <div class="daily-breakdown-header">
+        <h3>Last 30 Days</h3>
+        <button id="toggle-daily-details" class="toggle-btn">▼</button>
+      </div>
+      <div id="daily-breakdown-content" class="daily-breakdown-content">
+        <div class="daily-table-wrapper">
+          <table id="daily-table" class="energy-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Load</th>
+                <th>Solar PV</th>
+                <th>Battery charged</th>
+                <th>Battery discharged</th>
+                <th>Grid used</th>
+                <th>Grid exported</th>
+              </tr>
+            </thead>
+            <tbody id="daily-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Monthly Energy Breakdown (Last 12 Months) -->
+    <div class="daily-breakdown-container">
+      <div class="daily-breakdown-header">
+        <h3>Last 12 Months</h3>
+        <button id="toggle-monthly-details" class="toggle-btn">▼</button>
+      </div>
+      <div id="monthly-breakdown-content" class="daily-breakdown-content">
+        <div class="daily-table-wrapper">
+          <table id="monthly-table" class="energy-table">
+            <thead>
+              <tr>
+                <th>Month</th>
+                <th>Load</th>
+                <th>Solar PV</th>
+                <th>Battery charged</th>
+                <th>Battery discharged</th>
+                <th>Grid used</th>
+                <th>Grid exported</th>
+              </tr>
+            </thead>
+            <tbody id="monthly-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>
