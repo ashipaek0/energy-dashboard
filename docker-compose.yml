@@ -9,12 +9,12 @@ services:
       - ./data:/app/data
     environment:
       - SETTINGS_PASSWORD=spiceenergy
+      - TZ=Africa/Lagos   # Set your timezone here
 
   watchtower:
-    image: containrrr/watchtower
+    image: containrrr/watchtower:latest
     container_name: watchtower
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     command: --interval 300 energy-dashboard
-
