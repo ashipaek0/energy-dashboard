@@ -56,6 +56,26 @@
       <span id="grid-to-battery-arrow">↓</span> Grid charging battery <span id="grid-to-battery-arrow">↓</span>
     </div>
 
+    <!-- Weather Widget -->
+    <div class="weather-widget" id="weather-widget" style="display:none;">
+      <div class="weather-header">
+        <h3>☀️ Weather</h3>
+        <span id="weather-source" class="weather-source"></span>
+      </div>
+      <div class="weather-current">
+        <div class="weather-icon-large" id="weather-icon">--</div>
+        <div class="weather-temp" id="weather-temp">--°C</div>
+        <div class="weather-details">
+          <div>Feels like <span id="weather-feels">--°C</span></div>
+          <div>💧 <span id="weather-humidity">--%</span> &nbsp; 💨 <span id="weather-wind">-- m/s</span></div>
+          <div id="weather-desc">--</div>
+        </div>
+      </div>
+      <div class="weather-forecast" id="weather-forecast">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+
     <!-- Solar Forecast Banner -->
     <div class="forecast-banner" id="forecast-banner" style="display:none;">
       <div class="forecast-header">

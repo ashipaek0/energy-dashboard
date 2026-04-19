@@ -108,7 +108,8 @@ function initializeDatabase() {
     'ha_entity_battery_soc', 'grid_status_entity',
     'savings_currency', 'savings_rate', 'dashboard_title', 'dashboard_logo',
     'solar_latitude', 'solar_longitude', 'solar_tilt', 'solar_azimuth', 'solar_capacity_kwp', 'solcast_api_key',
-    'forecast_enabled', 'solar_loss_factor', 'solar_install_date', 'solcast_resource_id'
+    'forecast_enabled', 'solar_loss_factor', 'solar_install_date', 'solcast_resource_id',
+    'openweathermap_api_key'
   ];
 
   const insertConfig = db.prepare('INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)');
@@ -182,7 +183,7 @@ async function setupMqtt() {
       'mqtt_topic_battery_discharge', 'mqtt_topic_grid_import', 'mqtt_topic_grid_export',
       'mqtt_topic_battery_soc',
       'mqtt_topic_daily_consumption', 'mqtt_topic_daily_solar', 'mqtt_topic_daily_battery_charge',
-      'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_1000', 'mqtt_topic_daily_grid_export'
+      'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export'
     ];
     const topics = [];
     for (const k of topicKeys) {
@@ -834,6 +835,102 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
   }
 });
 
+// Weather endpoint (hybrid: OpenWeatherMap current + Open-Meteo forecast)
+let weatherCache = { data: null, timestamp: 0 };
+const WEATHER_CACHE_MS = 15 * 60 * 1000; // 15 minutes
+
+app.get('/api/weather', async (req, res) => {
+  try {
+    const now = Date.now();
+    if (weatherCache.data && (now - weatherCache.timestamp) < WEATHER_CACHE_MS) {
+      return res.json(weatherCache.data);
+    }
+
+    const lat = parseFloat(getConfig('solar_latitude')) || null;
+    const lon = parseFloat(getConfig('solar_longitude')) || null;
+    const owmKey = getConfig('openweathermap_api_key');
+
+    if (!lat || !lon) {
+      return res.json({ error: 'Location not configured' });
+    }
+
+    let current = null;
+    let forecast = null;
+    let source = 'none';
+
+    // 1. Fetch current conditions from OpenWeatherMap (if key provided)
+    if (owmKey) {
+      try {
+        const url = `https://api.openweathermap.org/data/3.0/onecall?lat=${lat}&lon=${lon}&exclude=minutely,hourly,daily&appid=${owmKey}&units=metric`;
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          current = {
+            temp: data.current.temp,
+            feels_like: data.current.feels_like,
+            humidity: data.current.humidity,
+            wind_speed: data.current.wind_speed,
+            weather_code: data.current.weather[0].id,
+            weather_main: data.current.weather[0].main,
+            weather_description: data.current.weather[0].description,
+            weather_icon: data.current.weather[0].icon,
+            is_day: data.current.dt > data.current.sunrise && data.current.dt < data.current.sunset
+          };
+          source = 'openweathermap';
+        }
+      } catch (e) { console.warn('OpenWeatherMap current fetch failed:', e.message); }
+    }
+
+    // 2. Fetch forecast from Open-Meteo (free, no key)
+    try {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=5`;
+      const response = await fetch(url);
+      if (response.ok) {
+        const data = await response.json();
+        const daily = data.daily;
+        forecast = daily.time.map((t, i) => ({
+          date: t,
+          weather_code: daily.weather_code[i],
+          temp_max: daily.temperature_2m_max[i],
+          temp_min: daily.temperature_2m_min[i]
+        }));
+        if (!source || source === 'none') source = 'open-meteo';
+      }
+    } catch (e) { console.warn('Open-Meteo forecast fetch failed:', e.message); }
+
+    // If current is missing, fallback to Open-Meteo current (less accurate)
+    if (!current) {
+      try {
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m&timezone=auto`;
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          current = {
+            temp: data.current.temperature_2m,
+            feels_like: data.current.apparent_temperature,
+            humidity: data.current.relative_humidity_2m,
+            wind_speed: data.current.wind_speed_10m,
+            weather_code: data.current.weather_code,
+            is_day: data.current.is_day === 1
+          };
+          source = source === 'none' ? 'open-meteo' : source;
+        }
+      } catch (e) {}
+    }
+
+    if (!current || !forecast) {
+      return res.status(500).json({ error: 'Weather data unavailable' });
+    }
+
+    const result = { current, forecast, source };
+    weatherCache = { data: result, timestamp: now };
+    res.json(result);
+  } catch (err) {
+    console.error('Weather error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- Backup & Restore (protected) ---
 app.get('/api/backup', authMiddleware, (req, res) => {
   try {
@@ -892,6 +989,7 @@ app.post('/api/settings', async (req, res) => {
       await restartMqtt();
     }
     forecastCache = { data: null, timestamp: 0 };
+    weatherCache = { data: null, timestamp: 0 };
     res.json({ success: true });
   } catch (err) {
     console.error('[Settings] Save error:', err);
