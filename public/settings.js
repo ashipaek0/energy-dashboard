@@ -238,13 +238,4 @@ form.addEventListener('submit', async (e) => {
       body: JSON.stringify(data)
     });
     if (res.ok) {
-      showStatus(saveStatus, 'Settings saved successfully!', 'success');
-    } else {
-      showStatus(saveStatus, 'Failed to save settings', 'error');
-    }
-  } catch (e) {
-    showStatus(saveStatus, 'Error: ' + e.message, 'error');
-  }
-});
-
-loadSettings();
+      show
