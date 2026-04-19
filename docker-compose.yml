@@ -1,6 +1,6 @@
-services:
+ services:
   energy-dashboard:
-    image: irunmole/energy-dashboard:latest
+    build: .
     container_name: energy-dashboard
     restart: unless-stopped
     ports:
@@ -9,7 +9,7 @@ services:
       - ./data:/app/data
     environment:
       - SETTINGS_PASSWORD=your_secure_password_here
-      - TZ=Africa/Lagos   # Set your timezone here
+      - TZ=Africa/Lagos   # Change to your timezone
 
   watchtower:
     image: containrrr/watchtower:latest
