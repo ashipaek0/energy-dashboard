@@ -9,7 +9,7 @@ services:
       - ./data:/app/data
     environment:
       - SETTINGS_PASSWORD=your_secure_password_here
-      - TZ=??   # Set your timezone here
+      - TZ=Africa/Lagos   # Set your timezone here
 
   watchtower:
     image: containrrr/watchtower:latest
