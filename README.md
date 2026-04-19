@@ -146,24 +146,6 @@ services:
       - TZ=??   # Set your timezone here
 ```
 
-## 🔄 Automatic Updates (CI/CD)
-
-This repository includes a GitHub Actions workflow that automatically builds and pushes a Docker image to Docker Hub on every push to `main`.
-
-To automatically update the running container on your server, add Watchtower to your `docker-compose.yml`:
-
-```yaml
-watchtower:
-  image: containrrr/watchtower
-  container_name: watchtower
-  restart: unless-stopped
-  volumes:
-    - /var/run/docker.sock:/var/run/docker.sock
-  command: --interval 300 energy-dashboard
-```
-
-Watchtower will check for new images every 5 minutes and restart the container when an update is available.
-
 ## 🛠️ Development / Manual Installation
 
 If you prefer to run without Docker:
