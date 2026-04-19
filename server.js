@@ -88,7 +88,7 @@ async function initializeDatabase() {
     'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export',
     'ha_entity_consumption', 'ha_entity_solar', 'ha_entity_battery_charge', 'ha_entity_battery_discharge',
     'ha_entity_grid_import', 'ha_entity_grid_export', 'ha_entity_daily_consumption', 'ha_entity_daily_solar',
-    'ha_entity_daily_battery_charge', 'ha_entity_daily_battery_discharge', 'ha_entity_daily_grid_import', 'ha_entity_daily_grid_export',
+    'ha_entity_daily_battery_1000', 'ha_entity_daily_battery_discharge', 'ha_entity_daily_grid_import', 'ha_entity_daily_grid_export',
     'ha_entity_battery_soc', 'grid_status_entity',
     'savings_currency', 'savings_rate', 'dashboard_title', 'dashboard_logo',
     'solar_latitude', 'solar_longitude', 'solar_tilt', 'solar_azimuth', 'solar_capacity_kwp', 'solcast_api_key',
@@ -177,7 +177,7 @@ async function setupMqtt() {
       'mqtt_topic_battery_discharge', 'mqtt_topic_grid_import', 'mqtt_topic_grid_export',
       'mqtt_topic_battery_soc',
       'mqtt_topic_daily_consumption', 'mqtt_topic_daily_solar', 'mqtt_topic_daily_battery_charge',
-      'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_1000', 'mqtt_topic_daily_grid_export'
+      'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export'
     ];
     const topics = [];
     for (const k of topicKeys) {
@@ -250,7 +250,7 @@ async function pollAndCache() {
     const now = Math.floor(Date.now() / 1000);
     await db.run(
       `INSERT OR REPLACE INTO history 
-       (timestamp, consumption, solar, battery_charge, battery_discharge, grid_import, grid_1000, battery_soc,
+       (timestamp, consumption, solar, battery_charge, battery_discharge, grid_import, grid_export, battery_soc,
         daily_consumption, daily_solar, daily_battery_charge, daily_battery_discharge, daily_grid_import, daily_grid_export)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [now, consumption, solarPower, battCharge, battDischarge, gridImport, gridExport, batterySoc,
@@ -539,6 +539,19 @@ app.get('/api/grid/hours', async (req, res) => {
   }
 });
 
+// Debug endpoint to check container timezone
+app.get('/api/debug/timezone', async (req, res) => {
+  const now = new Date();
+  res.json({
+    localTime: now.toString(),
+    iso: now.toISOString(),
+    timezoneOffset: now.getTimezoneOffset(),
+    envTZ: process.env.TZ || 'not set',
+    dayStart: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).toString(),
+    dayEnd: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toString()
+  });
+});
+
 // Savings endpoint
 app.get('/api/savings', async (req, res) => {
   try {
@@ -583,7 +596,7 @@ app.get('/api/savings', async (req, res) => {
       month: monthSavings || 0,
       all: allTimeSavings || 0
     });
-  } catch (1013) {
+  } catch (err) {
     console.error('Savings error:', err);
     res.status(500).json({ error: err.message });
   }
