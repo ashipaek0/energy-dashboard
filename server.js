@@ -85,7 +85,7 @@ async function initializeDatabase() {
     'mqtt_topic_battery_discharge', 'mqtt_topic_grid_import', 'mqtt_topic_grid_export',
     'mqtt_topic_battery_soc',
     'mqtt_topic_daily_consumption', 'mqtt_topic_daily_solar', 'mqtt_topic_daily_battery_charge',
-    'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export',
+    'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_1000', 'mqtt_topic_daily_grid_export',
     'ha_entity_consumption', 'ha_entity_solar', 'ha_entity_battery_charge', 'ha_entity_battery_discharge',
     'ha_entity_grid_import', 'ha_entity_grid_export', 'ha_entity_daily_consumption', 'ha_entity_daily_solar',
     'ha_entity_daily_battery_charge', 'ha_entity_daily_battery_discharge', 'ha_entity_daily_grid_import', 'ha_entity_daily_grid_export',
@@ -131,10 +131,8 @@ async function getConfig(key) {
 }
 
 async function setConfig(key, value) {
-  console.log(`[setConfig] Attempting to save: ${key} = ${value}`);
   try {
-    const result = await db.run('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)', [key, String(value)]);
-    console.log(`[setConfig] Success: ${key} saved, changes: ${result.changes}`);
+    await db.run('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)', [key, String(value)]);
   } catch (err) {
     console.error(`[setConfig] ERROR for ${key}:`, err.message);
     throw err;
@@ -497,9 +495,9 @@ app.get('/api/grid/hours', async (req, res) => {
   const endUnix = Math.floor(end.getTime() / 1000);
   
   try {
-    const initialState = await getGridStateAt(startUnix - 1);
+    const initialState = await getGridStateAt(startUnix);
     const rows = await db.all(
-      `SELECT timestamp, state FROM grid_status WHERE timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC`,
+      `SELECT timestamp, state FROM grid_status WHERE timestamp > ? AND timestamp <= ? ORDER BY timestamp ASC`,
       [startUnix, endUnix]
     );
     
@@ -577,7 +575,7 @@ app.get('/api/savings', async (req, res) => {
 
 // Solar Forecast endpoint (cached)
 let forecastCache = { data: null, timestamp: 0 };
-const FORECAST_CACHE_MS = 3 * 60 * 60 * 1000; // 3 hours
+const FORECAST_CACHE_MS = 3 * 60 * 60 * 1000;
 
 app.get('/api/solar-forecast', async (req, res) => {
   try {
@@ -607,34 +605,26 @@ app.get('/api/solar-forecast', async (req, res) => {
     let forecastData = null;
     let source = 'none';
 
-    // Try Solcast first if API key exists (corrected endpoint)
     if (solcastKey) {
       try {
         const url = `https://api.solcast.com.au/world_pv_power/forecasts?latitude=${lat}&longitude=${lon}&capacity=${capacityKwp}&tilt=${tilt}&azimuth=${azimuth}&loss_factor=${lossFactor}&install_date=${installDate}&format=json&api_key=${solcastKey}`;
-        console.log('[Forecast] Attempting Solcast fetch...');
         const response = await fetch(url);
         if (response.ok) {
           const data = await response.json();
           forecastData = data.forecasts.map(f => ({
             period_end: f.period_end,
-            pv_estimate: f.pv_estimate   // already in kW
+            pv_estimate: f.pv_estimate
           }));
           source = 'solcast';
-          console.log('[Forecast] Solcast success');
-        } else {
-          const errorText = await response.text();
-          console.warn('Solcast API error:', response.status, errorText);
         }
       } catch (e) { console.warn('Solcast fetch failed, falling back to Open-Meteo:', e.message); }
     }
 
-    // Fallback to Open-Meteo
     if (!forecastData) {
       const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=4`;
       const response = await fetch(url);
       const data = await response.json();
       
-      // Correct conversion: kW = irradiance (W/m²) × (capacityKwp / 1000)
       const conversionFactor = capacityKwp / 1000;
       const hourly = data.hourly;
       forecastData = hourly.time.map((t, i) => ({
@@ -642,10 +632,8 @@ app.get('/api/solar-forecast', async (req, res) => {
         pv_estimate: hourly.shortwave_radiation[i] * conversionFactor
       }));
       source = 'open-meteo';
-      console.log(`[Forecast] Open-Meteo factor: ${conversionFactor}, first: ${forecastData[0]?.pv_estimate}`);
     }
 
-    // Aggregate to daily totals
     const dailyMap = new Map();
     forecastData.forEach(f => {
       const date = f.period_end.split('T')[0];
@@ -674,10 +662,7 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
     const lonStr = await getConfig('solar_longitude');
     const capStr = await getConfig('solar_capacity_kwp');
     
-    console.log('[Test Forecast] Config values:', { latStr, lonStr, capStr });
-    
     if (!latStr || !lonStr || !capStr) {
-      console.warn('[Test Forecast] Missing required forecast config');
       return res.status(400).json({ error: 'Latitude, longitude, and capacity are required' });
     }
     
@@ -691,9 +676,6 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
     if (isNaN(capacityKwp) || capacityKwp <= 0) {
       return res.status(400).json({ error: 'System capacity must be a positive number (kWp)' });
     }
-    if (capacityKwp > 1000) {
-      console.warn(`[Test Forecast] Capacity ${capacityKwp} kWp seems very high. Did you enter watts?`);
-    }
 
     const solcastKey = await getConfig('solcast_api_key');
     const tilt = parseFloat(await getConfig('solar_tilt')) || 30;
@@ -705,11 +687,9 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
     let dailyTotal = 0;
     let peak = 0;
 
-    // Try Solcast first if API key exists
     if (solcastKey) {
       try {
         const url = `https://api.solcast.com.au/world_pv_power/forecasts?latitude=${lat}&longitude=${lon}&capacity=${capacityKwp}&tilt=${tilt}&azimuth=${azimuth}&loss_factor=${lossFactor}&install_date=${installDate}&format=json&api_key=${solcastKey}`;
-        console.log('[Test Forecast] Attempting Solcast fetch...');
         const response = await fetch(url);
         if (response.ok) {
           const data = await response.json();
@@ -722,45 +702,28 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
             }
           });
           source = 'solcast';
-          console.log('[Test Forecast] Solcast success, daily total:', dailyTotal);
-        } else {
-          const errorText = await response.text();
-          console.warn('[Test Forecast] Solcast API error:', response.status, errorText);
         }
-      } catch (e) {
-        console.warn('[Test Forecast] Solcast fetch failed:', e.message);
-      }
+      } catch (e) { console.warn('Solcast test fetch failed:', e.message); }
     }
 
-    // Fallback to Open-Meteo
     if (source === 'none') {
       try {
         const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=1`;
-        console.log('[Test Forecast] Falling back to Open-Meteo...');
         const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error(`Open-Meteo API error: ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`Open-Meteo API error: ${response.status}`);
         const data = await response.json();
         const conversionFactor = capacityKwp / 1000;
         const hourly = data.hourly;
         const today = new Date().toISOString().split('T')[0];
-        let found = false;
         hourly.time.forEach((t, i) => {
           if (t.startsWith(today)) {
             const pv = hourly.shortwave_radiation[i] * conversionFactor;
             dailyTotal += pv;
             peak = Math.max(peak, pv);
-            found = true;
           }
         });
-        if (!found) {
-          throw new Error('No forecast data for today');
-        }
         source = 'open-meteo';
-        console.log(`[Test Forecast] Open-Meteo success, daily total: ${dailyTotal}, peak: ${peak}, factor: ${conversionFactor}`);
       } catch (e) {
-        console.error('[Test Forecast] Open-Meteo fallback failed:', e.message);
         return res.status(500).json({ error: `Forecast service unavailable: ${e.message}` });
       }
     }
@@ -772,7 +735,7 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
       peak_kw: peak.toFixed(2)
     });
   } catch (err) {
-    console.error('[Test Forecast] Error:', err);
+    console.error('Test forecast error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -803,146 +766,4 @@ app.post('/api/restore', authMiddleware, upload.single('dbfile'), async (req, re
     await initializeDatabase();
     await setupMqtt();
     fs.unlinkSync(tempPath);
-    res.json({ success: true, message: 'Database restored successfully' });
-  } catch (err) {
-    try { fs.unlinkSync(tempPath); } catch (e) {}
-    try { await initializeDatabase(); } catch (e) {}
-    res.status(500).json({ error: 'Invalid database file: ' + err.message });
-  }
-});
-
-// --- Settings API (protected) ---
-app.use('/api/settings', authMiddleware);
-
-app.get('/api/settings', async (req, res) => {
-  const rows = await db.all('SELECT key, value FROM config');
-  const config = {};
-  rows.forEach(r => { config[r.key] = r.value; });
-  res.json(config);
-});
-
-app.post('/api/settings', async (req, res) => {
-  const updates = req.body;
-  console.log('[Settings] Received update request with keys:', Object.keys(updates));
-  try {
-    for (const [key, value] of Object.entries(updates)) {
-      await setConfig(key, String(value));
-    }
-    console.log('[Settings] All settings saved successfully.');
-    if ('mqtt_broker_url' in updates || 'mqtt_username' in updates || 'mqtt_password' in updates || 'mqtt_enabled' in updates) {
-      await restartMqtt();
-    }
-    forecastCache = { data: null, timestamp: 0 };
-    res.json({ success: true });
-  } catch (err) {
-    console.error('[Settings] Save error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/ha/entities', authMiddleware, async (req, res) => {
-  let haUrl = req.query.url;
-  let haToken = req.query.token;
-  if (!haUrl || !haToken) {
-    haUrl = await getConfig('ha_url');
-    haToken = await getConfig('ha_token');
-  }
-  if (!haUrl || !haToken) return res.status(400).json({ error: 'HA not configured' });
-  try {
-    const response = await fetch(`${haUrl}/api/states`, {
-      headers: { 'Authorization': `Bearer ${haToken}` }
-    });
-    if (!response.ok) throw new Error(`HA error ${response.status}`);
-    const data = await response.json();
-    const sensors = data.filter(e => e.entity_id.startsWith('sensor.') || e.entity_id.startsWith('binary_sensor.')).map(e => e.entity_id);
-    res.json(sensors);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/test-mqtt', authMiddleware, async (req, res) => {
-  let brokerUrl = req.query.broker;
-  if (!brokerUrl) brokerUrl = await getConfig('mqtt_broker_url');
-  if (!brokerUrl) return res.status(400).json({ error: 'MQTT broker URL not configured' });
-  const options = {};
-  const username = req.query.username || await getConfig('mqtt_username');
-  const password = req.query.password || await getConfig('mqtt_password');
-  if (username) options.username = username;
-  if (password) options.password = password;
-  const testClient = mqtt.connect(brokerUrl, options);
-  let responded = false;
-  const timeout = setTimeout(() => {
-    if (!responded) {
-      testClient.end();
-      res.status(500).json({ error: 'Connection timeout' });
-    }
-  }, 5000);
-  testClient.on('connect', () => {
-    clearTimeout(timeout);
-    testClient.end();
-    if (!responded) {
-      responded = true;
-      res.json({ success: true, message: 'Connected to MQTT broker' });
-    }
-  });
-  testClient.on('error', (err) => {
-    clearTimeout(timeout);
-    testClient.end();
-    if (!responded) {
-      responded = true;
-      res.status(500).json({ error: err.message });
-    }
-  });
-});
-
-app.get('/api/test-mqtt-topic', authMiddleware, async (req, res) => {
-  let brokerUrl = req.query.broker;
-  if (!brokerUrl) brokerUrl = await getConfig('mqtt_broker_url');
-  if (!brokerUrl) return res.status(400).json({ error: 'MQTT broker URL not configured' });
-  const topic = req.query.topic;
-  if (!topic) return res.status(400).json({ error: 'Topic required' });
-  const options = {};
-  const username = req.query.username || await getConfig('mqtt_username');
-  const password = req.query.password || await getConfig('mqtt_password');
-  if (username) options.username = username;
-  if (password) options.password = password;
-  const testClient = mqtt.connect(brokerUrl, options);
-  let responded = false;
-  const timeout = setTimeout(() => {
-    if (!responded) {
-      testClient.end();
-      res.status(500).json({ error: 'No message received within 5 seconds' });
-    }
-  }, 5000);
-  testClient.on('connect', () => { testClient.subscribe(topic); });
-  testClient.on('message', (recTopic, message) => {
-    if (recTopic === topic) {
-      clearTimeout(timeout);
-      testClient.end();
-      if (!responded) {
-        responded = true;
-        const val = parseFloat(message.toString());
-        if (!isNaN(val)) {
-          res.json({ success: true, value: val });
-        } else {
-          res.json({ success: true, value: null, raw: message.toString() });
-        }
-      }
-    }
-  });
-  testClient.on('error', (err) => {
-    clearTimeout(timeout);
-    testClient.end();
-    if (!responded) {
-      responded = true;
-      res.status(500).json({ error: err.message });
-    }
-  });
-});
-
-app.get('/settings', authMiddleware, (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'settings.html'));
-});
-
-app.listen(PORT, () => console.log(`Energy dashboard running on port ${PORT}`));
+    res.json({ success: true, message
