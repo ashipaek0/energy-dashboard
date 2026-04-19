@@ -13,8 +13,9 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --only=production
 
-# Force sqlite3 to rebuild from source
-RUN npm rebuild sqlite3 --build-from-source
+# Remove any existing prebuilt sqlite3 binary, then rebuild from source
+RUN rm -rf /app/node_modules/sqlite3/build && \
+    npm rebuild sqlite3 --build-from-source
 
 # Remove build tools to reduce image size
 RUN apt-get purge -y python3 make g++ && \
