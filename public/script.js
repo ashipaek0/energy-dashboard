@@ -409,7 +409,7 @@ function getWeatherIcon(weatherCode, isDay = true) {
   if (code >= 600 && code < 700) return '❄️';
   if (code >= 700 && code < 800) return '🌫️';
   if (code === 800) return isDay ? '☀️' : '🌙';
-  if (code === 801) return '🌤️';
+  if (code === 801) return isDay ? '🌤️' : '🌙';
   if (code === 802) return '⛅';
   if (code === 803 || code === 804) return '☁️';
   return '🌡️';
@@ -423,9 +423,10 @@ function getConditionText(weatherCode, isDay = true) {
   if (code >= 600 && code < 700) return 'Snow';
   if (code >= 700 && code < 800) return 'Foggy';
   if (code === 800) return isDay ? 'Sunny' : 'Clear';
-  if (code === 801) return 'Mostly Sunny';
+  if (code === 801) return isDay ? 'Mostly Sunny' : 'Partly Clear';
   if (code === 802) return 'Partly Cloudy';
-  if (code === 803 || code === 804) return 'Cloudy';
+  if (code === 803) return 'Mostly Cloudy';
+  if (code === 804) return 'Cloudy';
   return 'Unknown';
 }
 
@@ -440,11 +441,9 @@ function getConditionClass(weatherCode, isDay) {
 async function updateSkySolar() {
   const banner = document.getElementById('sky-solar-banner');
   try {
-    // Fetch weather
     const weatherRes = await fetch('/api/weather');
     const weatherData = await weatherRes.json();
     
-    // Fetch solar forecast
     const solarRes = await fetch('/api/solar-forecast');
     const solarData = await solarRes.json();
 
@@ -454,7 +453,6 @@ async function updateSkySolar() {
     }
     banner.style.display = 'block';
 
-    // Source indicator
     const sourceEl = document.getElementById('sky-solar-source');
     const wSource = weatherData.source === 'openweathermap' ? 'OWM' : (weatherData.source || '?');
     const sSource = solarData.source === 'solcast' ? 'Solcast' : (solarData.source || 'Open-Meteo');
@@ -495,7 +493,6 @@ async function updateSkySolar() {
       cardsContainer.style.display = 'grid';
       errorDiv.style.display = 'none';
 
-      // Sparkline
       const hourly = solarData.hourly;
       const chartData = hourly.map(h => ({ x: new Date(h.period_end), y: h.pv_estimate }));
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
@@ -509,22 +506,27 @@ async function updateSkySolar() {
       }];
       solarSparkline.update();
 
-      // Mini cards
       const daily = solarData.daily;
-      const today = new Date().toISOString().split('T')[0];
-      cardsContainer.innerHTML = daily.map((d, i) => {
-        const date = new Date(d.date + 'T12:00:00');
+      let cardsHtml = '';
+      for (let i = 0; i < 4; i++) {
+        const d = daily[i] || { date: '', total_kwh: 0, peak_kw: 0 };
         let dayLabel;
-        if (d.date === today) dayLabel = 'Today';
+        if (i === 0) dayLabel = 'Today';
         else if (i === 1) dayLabel = 'Tomorrow';
-        else dayLabel = date.toLocaleDateString(undefined, { weekday: 'short' });
-        const peak = d.peak_kw;
+        else {
+          const date = new Date();
+          date.setDate(date.getDate() + i);
+          dayLabel = date.toLocaleDateString(undefined, { weekday: 'short' });
+        }
+        
+        const peak = d.peak_kw || 0;
         const capacity = parseFloat(document.querySelector('[name="solar_capacity_kwp"]')?.value) || 5;
         const ratio = peak / capacity;
         let icon = '☀️';
         if (ratio < 0.3) icon = '☁️';
         else if (ratio < 0.6) icon = '⛅';
-        return `
+        
+        cardsHtml += `
           <div class="mini-solar-card">
             <div class="day">${dayLabel}</div>
             <div class="icon">${icon}</div>
@@ -532,7 +534,8 @@ async function updateSkySolar() {
             <div class="peak">Peak ${d.peak_kw.toFixed(1)} kW</div>
           </div>
         `;
-      }).join('');
+      }
+      cardsContainer.innerHTML = cardsHtml;
     }
   } catch (e) {
     console.error('Sky & Solar error:', e);
