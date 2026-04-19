@@ -308,13 +308,13 @@
           <div class="note">Enter total peak power in kilowatts (kWp). For a 2700 W system, enter 2.7.</div>
         </div>
         <div class="form-group">
-          <label>Solcast API Key (optional)</label>
+          <label>Solcast API Key (mandatory for solcast)</label>
           <input type="password" name="solcast_api_key" placeholder="Leave empty for Open-Meteo" autocomplete="off">
         </div>
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label>Solcast Resource ID (optional)</label>
+          <label>Solcast Resource ID (mandatory for solcast)</label>
           <input name="solcast_resource_id" placeholder="e.g., abc1-2345-def6-7890" autocomplete="off">
           <div class="note">Found in your Solcast site details. If provided, overrides lat/lon.</div>
         </div>
@@ -329,7 +329,7 @@
           <input name="solar_install_date" placeholder="2020-01-01" autocomplete="off">
           <div class="note">Used for panel degradation calculations (Solcast).</div>
         </div>
-        <div class="form-group"></div> <!-- spacer -->
+        <div class="form-group"></div> <!-- spacer for alignment -->
       </div>
       <div class="note">If Solcast key is provided, high‑accuracy forecasts will be used. Otherwise, Open‑Meteo (free) is used.</div>
       <div class="test-row">
