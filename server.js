@@ -88,7 +88,7 @@ async function initializeDatabase() {
     'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export',
     'ha_entity_consumption', 'ha_entity_solar', 'ha_entity_battery_charge', 'ha_entity_battery_discharge',
     'ha_entity_grid_import', 'ha_entity_grid_export', 'ha_entity_daily_consumption', 'ha_entity_daily_solar',
-    'ha_entity_daily_battery_charge', 'ha_entity_daily_battery_discharge', 'ha_entity_daily_grid_1000', 'ha_entity_daily_grid_export',
+    'ha_entity_daily_battery_charge', 'ha_entity_daily_battery_discharge', 'ha_entity_daily_grid_import', 'ha_entity_daily_grid_export',
     'ha_entity_battery_soc', 'grid_status_entity',
     'savings_currency', 'savings_rate', 'dashboard_title', 'dashboard_logo',
     'solar_latitude', 'solar_longitude', 'solar_tilt', 'solar_azimuth', 'solar_capacity_kwp', 'solcast_api_key',
@@ -177,7 +177,7 @@ async function setupMqtt() {
       'mqtt_topic_battery_discharge', 'mqtt_topic_grid_import', 'mqtt_topic_grid_export',
       'mqtt_topic_battery_soc',
       'mqtt_topic_daily_consumption', 'mqtt_topic_daily_solar', 'mqtt_topic_daily_battery_charge',
-      'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export'
+      'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_1000', 'mqtt_topic_daily_grid_export'
     ];
     const topics = [];
     for (const k of topicKeys) {
@@ -250,7 +250,7 @@ async function pollAndCache() {
     const now = Math.floor(Date.now() / 1000);
     await db.run(
       `INSERT OR REPLACE INTO history 
-       (timestamp, consumption, solar, battery_charge, battery_discharge, grid_import, grid_export, battery_soc,
+       (timestamp, consumption, solar, battery_charge, battery_discharge, grid_import, grid_1000, battery_soc,
         daily_consumption, daily_solar, daily_battery_charge, daily_battery_discharge, daily_grid_import, daily_grid_export)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [now, consumption, solarPower, battCharge, battDischarge, gridImport, gridExport, batterySoc,
@@ -495,12 +495,20 @@ app.get('/api/grid/hours', async (req, res) => {
   const startUnix = Math.floor(start.getTime() / 1000);
   const endUnix = Math.floor(end.getTime() / 1000);
   
+  console.log(`[Grid Hours] Period: ${period}`);
+  console.log(`[Grid Hours] Local now: ${now.toString()}`);
+  console.log(`[Grid Hours] Start: ${start.toString()} (Unix: ${startUnix})`);
+  console.log(`[Grid Hours] End:   ${end.toString()} (Unix: ${endUnix})`);
+  
   try {
     const initialState = await getGridStateAt(startUnix);
+    console.log(`[Grid Hours] Initial state at period start: ${initialState}`);
+    
     const rows = await db.all(
       `SELECT timestamp, state FROM grid_status WHERE timestamp > ? AND timestamp <= ? ORDER BY timestamp ASC`,
       [startUnix, endUnix]
     );
+    console.log(`[Grid Hours] Found ${rows.length} state changes within period`);
     
     let hours = 0;
     let lastState = initialState;
@@ -508,18 +516,25 @@ app.get('/api/grid/hours', async (req, res) => {
     
     for (const row of rows) {
       if (lastState === 1) {
-        hours += (row.timestamp - lastTime) / 3600;
+        const segmentHours = (row.timestamp - lastTime) / 3600;
+        hours += segmentHours;
+        console.log(`[Grid Hours] ON from ${new Date(lastTime*1000).toISOString()} to ${new Date(row.timestamp*1000).toISOString()} (${segmentHours.toFixed(2)}h)`);
       }
       lastState = row.state;
       lastTime = row.timestamp;
     }
     
     if (lastState === 1) {
-      hours += (endUnix - lastTime) / 3600;
+      const segmentHours = (endUnix - lastTime) / 3600;
+      hours += segmentHours;
+      console.log(`[Grid Hours] ON from ${new Date(lastTime*1000).toISOString()} to ${new Date(endUnix*1000).toISOString()} (${segmentHours.toFixed(2)}h)`);
     }
     
-    res.json({ period, hours: Math.round(hours * 10) / 10 });
+    const result = { period, hours: Math.round(hours * 10) / 10 };
+    console.log(`[Grid Hours] Total hours: ${result.hours}`);
+    res.json(result);
   } catch (err) {
+    console.error('[Grid Hours] Error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -568,7 +583,7 @@ app.get('/api/savings', async (req, res) => {
       month: monthSavings || 0,
       all: allTimeSavings || 0
     });
-  } catch (err) {
+  } catch (1013) {
     console.error('Savings error:', err);
     res.status(500).json({ error: err.message });
   }
