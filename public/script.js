@@ -400,38 +400,38 @@ async function loadBranding() {
   } catch (e) {}
 }
 
-// Weather & Solar combined update
-function getWeatherIcon(weatherCode, isDay = true) {
-  const code = weatherCode;
-  if (code >= 200 && code < 300) return '⛈️';
-  if (code >= 300 && code < 400) return '🌦️';
-  if (code >= 500 && code < 600) return '🌧️';
-  if (code >= 600 && code < 700) return '❄️';
-  if (code >= 700 && code < 800) return '🌫️';
-  if (code === 800) return isDay ? '☀️' : '🌙';
-  if (code === 801) return isDay ? '🌤️' : '🌙';
-  if (code === 802) return '⛅';
-  if (code === 803 || code === 804) return '☁️';
+// WMO Weather interpretation codes (Open-Meteo)
+function getWeatherIconWMO(code, isDay = true) {
+  // WMO codes: https://www.nodc.noaa.gov/archive/arc0021/0007199/1.1/data/0-data/HTML/WMO-CODE/WMO4677.HTM
+  if (code === 0) return isDay ? '☀️' : '🌙';          // Clear sky
+  if (code === 1) return isDay ? '🌤️' : '🌙';          // Mainly clear
+  if (code === 2) return '⛅';                          // Partly cloudy
+  if (code === 3) return '☁️';                          // Overcast
+  if (code === 45 || code === 48) return '🌫️';         // Fog
+  if (code === 51 || code === 53 || code === 55) return '🌦️'; // Drizzle
+  if (code === 61 || code === 63 || code === 65) return '🌧️'; // Rain
+  if (code === 71 || code === 73 || code === 75) return '❄️'; // Snow
+  if (code === 80 || code === 81 || code === 82) return '🌧️'; // Rain showers
+  if (code === 95 || code === 96 || code === 99) return '⛈️'; // Thunderstorm
   return '🌡️';
 }
 
-function getConditionText(weatherCode, isDay = true) {
-  const code = weatherCode;
-  if (code >= 200 && code < 300) return 'Thunderstorm';
-  if (code >= 300 && code < 400) return 'Drizzle';
-  if (code >= 500 && code < 600) return 'Rain';
-  if (code >= 600 && code < 700) return 'Snow';
-  if (code >= 700 && code < 800) return 'Foggy';
-  if (code === 800) return isDay ? 'Sunny' : 'Clear';
-  if (code === 801) return isDay ? 'Mostly Sunny' : 'Partly Clear';
-  if (code === 802) return 'Partly Cloudy';
-  if (code === 803) return 'Mostly Cloudy';
-  if (code === 804) return 'Cloudy';
+function getConditionTextWMO(code, isDay = true) {
+  if (code === 0) return isDay ? 'Sunny' : 'Clear';
+  if (code === 1) return isDay ? 'Mostly Sunny' : 'Mostly Clear';
+  if (code === 2) return 'Partly Cloudy';
+  if (code === 3) return 'Cloudy';
+  if (code === 45 || code === 48) return 'Foggy';
+  if (code === 51 || code === 53 || code === 55) return 'Drizzle';
+  if (code === 61 || code === 63 || code === 65) return 'Rain';
+  if (code === 71 || code === 73 || code === 75) return 'Snow';
+  if (code === 80 || code === 81 || code === 82) return 'Rain Showers';
+  if (code === 95 || code === 96 || code === 99) return 'Thunderstorm';
   return 'Unknown';
 }
 
-function getConditionClass(weatherCode, isDay) {
-  const text = getConditionText(weatherCode, isDay).toLowerCase();
+function getConditionClassWMO(code, isDay) {
+  const text = getConditionTextWMO(code, isDay).toLowerCase();
   if (text.includes('sunny') || text.includes('clear')) return 'sunny';
   if (text.includes('rain') || text.includes('drizzle')) return 'rain';
   if (text.includes('cloud')) return 'cloudy';
@@ -454,16 +454,16 @@ async function updateSkySolar() {
     banner.style.display = 'block';
 
     const sourceEl = document.getElementById('sky-solar-source');
-    const wSource = weatherData.source === 'openweathermap' ? 'OWM' : (weatherData.source || '?');
+    const wSource = weatherData.source || 'Open-Meteo';
     const sSource = solarData.source === 'solcast' ? 'Solcast' : (solarData.source || 'Open-Meteo');
     sourceEl.textContent = `🌍 ${wSource} · ☀️ ${sSource}`;
 
     // --- Weather Side ---
     if (!weatherData.error) {
       const cur = weatherData.current;
-      const icon = getWeatherIcon(cur.weather_code, cur.is_day);
-      const conditionText = getConditionText(cur.weather_code, cur.is_day);
-      const conditionClass = getConditionClass(cur.weather_code, cur.is_day);
+      const icon = getWeatherIconWMO(cur.weather_code, cur.is_day);
+      const conditionText = getConditionTextWMO(cur.weather_code, cur.is_day);
+      const conditionClass = getConditionClassWMO(cur.weather_code, cur.is_day);
       
       const iconEl = document.getElementById('weather-condition-icon');
       iconEl.textContent = icon;
