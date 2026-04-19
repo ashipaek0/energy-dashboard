@@ -143,6 +143,7 @@ services:
       - ./data:/app/data
     environment:
       - SETTINGS_PASSWORD=your_secure_password_here
+      - TZ=??   # Set your timezone here
 ```
 
 ## 🔄 Automatic Updates (CI/CD)
