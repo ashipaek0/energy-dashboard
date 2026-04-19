@@ -1,13 +1,20 @@
 FROM node:18-slim
 
-# Install tzdata and set timezone
-RUN apt-get update && apt-get install -y tzdata && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+# Install build tools and tzdata
+RUN apt-get update && apt-get install -y \
+    python3 \
+    make \
+    g++ \
+    tzdata \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY package*.json ./
 RUN npm ci --only=production
+
+# Rebuild native modules to match the container's glibc
+RUN npm rebuild sqlite3 --update-binary
 
 COPY . .
 
