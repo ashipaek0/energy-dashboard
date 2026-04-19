@@ -11,10 +11,3 @@ services:
       - SETTINGS_PASSWORD=your_secure_password_here
       - TZ=Africa/Lagos   # Change to your timezone
 
-  watchtower:
-    image: containrrr/watchtower:latest
-    container_name: watchtower
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    command: --interval 300 energy-dashboard
