@@ -85,10 +85,10 @@ async function initializeDatabase() {
     'mqtt_topic_battery_discharge', 'mqtt_topic_grid_import', 'mqtt_topic_grid_export',
     'mqtt_topic_battery_soc',
     'mqtt_topic_daily_consumption', 'mqtt_topic_daily_solar', 'mqtt_topic_daily_battery_charge',
-    'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_1000', 'mqtt_topic_daily_grid_export',
+    'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export',
     'ha_entity_consumption', 'ha_entity_solar', 'ha_entity_battery_charge', 'ha_entity_battery_discharge',
     'ha_entity_grid_import', 'ha_entity_grid_export', 'ha_entity_daily_consumption', 'ha_entity_daily_solar',
-    'ha_entity_daily_battery_charge', 'ha_entity_daily_battery_discharge', 'ha_entity_daily_grid_import', 'ha_entity_daily_grid_export',
+    'ha_entity_daily_battery_charge', 'ha_entity_daily_battery_discharge', 'ha_entity_daily_grid_1000', 'ha_entity_daily_grid_export',
     'ha_entity_battery_soc', 'grid_status_entity',
     'savings_currency', 'savings_rate', 'dashboard_title', 'dashboard_logo',
     'solar_latitude', 'solar_longitude', 'solar_tilt', 'solar_azimuth', 'solar_capacity_kwp', 'solcast_api_key',
@@ -471,6 +471,7 @@ app.get('/api/grid/hours', async (req, res) => {
   const now = new Date();
   let start, end;
   
+  // Use local time boundaries (container timezone)
   if (period === 'day') {
     start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
     end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
