@@ -3,7 +3,7 @@ name: Build and Push Docker Image
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch:  # allows manual trigger
+  workflow_dispatch:  # Allows manual trigger from Actions tab
 
 jobs:
   build-and-push:
