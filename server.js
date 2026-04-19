@@ -30,8 +30,18 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 }
 });
 
-const DB_PATH = './data/energy.db';
 let db;
+const DB_PATH = './data/energy.db';
+
+// MQTT client declared early to avoid initialization errors
+let mqttClient = null;
+const mqttValues = {
+  consumption: 0, solar: 0, battery_charge: 0, battery_discharge: 0,
+  grid_import: 0, grid_export: 0, battery_soc: 0,
+  daily_consumption: 0, daily_solar: 0, daily_battery_charge: 0, daily_battery_discharge: 0,
+  daily_grid_import: 0, daily_grid_export: 0
+};
+const topicKeyMap = {};
 
 function parseGridState(state) {
   if (state === null || state === undefined) return 0;
@@ -147,15 +157,6 @@ async function isSourceEnabled(source) {
   const val = getConfig(source);
   return val === 'true' || val === true;
 }
-
-let mqttClient = null;
-const mqttValues = {
-  consumption: 0, solar: 0, battery_charge: 0, battery_discharge: 0,
-  grid_import: 0, grid_export: 0, battery_soc: 0,
-  daily_consumption: 0, daily_solar: 0, daily_battery_charge: 0, daily_battery_discharge: 0,
-  daily_grid_import: 0, daily_grid_export: 0
-};
-const topicKeyMap = {};
 
 async function setupMqtt() {
   if (mqttClient) {
