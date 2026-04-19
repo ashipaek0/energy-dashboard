@@ -1,7 +1,9 @@
-FROM node:18-alpine
+FROM node:18-slim
 
-# Install tzdata for timezone support
-RUN apk add --no-cache tzdata
+# Install tzdata and set timezone
+RUN apt-get update && apt-get install -y tzdata && \
+    ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
+    dpkg-reconfigure -f noninteractive tzdata
 
 WORKDIR /app
 
@@ -14,7 +16,6 @@ RUN mkdir -p /app/data
 
 EXPOSE 3000
 
-# Set default timezone (override with TZ environment variable)
 ENV TZ=UTC
 
 CMD ["npm", "start"]
