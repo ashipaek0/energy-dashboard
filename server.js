@@ -766,4 +766,144 @@ app.post('/api/restore', authMiddleware, upload.single('dbfile'), async (req, re
     await initializeDatabase();
     await setupMqtt();
     fs.unlinkSync(tempPath);
-    res.json({ success: true, message
+    res.json({ success: true, message: 'Database restored successfully' });
+  } catch (err) {
+    try { fs.unlinkSync(tempPath); } catch (e) {}
+    try { await initializeDatabase(); } catch (e) {}
+    res.status(500).json({ error: 'Invalid database file: ' + err.message });
+  }
+});
+
+// --- Settings API (protected) ---
+app.use('/api/settings', authMiddleware);
+
+app.get('/api/settings', async (req, res) => {
+  const rows = await db.all('SELECT key, value FROM config');
+  const config = {};
+  rows.forEach(r => { config[r.key] = r.value; });
+  res.json(config);
+});
+
+app.post('/api/settings', async (req, res) => {
+  const updates = req.body;
+  try {
+    for (const [key, value] of Object.entries(updates)) {
+      await setConfig(key, String(value));
+    }
+    if ('mqtt_broker_url' in updates || 'mqtt_username' in updates || 'mqtt_password' in updates || 'mqtt_enabled' in updates) {
+      await restartMqtt();
+    }
+    forecastCache = { data: null, timestamp: 0 };
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Settings] Save error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/ha/entities', authMiddleware, async (req, res) => {
+  let haUrl = req.query.url;
+  let haToken = req.query.token;
+  if (!haUrl || !haToken) {
+    haUrl = await getConfig('ha_url');
+    haToken = await getConfig('ha_token');
+  }
+  if (!haUrl || !haToken) return res.status(400).json({ error: 'HA not configured' });
+  try {
+    const response = await fetch(`${haUrl}/api/states`, {
+      headers: { 'Authorization': `Bearer ${haToken}` }
+    });
+    if (!response.ok) throw new Error(`HA error ${response.status}`);
+    const data = await response.json();
+    const sensors = data.filter(e => e.entity_id.startsWith('sensor.') || e.entity_id.startsWith('binary_sensor.')).map(e => e.entity_id);
+    res.json(sensors);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/test-mqtt', authMiddleware, async (req, res) => {
+  let brokerUrl = req.query.broker;
+  if (!brokerUrl) brokerUrl = await getConfig('mqtt_broker_url');
+  if (!brokerUrl) return res.status(400).json({ error: 'MQTT broker URL not configured' });
+  const options = {};
+  const username = req.query.username || await getConfig('mqtt_username');
+  const password = req.query.password || await getConfig('mqtt_password');
+  if (username) options.username = username;
+  if (password) options.password = password;
+  const testClient = mqtt.connect(brokerUrl, options);
+  let responded = false;
+  const timeout = setTimeout(() => {
+    if (!responded) {
+      testClient.end();
+      res.status(500).json({ error: 'Connection timeout' });
+    }
+  }, 5000);
+  testClient.on('connect', () => {
+    clearTimeout(timeout);
+    testClient.end();
+    if (!responded) {
+      responded = true;
+      res.json({ success: true, message: 'Connected to MQTT broker' });
+    }
+  });
+  testClient.on('error', (err) => {
+    clearTimeout(timeout);
+    testClient.end();
+    if (!responded) {
+      responded = true;
+      res.status(500).json({ error: err.message });
+    }
+  });
+});
+
+app.get('/api/test-mqtt-topic', authMiddleware, async (req, res) => {
+  let brokerUrl = req.query.broker;
+  if (!brokerUrl) brokerUrl = await getConfig('mqtt_broker_url');
+  if (!brokerUrl) return res.status(400).json({ error: 'MQTT broker URL not configured' });
+  const topic = req.query.topic;
+  if (!topic) return res.status(400).json({ error: 'Topic required' });
+  const options = {};
+  const username = req.query.username || await getConfig('mqtt_username');
+  const password = req.query.password || await getConfig('mqtt_password');
+  if (username) options.username = username;
+  if (password) options.password = password;
+  const testClient = mqtt.connect(brokerUrl, options);
+  let responded = false;
+  const timeout = setTimeout(() => {
+    if (!responded) {
+      testClient.end();
+      res.status(500).json({ error: 'No message received within 5 seconds' });
+    }
+  }, 5000);
+  testClient.on('connect', () => { testClient.subscribe(topic); });
+  testClient.on('message', (recTopic, message) => {
+    if (recTopic === topic) {
+      clearTimeout(timeout);
+      testClient.end();
+      if (!responded) {
+        responded = true;
+        const val = parseFloat(message.toString());
+        if (!isNaN(val)) {
+          res.json({ success: true, value: val });
+        } else {
+          res.json({ success: true, value: null, raw: message.toString() });
+        }
+      }
+    }
+  });
+  testClient.on('error', (err) => {
+    clearTimeout(timeout);
+    testClient.end();
+    if (!responded) {
+      responded = true;
+      res.status(500).json({ error: err.message });
+    }
+  });
+});
+
+app.get('/settings', authMiddleware, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'settings.html'));
+});
+
+app.listen(PORT, () => console.log(`Energy dashboard running on port ${PORT}`));
