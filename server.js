@@ -704,7 +704,20 @@ app.get('/api/solar-forecast', async (req, res) => {
       return await fetchOpenMeteoForecast(res, lat, lon, capacityKwp);
     }
 
-    // Aggregate to daily totals
+    // --- NEW: Combine actual solar generated today with remaining forecast ---
+    // Get today's date in local time (YYYY-MM-DD)
+    const todayDate = new Date().toISOString().split('T')[0];
+    
+    // Get actual solar energy generated so far today (kWh)
+    const todayStartUnix = Math.floor(new Date().setHours(0,0,0,0) / 1000);
+    const actualTodayRow = db.prepare(`
+      SELECT MAX(daily_solar) as actual FROM history 
+      WHERE timestamp >= ? 
+      GROUP BY date(timestamp, 'unixepoch')
+    `).get(todayStartUnix);
+    const actualTodayKwh = actualTodayRow?.actual || 0;
+
+    // Aggregate forecast data to daily totals (remaining only)
     const dailyMap = new Map();
     forecastData.forEach(f => {
       const date = f.period_end.split('T')[0];
@@ -715,6 +728,16 @@ app.get('/api/solar-forecast', async (req, res) => {
     });
 
     const daily = Array.from(dailyMap.values()).slice(0, 4);
+    
+    // For the current day, replace total_kwh with actual + remaining forecast
+    for (const dayEntry of daily) {
+      if (dayEntry.date === todayDate) {
+        dayEntry.total_kwh = actualTodayKwh + dayEntry.total_kwh;
+        dayEntry.actual_so_far = actualTodayKwh; // optional, can be used by frontend
+        break;
+      }
+    }
+
     const hourly = forecastData.slice(0, 96);
 
     const result = { daily, hourly, source };
