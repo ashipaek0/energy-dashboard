@@ -25,7 +25,7 @@ function formatHoursToHM(hours) {
   const totalMinutes = Math.round(hours * 60);
   const h = Math.floor(totalMinutes / 60);
   const m = totalMinutes % 60;
-  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+  return `${h.toString().padStart(2, '0')}h:${m.toString().padStart(2, '0')}m`;
 }
 
 function initCharts() {
