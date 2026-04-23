@@ -556,32 +556,62 @@ app.get('/api/savings', async (req, res) => {
 
     const now = new Date();
     
+    // Helper: get total solar energy for a period by grouping records by local date
     function getTotalSolarSince(startDate) {
       const startUnix = Math.floor(startDate.getTime() / 1000);
+      // Fetch all relevant records
       const rows = db.prepare(`
-        SELECT MAX(daily_solar) as daily FROM history WHERE timestamp >= ? GROUP BY date(timestamp, 'unixepoch')
+        SELECT timestamp, daily_solar FROM history 
+        WHERE timestamp >= ? AND daily_solar IS NOT NULL
+        ORDER BY timestamp ASC
       `).all(startUnix);
-      return rows.reduce((sum, r) => sum + (r.daily || 0), 0);
+      
+      // Group by local date and take max for each day
+      const dailyMax = {};
+      rows.forEach(row => {
+        const date = new Date(row.timestamp * 1000).toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
+        const val = row.daily_solar;
+        if (!dailyMax[date] || val > dailyMax[date]) {
+          dailyMax[date] = val;
+        }
+      });
+      
+      return Object.values(dailyMax).reduce((sum, val) => sum + val, 0);
     }
 
-    const todayStart = new Date(now); todayStart.setHours(0,0,0,0);
+    // Today
+    const todayStart = new Date(now); 
+    todayStart.setHours(0,0,0,0);
     const todaySolar = getTotalSolarSince(todayStart);
     const todaySavings = todaySolar * rate;
 
+    // This Week (starting Monday)
     const day = now.getDay();
-    const diff = (day === 0 ? 6 : day - 1);
-    const weekStart = new Date(now); weekStart.setDate(now.getDate() - diff); weekStart.setHours(0,0,0,0);
+    const diff = (day === 0 ? 6 : day - 1); // Monday = 1, Sunday = 0
+    const weekStart = new Date(now); 
+    weekStart.setDate(now.getDate() - diff); 
+    weekStart.setHours(0,0,0,0);
     const weekSolar = getTotalSolarSince(weekStart);
     const weekSavings = weekSolar * rate;
 
+    // This Month
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const monthSolar = getTotalSolarSince(monthStart);
     const monthSavings = monthSolar * rate;
 
+    // All-time
     const allTimeRows = db.prepare(`
-      SELECT MAX(daily_solar) as daily FROM history GROUP BY date(timestamp, 'unixepoch')
+      SELECT timestamp, daily_solar FROM history WHERE daily_solar IS NOT NULL ORDER BY timestamp ASC
     `).all();
-    const allTimeSolar = allTimeRows.reduce((sum, r) => sum + (r.daily || 0), 0);
+    const allDailyMax = {};
+    allTimeRows.forEach(row => {
+      const date = new Date(row.timestamp * 1000).toLocaleDateString('en-CA');
+      const val = row.daily_solar;
+      if (!allDailyMax[date] || val > allDailyMax[date]) {
+        allDailyMax[date] = val;
+      }
+    });
+    const allTimeSolar = Object.values(allDailyMax).reduce((sum, val) => sum + val, 0);
     const allTimeSavings = allTimeSolar * rate;
 
     res.json({
@@ -704,18 +734,25 @@ app.get('/api/solar-forecast', async (req, res) => {
       return await fetchOpenMeteoForecast(res, lat, lon, capacityKwp);
     }
 
-    // --- NEW: Combine actual solar generated today with remaining forecast ---
-    // Get today's date in local time (YYYY-MM-DD)
-    const todayDate = new Date().toISOString().split('T')[0];
+    // --- Combine actual solar generated today with remaining forecast ---
+    const todayDate = new Date().toLocaleDateString('en-CA'); // local date YYYY-MM-DD
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    const todayStartUnix = Math.floor(todayStart.getTime() / 1000);
     
-    // Get actual solar energy generated so far today (kWh)
-    const todayStartUnix = Math.floor(new Date().setHours(0,0,0,0) / 1000);
-    const actualTodayRow = db.prepare(`
-      SELECT MAX(daily_solar) as actual FROM history 
-      WHERE timestamp >= ? 
-      GROUP BY date(timestamp, 'unixepoch')
-    `).get(todayStartUnix);
-    const actualTodayKwh = actualTodayRow?.actual || 0;
+    // Get actual solar energy generated so far today (kWh) using local date grouping
+    const todayRows = db.prepare(`
+      SELECT timestamp, daily_solar FROM history 
+      WHERE timestamp >= ? AND daily_solar IS NOT NULL
+      ORDER BY timestamp ASC
+    `).all(todayStartUnix);
+    let actualTodayKwh = 0;
+    const todayLocalDate = todayDate;
+    todayRows.forEach(row => {
+      const rowDate = new Date(row.timestamp * 1000).toLocaleDateString('en-CA');
+      if (rowDate === todayLocalDate) {
+        actualTodayKwh = Math.max(actualTodayKwh, row.daily_solar);
+      }
+    });
 
     // Aggregate forecast data to daily totals (remaining only)
     const dailyMap = new Map();
@@ -733,7 +770,7 @@ app.get('/api/solar-forecast', async (req, res) => {
     for (const dayEntry of daily) {
       if (dayEntry.date === todayDate) {
         dayEntry.total_kwh = actualTodayKwh + dayEntry.total_kwh;
-        dayEntry.actual_so_far = actualTodayKwh; // optional, can be used by frontend
+        dayEntry.actual_so_far = actualTodayKwh;
         break;
       }
     }
