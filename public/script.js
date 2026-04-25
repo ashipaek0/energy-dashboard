@@ -94,7 +94,7 @@ function initCharts() {
     }
   });
 
-  // Sparkline chart for PV Today
+  // Sparkline chart for PV Today (taller graph)
   sparklineChart = new Chart(ctxSparkline, {
     type: 'line',
     data: { datasets: [] },
@@ -258,10 +258,24 @@ async function updateForecast() {
     banner.style.display = 'block';
     
     const today = data.daily[0];
+    const tomorrow = data.daily.length > 1 ? data.daily[1] : null;
+    const nextDay = data.daily.length > 2 ? data.daily[2] : null;
     
     // Update metric values
     document.getElementById('pv-generated').textContent = (today.actual_so_far || 0).toFixed(1) + ' kWh';
     document.getElementById('pv-predicted').textContent = (today.total_kwh - (today.actual_so_far || 0)).toFixed(1) + ' kWh';
+    
+    // Update Tomorrow and Next Day predictions (their total kWh, no actual data)
+    if (tomorrow) {
+      document.getElementById('pv-tomorrow').textContent = tomorrow.total_kwh.toFixed(1) + ' kWh';
+    } else {
+      document.getElementById('pv-tomorrow').textContent = '-- kWh';
+    }
+    if (nextDay) {
+      document.getElementById('pv-nextday').textContent = nextDay.total_kwh.toFixed(1) + ' kWh';
+    } else {
+      document.getElementById('pv-nextday').textContent = '-- kWh';
+    }
     
     // Update date
     const now = new Date();
