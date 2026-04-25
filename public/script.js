@@ -1,9 +1,9 @@
 let powerChart;
 let energyBarChart;
-let forecastChart;
+let sparklineChart;         // new chart for PV Today sparkline
 const ctxPower = document.getElementById('powerChart').getContext('2d');
 const ctxEnergy = document.getElementById('energyBarChart').getContext('2d');
-const ctxForecast = document.getElementById('forecastChart').getContext('2d');
+const ctxSparkline = document.getElementById('pv-sparkline').getContext('2d');
 
 const visibilityPrefs = {
   'Load': true,
@@ -13,6 +13,10 @@ const visibilityPrefs = {
   'Grid Import': false,
   'Grid Export': false
 };
+
+// Global current data for the forecast row
+let currentSolarWatts = 0;
+let systemCapacityKwp = 2.1;   // will be updated from settings or config
 
 function formatCurrency(amount, currency) {
   return currency + ' ' + amount.toLocaleString(undefined, {
@@ -90,32 +94,34 @@ function initCharts() {
     }
   });
 
-  forecastChart = new Chart(ctxForecast, {
+  // Sparkline chart for PV Today
+  sparklineChart = new Chart(ctxSparkline, {
     type: 'line',
     data: { datasets: [] },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      interaction: { mode: 'index' },
+      interaction: { intersect: false, mode: 'index' },
       elements: {
         line: { borderWidth: 2, tension: 0.4 },
-        point: { radius: 0, hoverRadius: 4 }
+        point: { radius: 0 }
       },
       scales: {
         x: {
           type: 'time',
-          time: { unit: 'hour', displayFormats: { hour: 'ha' } },
+          time: { unit: 'hour', displayFormats: { hour: 'HH' } },
           grid: { display: false },
           ticks: { color: textColor, maxRotation: 0 }
         },
         y: {
           beginAtZero: true,
           grid: { color: gridColor },
-          ticks: { color: textColor, callback: (v) => v + ' kW' }
+          ticks: { color: textColor, callback: (v) => v + ' kW' },
+          max: 1
         }
       },
       plugins: {
-        tooltip: { mode: 'index' },
+        tooltip: { enabled: false },
         legend: { display: false }
       }
     }
@@ -161,7 +167,7 @@ async function updateCurrent() {
     const res = await fetch('/api/current');
     const d = await res.json();
 
-    const solar = Math.round(d.solar_kw * 1000);
+    currentSolarWatts = Math.round(d.solar_kw * 1000);
     const consumption = Math.round(d.consumption_kw * 1000);
     const battCharge = Math.round(d.battery_charge_kw * 1000);
     const battDischarge = Math.round(d.battery_discharge_kw * 1000);
@@ -169,7 +175,7 @@ async function updateCurrent() {
     const gridExport = Math.round(d.grid_export_kw * 1000);
     const battSoc = d.battery_soc || 0;
 
-    document.getElementById('flow-solar').textContent = solar + ' W';
+    document.getElementById('flow-solar').textContent = currentSolarWatts + ' W';
     document.getElementById('flow-battery-soc').textContent = battSoc.toFixed(1) + '%';
 
     const battNet = battCharge - battDischarge;
@@ -185,7 +191,7 @@ async function updateCurrent() {
     document.getElementById('flow-grid').innerHTML = `<span style="color:${gridColor}">${Math.abs(gridNet)} W</span>`;
     document.getElementById('flow-grid-direction').textContent = gridDir;
 
-    updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImport, gridExport);
+    updateFlowArrows(currentSolarWatts, consumption, battCharge, battDischarge, gridImport, gridExport);
 
     const cfgRes = await fetch('/api/public-config');
     const cfg = await cfgRes.json();
@@ -196,9 +202,23 @@ async function updateCurrent() {
     document.getElementById('daily-grid-import').textContent = d.daily_grid_import_kwh.toFixed(2) + ' kWh';
     const sufficiency = d.daily_consumption_kwh > 0 ? (d.daily_solar_kwh / d.daily_consumption_kwh * 100).toFixed(1) : '0.0';
     document.getElementById('self-sufficiency').textContent = sufficiency + '%';
+    
+    // Update the "Now" gauge in the forecast row (if visible)
+    updateNowGauge();
   } catch (e) {
     console.error(e);
   }
+}
+
+function updateNowGauge() {
+  const gaugeFill = document.getElementById('gauge-bar-fill');
+  const gaugePercent = document.getElementById('gauge-percent');
+  if (!gaugeFill || !gaugePercent) return;
+  
+  const capacityWatts = systemCapacityKwp * 1000;
+  const percent = capacityWatts > 0 ? Math.min(100, (currentSolarWatts / capacityWatts) * 100) : 0;
+  gaugeFill.style.width = percent + '%';
+  gaugePercent.textContent = percent.toFixed(0) + '%';
 }
 
 async function updateSavings() {
@@ -230,61 +250,58 @@ async function updateForecast() {
     const res = await fetch('/api/solar-forecast');
     const data = await res.json();
     
-    if (data.error) {
+    if (data.error || !data.daily || data.daily.length === 0) {
       banner.style.display = 'none';
       return;
     }
     
     banner.style.display = 'block';
     
-    const sourceEl = document.getElementById('forecast-source');
-    sourceEl.textContent = data.source === 'solcast' ? '⚡ Solcast' : '☁️ Open-Meteo';
+    const today = data.daily[0];
     
-    const hourly = data.hourly;
-    const chartData = hourly.map(h => ({ x: new Date(h.period_end), y: h.pv_estimate }));
+    // Update metric values
+    document.getElementById('pv-generated').textContent = (today.actual_so_far || 0).toFixed(1) + ' kWh';
+    document.getElementById('pv-predicted').textContent = (today.total_kwh - (today.actual_so_far || 0)).toFixed(1) + ' kWh';
     
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    const gradient = ctxForecast.createLinearGradient(0, 0, 0, 160);
-    gradient.addColorStop(0, isDark ? '#fbbf2480' : '#d9770680');
-    gradient.addColorStop(1, isDark ? '#fbbf2400' : '#d9770600');
+    // Update date
+    const now = new Date();
+    document.getElementById('forecast-date').textContent = now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
     
-    forecastChart.data.datasets = [{
-      label: 'Solar Power',
-      data: chartData,
-      borderColor: isDark ? '#fbbf24' : '#d97706',
-      backgroundColor: gradient,
-      fill: true,
-      tension: 0.4,
-      borderWidth: 2
-    }];
-    forecastChart.update();
-    
-    const daily = data.daily;
-    const cardsContainer = document.getElementById('forecast-cards');
-    const today = new Date().toISOString().split('T')[0];
-    cardsContainer.innerHTML = daily.map((d, i) => {
-      const date = new Date(d.date + 'T12:00:00');
-      let dayLabel;
-      if (d.date === today) dayLabel = 'Today';
-      else if (i === 1) dayLabel = 'Tomorrow';
-      else dayLabel = date.toLocaleDateString(undefined, { weekday: 'short' });
+    // Update the sparkline with today's hourly data
+    const hourly = data.hourly.filter(h => h.period_end.startsWith(today.date));
+    if (hourly.length > 0) {
+      const chartData = hourly.map(h => ({
+        x: new Date(h.period_end),
+        y: h.pv_estimate
+      }));
       
-      const peak = d.peak_kw;
-      const capacity = parseFloat(document.querySelector('[name="solar_capacity_kwp"]')?.value) || 5;
-      const ratio = peak / capacity;
-      let icon = '☀️';
-      if (ratio < 0.3) icon = '☁️';
-      else if (ratio < 0.6) icon = '⛅';
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const lineColor = isDark ? '#fbbf24' : '#d97706';
       
-      return `
-        <div class="forecast-card">
-          <div class="day">${dayLabel}</div>
-          <div class="icon">${icon}</div>
-          <div class="kwh">${d.total_kwh.toFixed(1)} kWh</div>
-          <div class="peak">Peak: ${d.peak_kw.toFixed(1)} kW</div>
-        </div>
-      `;
-    }).join('');
+      sparklineChart.data.datasets = [{
+        data: chartData,
+        borderColor: lineColor,
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        tension: 0.4,
+        pointRadius: 0
+      }];
+      
+      sparklineChart.options.scales.x.ticks.color = isDark ? '#f8fafc' : '#0f172a';
+      sparklineChart.options.scales.y.ticks.color = isDark ? '#f8fafc' : '#0f172a';
+      sparklineChart.options.scales.y.max = systemCapacityKwp || undefined;
+      sparklineChart.update();
+    }
+    
+    // Get system capacity from settings (for the gauge)
+    try {
+      const cfgRes = await fetch('/api/public-config');
+      const cfg = await cfgRes.json();
+      systemCapacityKwp = parseFloat(cfg.solar_capacity_kwp) || 2.1;
+    } catch (e) { /* ignore */ }
+    
+    updateNowGauge();
+    
   } catch (e) {
     console.error('Forecast error:', e);
     banner.style.display = 'none';
@@ -508,6 +525,10 @@ async function loadBranding() {
       document.getElementById('logo-img').src = cfg.dashboard_logo;
       document.getElementById('logo-img').style.display = 'inline';
     }
+    // update capacity for gauge
+    if (cfg.solar_capacity_kwp) {
+      systemCapacityKwp = parseFloat(cfg.solar_capacity_kwp) || 2.1;
+    }
   } catch (e) {}
 }
 
@@ -537,6 +558,8 @@ function toggleTheme() {
   
   updateChartColors();
   if (powerChart) applyGradientFills(powerChart);
+  // re-draw forecast sparkline to match theme
+  updateForecast();
 }
 
 function updateChartColors() {
@@ -564,18 +587,6 @@ function updateChartColors() {
     energyBarChart.options.scales.y.grid.color = gridColor;
     energyBarChart.options.plugins.legend.labels.color = textColor;
     energyBarChart.update();
-  }
-  if (forecastChart) {
-    forecastChart.options.scales.x.ticks.color = textColor;
-    forecastChart.options.scales.y.grid.color = gridColor;
-    forecastChart.options.scales.y.ticks.color = textColor;
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    forecastChart.data.datasets[0].borderColor = isDark ? '#fbbf24' : '#d97706';
-    const gradient = ctxForecast.createLinearGradient(0, 0, 0, 160);
-    gradient.addColorStop(0, isDark ? '#fbbf2480' : '#d9770680');
-    gradient.addColorStop(1, isDark ? '#fbbf2400' : '#d9770600');
-    forecastChart.data.datasets[0].backgroundColor = gradient;
-    forecastChart.update();
   }
 }
 
@@ -606,15 +617,17 @@ document.querySelectorAll('.chart-controls button').forEach(btn => {
 
 initTheme();
 initCharts();
-updateCurrent();
-updateSavings();
-updateForecast();
-updateGridStatus();
-updateChart(1);
-updateEnergyBarChart();
-updateDailyTable();
-updateMonthlyTable();
-loadBranding();
+// Fetch system capacity before anything else for the gauge
+loadBranding().then(() => {
+  updateCurrent();
+  updateSavings();
+  updateForecast();
+  updateGridStatus();
+  updateChart(1);
+  updateEnergyBarChart();
+  updateDailyTable();
+  updateMonthlyTable();
+});
 
 setInterval(() => {
   updateCurrent();
