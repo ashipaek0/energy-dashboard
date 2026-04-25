@@ -32,8 +32,7 @@ function formatHoursToHM(hours) {
 }
 
 function getDayName(dateStr) {
-  // dateStr in YYYY-MM-DD format
-  const date = new Date(dateStr + 'T12:00:00'); // avoid timezone issues
+  const date = new Date(dateStr + 'T12:00:00');
   return date.toLocaleDateString(undefined, { weekday: 'long' });
 }
 
@@ -99,7 +98,7 @@ function initCharts() {
     }
   });
 
-  // Sparkline chart (forecast) – now supports multiple datasets
+  // Sparkline chart with legend enabled
   sparklineChart = new Chart(ctxSparkline, {
     type: 'line',
     data: { datasets: [] },
@@ -127,7 +126,14 @@ function initCharts() {
       },
       plugins: {
         tooltip: { enabled: false },
-        legend: { display: false }
+        legend: {                           // LEGEND NOW VISIBLE
+          display: true,
+          labels: {
+            color: textColor,
+            boxWidth: 20,
+            padding: 10
+          }
+        }
       }
     }
   });
@@ -263,12 +269,10 @@ async function updateForecast() {
     const tomorrow = data.daily.length > 1 ? data.daily[1] : null;
     const nextDay = data.daily.length > 2 ? data.daily[2] : null;
     
-    // Update metric values
     document.getElementById('pv-generated').textContent = (today.actual_so_far || 0).toFixed(1) + ' kWh';
     const predictedToday = today.total_kwh - (today.actual_so_far || 0);
     document.getElementById('pv-predicted').textContent = predictedToday.toFixed(1) + ' kWh';
     
-    // Set day names
     if (tomorrow) {
       document.getElementById('pred-day1-label').textContent = getDayName(tomorrow.date);
       document.getElementById('pv-tomorrow').textContent = tomorrow.total_kwh.toFixed(1) + ' kWh';
@@ -284,17 +288,15 @@ async function updateForecast() {
       document.getElementById('pv-nextday').textContent = '-- kWh';
     }
     
-    // Date for the header
     const now = new Date();
     document.getElementById('forecast-date').textContent = now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
     
-    const todayDate = now.toLocaleDateString('en-CA'); // YYYY-MM-DD
+    const todayDate = now.toLocaleDateString('en-CA');
     
-    // Fetch actual power history for today (every 30s, returned as kW)
+    // Fetch actual power history for today
     const historyRes = await fetch('/api/history?days=1');
     const historyData = await historyRes.json();
     
-    // Filter to today local date and 6 AM-7 PM
     const actualPoints = historyData.filter(d => {
       const date = new Date(d.timestamp);
       return date.toLocaleDateString('en-CA') === todayDate &&
@@ -305,32 +307,24 @@ async function updateForecast() {
       y: d.solar_kw
     }));
     
-    // Build 30-minute interval buckets from 06:00 to 19:00
+    // Build 30-minute interval buckets
     const intervals = [];
     for (let h = 6; h <= 19; h += 0.5) {
-      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, (h % 1) * 60, 0);
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), Math.floor(h), (h % 1) * 60, 0);
       intervals.push(start.getTime());
     }
     
-    // Downsample actual data to the mean per interval
     const actualByInterval = {};
     actualPoints.forEach(p => {
-      // Find closest interval start
-      const ts = p.x;
-      const d = new Date(ts);
+      const d = new Date(p.x);
       const hour = d.getHours();
       const minute = d.getMinutes();
-      // Round to nearest half-hour
-      const roundedHour = hour;
-      const roundedMinute = minute < 15 ? 0 : (minute < 45 ? 30 : 0);
-      // If minute >=45 we might roll into next hour, but we'll keep it simple: use floor to half-hour
       const bucketMinute = Math.floor(minute / 30) * 30;
       const bucketTime = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, bucketMinute, 0).getTime();
       if (!actualByInterval[bucketTime]) actualByInterval[bucketTime] = [];
       actualByInterval[bucketTime].push(p.y);
     });
     
-    // Create actual dataset: average power per interval, only up to now
     const actualData = intervals.map(ts => {
       const values = actualByInterval[ts] || [];
       if (values.length === 0) return null;
@@ -338,7 +332,7 @@ async function updateForecast() {
       return { x: ts, y: avg };
     }).filter(p => p !== null && p.x <= now.getTime());
     
-    // Prepare forecast data: filter Solcast hourly for today 6 AM-7 PM
+    // Forecast data for whole day 6 AM-7 PM (not filtered by now)
     const forecastHourly = data.hourly.filter(h => {
       const d = new Date(h.period_end);
       return d.toISOString().startsWith(todayDate) &&
@@ -349,54 +343,54 @@ async function updateForecast() {
       y: h.pv_estimate
     }));
     
-    // Keep only forecast points after current time
-    const forecastData = forecastHourly.filter(p => p.x > now.getTime());
-    
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    const solarColor = isDark ? '#fbbf24' : '#d97706';
+    
+    // Distinct colors for actual and forecast
+    const actualColor = '#3b82f6';  // blue
+    const forecastColor = isDark ? '#fbbf24' : '#d97706';  // solar yellow
     
     // Build datasets
     sparklineChart.data.datasets = [
       {
         label: 'Actual',
         data: actualData,
-        borderColor: solarColor,
-        backgroundColor: 'transparent', // will set gradient
-        borderWidth: 2,
-        tension: 0.4,
-        pointRadius: 0,
-        fill: true,
-        borderDash: [] // solid line
-      },
-      {
-        label: 'Forecast',
-        data: forecastData,
-        borderColor: solarColor,
-        backgroundColor: 'transparent',
+        borderColor: actualColor,
+        backgroundColor: 'transparent',  // no fill
         borderWidth: 2,
         tension: 0.4,
         pointRadius: 0,
         fill: false,
-        borderDash: [5, 5] // dotted line
+        borderDash: []                   // solid line
+      },
+      {
+        label: 'Forecast',
+        data: forecastHourly,
+        borderColor: forecastColor,
+        backgroundColor: 'transparent',  // will be replaced by gradient
+        borderWidth: 2,
+        tension: 0.4,
+        pointRadius: 0,
+        fill: true,
+        borderDash: [5, 5]              // dotted line
       }
     ];
     
-    // Apply gradient fill to the actual dataset
+    // Apply gradient fill to forecast line only
     const ctx = sparklineChart.ctx;
     const chartArea = sparklineChart.chartArea;
-    if (chartArea && sparklineChart.data.datasets[0].data.length > 0) {
+    if (chartArea && sparklineChart.data.datasets[1].data.length > 0) {
       const gradient = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
-      const hex = solarColor;
+      const hex = forecastColor;
       const r = parseInt(hex.slice(1,3), 16);
       const g = parseInt(hex.slice(3,5), 16);
       const b = parseInt(hex.slice(5,7), 16);
       gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.1)`);
       gradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.3)`);
       gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.5)`);
-      sparklineChart.data.datasets[0].backgroundColor = gradient;
+      sparklineChart.data.datasets[1].backgroundColor = gradient;
     }
     
-    // Set x-axis range 6 AM-7 PM local
+    // Axis range
     const startTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 6, 0, 0).getTime();
     const endTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 19, 0, 0).getTime();
     sparklineChart.options.scales.x.min = startTime;
@@ -405,14 +399,16 @@ async function updateForecast() {
     sparklineChart.options.scales.x.ticks.color = isDark ? '#f8fafc' : '#0f172a';
     sparklineChart.options.scales.y.ticks.color = isDark ? '#f8fafc' : '#0f172a';
     
+    // Update legend label colors
+    sparklineChart.options.plugins.legend.labels.color = isDark ? '#f8fafc' : '#0f172a';
+    
     sparklineChart.update();
     
-    // Update capacity
     try {
       const cfgRes = await fetch('/api/public-config');
       const cfg = await cfgRes.json();
       systemCapacityKwp = parseFloat(cfg.solar_capacity_kwp) || 2.1;
-    } catch (e) { /* ignore */ }
+    } catch (e) {}
     
     updateNowGauge();
     
