@@ -6,6 +6,8 @@
   <title>Energy Monitor</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%233b82f6'/%3E%3Ctext x='50' y='70' font-size='50' text-anchor='middle' fill='white'%3E⚡%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
+  <!-- Font Awesome 6 Free (icons) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 </head>
@@ -24,29 +26,29 @@
       </div>
     </header>
 
-    <!-- Flow Card -->
+    <!-- Flow Card (with Font Awesome icons) -->
     <div class="flow-card">
       <div class="flow-item solar">
-        <div class="flow-icon">☀️</div>
+        <div class="flow-icon"><i class="fas fa-sun"></i></div>
         <div class="flow-label">Solar</div>
         <div class="flow-value" id="flow-solar">0 W</div>
       </div>
       <div class="flow-arrow solar-home">→</div>
       <div class="flow-item battery">
-        <div class="flow-icon">🔋</div>
+        <div class="flow-icon"><i class="fas fa-car-battery"></i></div>
         <div class="flow-label">Battery</div>
         <div class="flow-value" id="flow-battery-soc">--%</div>
         <div class="flow-sub" id="flow-battery-power">⚡ 0 W</div>
       </div>
       <div class="flow-arrow battery">⇄</div>
       <div class="flow-item home">
-        <div class="flow-icon">🏠</div>
+        <div class="flow-icon"><i class="fas fa-home"></i></div>
         <div class="flow-label">Home</div>
         <div class="flow-value" id="flow-home">0 W</div>
       </div>
       <div class="flow-arrow grid">⇄</div>
       <div class="flow-item grid">
-        <div class="flow-icon">⚡</div>
+        <div class="flow-icon"><i class="fas fa-bolt"></i></div>
         <div class="flow-label">Grid</div>
         <div class="flow-value" id="flow-grid">0 W</div>
         <div class="flow-sub" id="flow-grid-direction">Import</div>
@@ -83,7 +85,7 @@
           </div>
         </div>
 
-        <!-- Extra predicted days: on desktop inside predicted (if desired), but we move it here for mobile -->
+        <!-- Extra predicted days: on desktop inside predicted, on mobile their own row -->
         <div class="predicted-extras" id="predicted-extras-row">
           <div class="predicted-extra">
             <span class="predicted-extra-label" id="pred-day1-label">Tomorrow</span>
