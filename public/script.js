@@ -311,8 +311,14 @@ async function updateForecast() {
     const now = new Date();
     document.getElementById('forecast-date').textContent = now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
     
-    // Update sparkline
-    const hourly = data.hourly.filter(h => h.period_end.startsWith(today.date));
+    // Filter hourly data for today, only between 06:00 and 19:00 local time
+    const hourly = data.hourly.filter(h => {
+      const d = new Date(h.period_end);
+      return d.toISOString().startsWith(today.date) &&
+             d.getHours() >= 6 &&
+             d.getHours() <= 19;
+    });
+    
     if (hourly.length > 0) {
       const chartData = hourly.map(h => ({
         x: new Date(h.period_end),
@@ -325,7 +331,7 @@ async function updateForecast() {
       sparklineChart.data.datasets = [{
         data: chartData,
         borderColor: lineColor,
-        backgroundColor: 'transparent', // will be set by gradient
+        backgroundColor: 'transparent', // gradient fills later
         borderWidth: 2,
         tension: 0.4,
         pointRadius: 0,
@@ -337,7 +343,6 @@ async function updateForecast() {
       sparklineChart.options.scales.y.max = systemCapacityKwp || undefined;
       sparklineChart.update();
       
-      // Apply gradient after update
       applySparklineGradient();
     }
     
