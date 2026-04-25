@@ -53,13 +53,13 @@
       </div>
     </div>
     <div id="grid-to-battery" style="display:none; text-align:center; margin-top:-0.5rem; margin-bottom:1rem; color:var(--grid); font-size:0.9rem;">
-      <span id="grid-to-battery-arrow">↓</span> Grid charging battery <span id="grid-to-battery-arrow">↓</span>
+      <span id="grid-to-battery-arrow">↑</span> Grid charging battery <span id="grid-to-battery-arrow">↑</span>
     </div>
 
-    <!-- PV Today – Expanded Forecast Row -->
+    <!-- Solar Forecast – Expanded Row -->
     <div class="pv-today-banner" id="forecast-banner" style="display:none;">
       <div class="pv-today-header">
-        <h3>PV Today</h3>
+        <h3>Solar Forecast</h3>
         <span class="forecast-date" id="forecast-date"></span>
       </div>
       <div class="pv-today-body">
@@ -71,14 +71,14 @@
           <div class="pv-metric">
             <span class="pv-metric-label">Predicted</span>
             <span class="pv-metric-value" id="pv-predicted">0 kWh</span>
-            <!-- Additional predictions stacked below -->
+            <!-- Future days stacked below -->
             <div class="predicted-extras">
               <div class="predicted-extra">
-                <span class="predicted-extra-label">Tomorrow</span>
+                <span class="predicted-extra-label" id="pred-day1-label">Tomorrow</span>
                 <span class="predicted-extra-value" id="pv-tomorrow">0 kWh</span>
               </div>
               <div class="predicted-extra">
-                <span class="predicted-extra-label">Next Day</span>
+                <span class="predicted-extra-label" id="pred-day2-label">Next Day</span>
                 <span class="predicted-extra-value" id="pv-nextday">0 kWh</span>
               </div>
             </div>
