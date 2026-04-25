@@ -1,6 +1,6 @@
 let powerChart;
 let energyBarChart;
-let sparklineChart;         // new chart for PV Today sparkline
+let sparklineChart;         // sparkline for forecast
 const ctxPower = document.getElementById('powerChart').getContext('2d');
 const ctxEnergy = document.getElementById('energyBarChart').getContext('2d');
 const ctxSparkline = document.getElementById('pv-sparkline').getContext('2d');
@@ -14,9 +14,8 @@ const visibilityPrefs = {
   'Grid Export': false
 };
 
-// Global current data for the forecast row
 let currentSolarWatts = 0;
-let systemCapacityKwp = 2.1;   // will be updated from settings or config
+let systemCapacityKwp = 2.1;   // updated from settings
 
 function formatCurrency(amount, currency) {
   return currency + ' ' + amount.toLocaleString(undefined, {
@@ -30,6 +29,12 @@ function formatHoursToHM(hours) {
   const h = Math.floor(totalMinutes / 60);
   const m = totalMinutes % 60;
   return `${h.toString().padStart(2, '0')}h:${m.toString().padStart(2, '0')}m`;
+}
+
+function getDayName(dateStr) {
+  // dateStr in YYYY-MM-DD format
+  const date = new Date(dateStr + 'T12:00:00'); // avoid timezone issues
+  return date.toLocaleDateString(undefined, { weekday: 'long' });
 }
 
 function initCharts() {
@@ -94,7 +99,7 @@ function initCharts() {
     }
   });
 
-  // Sparkline chart for PV Today (taller graph)
+  // Sparkline chart (forecast)
   sparklineChart = new Chart(ctxSparkline, {
     type: 'line',
     data: { datasets: [] },
@@ -162,6 +167,29 @@ function applyGradientFills(chart) {
   });
 }
 
+// Make the sparkline gradient fill
+function applySparklineGradient() {
+  if (!sparklineChart || !sparklineChart.data.datasets.length) return;
+  const ctx = sparklineChart.ctx;
+  const chartArea = sparklineChart.chartArea;
+  const dataset = sparklineChart.data.datasets[0];
+  if (!dataset.data.length) return;
+
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const color = isDark ? '#fbbf24' : '#d97706';
+  const gradient = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
+  const hex = color;
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.1)`);
+  gradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.3)`);
+  gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.5)`);
+  dataset.backgroundColor = gradient;
+  dataset.fill = true;
+  sparklineChart.update();
+}
+
 async function updateCurrent() {
   try {
     const res = await fetch('/api/current');
@@ -203,7 +231,6 @@ async function updateCurrent() {
     const sufficiency = d.daily_consumption_kwh > 0 ? (d.daily_solar_kwh / d.daily_consumption_kwh * 100).toFixed(1) : '0.0';
     document.getElementById('self-sufficiency').textContent = sufficiency + '%';
     
-    // Update the "Now" gauge in the forecast row (if visible)
     updateNowGauge();
   } catch (e) {
     console.error(e);
@@ -226,7 +253,6 @@ async function updateSavings() {
     const res = await fetch('/api/savings');
     const d = await res.json();
     const curr = d.currency || '€';
-    
     const safeFormat = (val) => formatCurrency(val || 0, curr);
     
     document.getElementById('savings-today').textContent = safeFormat(d.today);
@@ -235,11 +261,10 @@ async function updateSavings() {
     document.getElementById('savings-all').textContent = safeFormat(d.all);
   } catch (e) {
     console.error('Savings fetch error:', e);
-    const fallback = '--';
-    document.getElementById('savings-today').textContent = fallback;
-    document.getElementById('savings-week').textContent = fallback;
-    document.getElementById('savings-month').textContent = fallback;
-    document.getElementById('savings-all').textContent = fallback;
+    document.getElementById('savings-today').textContent = '--';
+    document.getElementById('savings-week').textContent = '--';
+    document.getElementById('savings-month').textContent = '--';
+    document.getElementById('savings-all').textContent = '--';
   }
 }
 
@@ -263,25 +288,30 @@ async function updateForecast() {
     
     // Update metric values
     document.getElementById('pv-generated').textContent = (today.actual_so_far || 0).toFixed(1) + ' kWh';
-    document.getElementById('pv-predicted').textContent = (today.total_kwh - (today.actual_so_far || 0)).toFixed(1) + ' kWh';
+    const predictedToday = today.total_kwh - (today.actual_so_far || 0);
+    document.getElementById('pv-predicted').textContent = predictedToday.toFixed(1) + ' kWh';
     
-    // Update Tomorrow and Next Day predictions (their total kWh, no actual data)
+    // Set day names
     if (tomorrow) {
+      document.getElementById('pred-day1-label').textContent = getDayName(tomorrow.date);
       document.getElementById('pv-tomorrow').textContent = tomorrow.total_kwh.toFixed(1) + ' kWh';
     } else {
+      document.getElementById('pred-day1-label').textContent = 'Tomorrow';
       document.getElementById('pv-tomorrow').textContent = '-- kWh';
     }
     if (nextDay) {
+      document.getElementById('pred-day2-label').textContent = getDayName(nextDay.date);
       document.getElementById('pv-nextday').textContent = nextDay.total_kwh.toFixed(1) + ' kWh';
     } else {
+      document.getElementById('pred-day2-label').textContent = 'Next Day';
       document.getElementById('pv-nextday').textContent = '-- kWh';
     }
     
-    // Update date
+    // Date for the header
     const now = new Date();
     document.getElementById('forecast-date').textContent = now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
     
-    // Update the sparkline with today's hourly data
+    // Update sparkline
     const hourly = data.hourly.filter(h => h.period_end.startsWith(today.date));
     if (hourly.length > 0) {
       const chartData = hourly.map(h => ({
@@ -295,19 +325,23 @@ async function updateForecast() {
       sparklineChart.data.datasets = [{
         data: chartData,
         borderColor: lineColor,
-        backgroundColor: 'transparent',
+        backgroundColor: 'transparent', // will be set by gradient
         borderWidth: 2,
         tension: 0.4,
-        pointRadius: 0
+        pointRadius: 0,
+        fill: true
       }];
       
       sparklineChart.options.scales.x.ticks.color = isDark ? '#f8fafc' : '#0f172a';
       sparklineChart.options.scales.y.ticks.color = isDark ? '#f8fafc' : '#0f172a';
       sparklineChart.options.scales.y.max = systemCapacityKwp || undefined;
       sparklineChart.update();
+      
+      // Apply gradient after update
+      applySparklineGradient();
     }
     
-    // Get system capacity from settings (for the gauge)
+    // Update capacity
     try {
       const cfgRes = await fetch('/api/public-config');
       const cfg = await cfgRes.json();
@@ -539,7 +573,6 @@ async function loadBranding() {
       document.getElementById('logo-img').src = cfg.dashboard_logo;
       document.getElementById('logo-img').style.display = 'inline';
     }
-    // update capacity for gauge
     if (cfg.solar_capacity_kwp) {
       systemCapacityKwp = parseFloat(cfg.solar_capacity_kwp) || 2.1;
     }
@@ -572,8 +605,7 @@ function toggleTheme() {
   
   updateChartColors();
   if (powerChart) applyGradientFills(powerChart);
-  // re-draw forecast sparkline to match theme
-  updateForecast();
+  updateForecast(); // re-draw sparkline with new colors
 }
 
 function updateChartColors() {
@@ -631,7 +663,6 @@ document.querySelectorAll('.chart-controls button').forEach(btn => {
 
 initTheme();
 initCharts();
-// Fetch system capacity before anything else for the gauge
 loadBranding().then(() => {
   updateCurrent();
   updateSavings();

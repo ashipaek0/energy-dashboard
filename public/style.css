@@ -179,7 +179,7 @@ h1 {
   100% { opacity: 0.5; transform: scale(1); }
 }
 
-/* PV Today Banner - Expanded */
+/* Solar Forecast Banner */
 .pv-today-banner {
   background: var(--card-bg);
   border-radius: 1.5rem;
@@ -187,7 +187,7 @@ h1 {
   margin-bottom: 2rem;
   box-shadow: var(--shadow);
   border: 1px solid var(--border);
-  min-height: 240px; /* increased */
+  min-height: 240px;
 }
 
 .pv-today-header {
@@ -239,18 +239,19 @@ h1 {
   color: var(--text);
 }
 
-/* Additional predicted days under the main predicted value */
+/* Additional predicted days */
 .predicted-extras {
   margin-top: 0.75rem;
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.4rem;
 }
 
 .predicted-extra {
   display: flex;
   justify-content: space-between;
   font-size: 0.9rem;
+  align-items: baseline;
 }
 
 .predicted-extra-label {
@@ -259,10 +260,12 @@ h1 {
 }
 
 .predicted-extra-value {
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text);
+  font-size: 0.9rem;
 }
 
+/* Now gauge – bigger and thicker */
 .now-metric .now-gauge {
   display: flex;
   align-items: center;
@@ -270,10 +273,10 @@ h1 {
 }
 
 .gauge-bar-bg {
-  width: 80px;
-  height: 8px;
+  width: 120px;        /* wider */
+  height: 12px;        /* thicker */
   background: var(--border);
-  border-radius: 4px;
+  border-radius: 6px;
   overflow: hidden;
 }
 
@@ -281,21 +284,21 @@ h1 {
   height: 100%;
   width: 0%;
   background: var(--solar);
-  border-radius: 4px;
+  border-radius: 6px;
   transition: width 0.5s ease;
 }
 
 .gauge-percent {
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--text-secondary);
-  min-width: 2.5rem;
+  font-size: 1rem;    /* bigger text */
+  font-weight: 600;
+  color: var(--text);
+  min-width: 3rem;
 }
 
 .pv-sparkline-container {
   flex: 2;
   min-width: 300px;
-  height: 200px; /* taller graph */
+  height: 200px;
 }
 
 .pv-sparkline-container canvas {
