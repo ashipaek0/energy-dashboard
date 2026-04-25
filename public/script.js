@@ -99,7 +99,7 @@ function initCharts() {
     }
   });
 
-  // Sparkline chart (forecast)
+  // Sparkline chart (forecast) – now supports multiple datasets
   sparklineChart = new Chart(ctxSparkline, {
     type: 'line',
     data: { datasets: [] },
@@ -165,29 +165,6 @@ function applyGradientFills(chart) {
       dataset.fill = true;
     }
   });
-}
-
-// Make the sparkline gradient fill
-function applySparklineGradient() {
-  if (!sparklineChart || !sparklineChart.data.datasets.length) return;
-  const ctx = sparklineChart.ctx;
-  const chartArea = sparklineChart.chartArea;
-  const dataset = sparklineChart.data.datasets[0];
-  if (!dataset.data.length) return;
-
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-  const color = isDark ? '#fbbf24' : '#d97706';
-  const gradient = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
-  const hex = color;
-  const r = parseInt(hex.slice(1,3), 16);
-  const g = parseInt(hex.slice(3,5), 16);
-  const b = parseInt(hex.slice(5,7), 16);
-  gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.1)`);
-  gradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.3)`);
-  gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.5)`);
-  dataset.backgroundColor = gradient;
-  dataset.fill = true;
-  sparklineChart.update();
 }
 
 async function updateCurrent() {
@@ -311,49 +288,124 @@ async function updateForecast() {
     const now = new Date();
     document.getElementById('forecast-date').textContent = now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
     
-    // Filter hourly data for today, only between 06:00 and 19:00 local time
-    const hourly = data.hourly.filter(h => {
-      const d = new Date(h.period_end);
-      return d.toISOString().startsWith(today.date) &&
-             d.getHours() >= 6 &&
-             d.getHours() <= 19;
+    const todayDate = now.toLocaleDateString('en-CA'); // YYYY-MM-DD
+    
+    // Fetch actual power history for today (every 30s, returned as kW)
+    const historyRes = await fetch('/api/history?days=1');
+    const historyData = await historyRes.json();
+    
+    // Filter to today local date and 6 AM-7 PM
+    const actualPoints = historyData.filter(d => {
+      const date = new Date(d.timestamp);
+      return date.toLocaleDateString('en-CA') === todayDate &&
+             date.getHours() >= 6 &&
+             date.getHours() <= 19;
+    }).map(d => ({
+      x: d.timestamp,
+      y: d.solar_kw
+    }));
+    
+    // Build 30-minute interval buckets from 06:00 to 19:00
+    const intervals = [];
+    for (let h = 6; h <= 19; h += 0.5) {
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, (h % 1) * 60, 0);
+      intervals.push(start.getTime());
+    }
+    
+    // Downsample actual data to the mean per interval
+    const actualByInterval = {};
+    actualPoints.forEach(p => {
+      // Find closest interval start
+      const ts = p.x;
+      const d = new Date(ts);
+      const hour = d.getHours();
+      const minute = d.getMinutes();
+      // Round to nearest half-hour
+      const roundedHour = hour;
+      const roundedMinute = minute < 15 ? 0 : (minute < 45 ? 30 : 0);
+      // If minute >=45 we might roll into next hour, but we'll keep it simple: use floor to half-hour
+      const bucketMinute = Math.floor(minute / 30) * 30;
+      const bucketTime = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, bucketMinute, 0).getTime();
+      if (!actualByInterval[bucketTime]) actualByInterval[bucketTime] = [];
+      actualByInterval[bucketTime].push(p.y);
     });
     
-    if (hourly.length > 0) {
-      const chartData = hourly.map(h => ({
-        x: new Date(h.period_end),
-        y: h.pv_estimate
-      }));
-      
-      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-      const lineColor = isDark ? '#fbbf24' : '#d97706';
-      
-      sparklineChart.data.datasets = [{
-        data: chartData,
-        borderColor: lineColor,
+    // Create actual dataset: average power per interval, only up to now
+    const actualData = intervals.map(ts => {
+      const values = actualByInterval[ts] || [];
+      if (values.length === 0) return null;
+      const avg = values.reduce((a,b) => a+b, 0) / values.length;
+      return { x: ts, y: avg };
+    }).filter(p => p !== null && p.x <= now.getTime());
+    
+    // Prepare forecast data: filter Solcast hourly for today 6 AM-7 PM
+    const forecastHourly = data.hourly.filter(h => {
+      const d = new Date(h.period_end);
+      return d.toISOString().startsWith(todayDate) &&
+             d.getHours() >= 6 &&
+             d.getHours() <= 19;
+    }).map(h => ({
+      x: new Date(h.period_end).getTime(),
+      y: h.pv_estimate
+    }));
+    
+    // Keep only forecast points after current time
+    const forecastData = forecastHourly.filter(p => p.x > now.getTime());
+    
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const solarColor = isDark ? '#fbbf24' : '#d97706';
+    
+    // Build datasets
+    sparklineChart.data.datasets = [
+      {
+        label: 'Actual',
+        data: actualData,
+        borderColor: solarColor,
+        backgroundColor: 'transparent', // will set gradient
+        borderWidth: 2,
+        tension: 0.4,
+        pointRadius: 0,
+        fill: true,
+        borderDash: [] // solid line
+      },
+      {
+        label: 'Forecast',
+        data: forecastData,
+        borderColor: solarColor,
         backgroundColor: 'transparent',
         borderWidth: 2,
         tension: 0.4,
         pointRadius: 0,
-        fill: true
-      }];
-      
-      sparklineChart.options.scales.x.ticks.color = isDark ? '#f8fafc' : '#0f172a';
-      sparklineChart.options.scales.y.ticks.color = isDark ? '#f8fafc' : '#0f172a';
-      sparklineChart.options.scales.y.max = systemCapacityKwp || undefined;
-      
-      // Force x-axis to display 6 AM to 7 PM local time
-      const startTime = new Date();
-      startTime.setHours(6,0,0,0);
-      const endTime = new Date();
-      endTime.setHours(19,0,0,0);
-      sparklineChart.options.scales.x.min = startTime.getTime();
-      sparklineChart.options.scales.x.max = endTime.getTime();
-      
-      sparklineChart.update();
-      
-      applySparklineGradient();
+        fill: false,
+        borderDash: [5, 5] // dotted line
+      }
+    ];
+    
+    // Apply gradient fill to the actual dataset
+    const ctx = sparklineChart.ctx;
+    const chartArea = sparklineChart.chartArea;
+    if (chartArea && sparklineChart.data.datasets[0].data.length > 0) {
+      const gradient = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
+      const hex = solarColor;
+      const r = parseInt(hex.slice(1,3), 16);
+      const g = parseInt(hex.slice(3,5), 16);
+      const b = parseInt(hex.slice(5,7), 16);
+      gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.1)`);
+      gradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.3)`);
+      gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.5)`);
+      sparklineChart.data.datasets[0].backgroundColor = gradient;
     }
+    
+    // Set x-axis range 6 AM-7 PM local
+    const startTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 6, 0, 0).getTime();
+    const endTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 19, 0, 0).getTime();
+    sparklineChart.options.scales.x.min = startTime;
+    sparklineChart.options.scales.x.max = endTime;
+    sparklineChart.options.scales.y.max = systemCapacityKwp || undefined;
+    sparklineChart.options.scales.x.ticks.color = isDark ? '#f8fafc' : '#0f172a';
+    sparklineChart.options.scales.y.ticks.color = isDark ? '#f8fafc' : '#0f172a';
+    
+    sparklineChart.update();
     
     // Update capacity
     try {
