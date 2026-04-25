@@ -11,11 +11,7 @@
   --home: #7c3aed;
   --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
   --grid-color: #cbd5e1;
-
-  /* Font size scale – only three sizes */
-  --fs-small: 0.85rem;    /* labels, secondary text, table headers */
-  --fs-medium: 1.1rem;    /* sub‑headings, gauge text, medium emphasis */
-  --fs-large: 1.5rem;     /* main values, headings, important numbers */
+  --radius: 1rem;   /* unified border radius for all cards */
 }
 
 [data-theme="dark"] {
@@ -77,51 +73,10 @@ header {
   border-radius: 8px;
 }
 
-/* Headings – large */
-h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h3 {
-  font-size: var(--fs-large);
-  font-weight: 600;
+h1 {
+  font-weight: 500;
   color: var(--text);
 }
-
-/* Sub‑headings / medium emphasis */
-.stat-value, .pv-metric-value, .predicted-extra-value, .flow-value,
-.gauge-percent, .chart-controls button, .toggle-btn {
-  font-size: var(--fs-large);
-  font-weight: 600;
-}
-
-.stat-value, .pv-metric-value, .flow-value {
-  font-size: var(--fs-large);
-}
-
-.gauge-percent {
-  font-size: var(--fs-medium);
-}
-
-.chart-controls button {
-  font-size: var(--fs-small);
-}
-
-.toggle-btn {
-  font-size: var(--fs-medium);
-}
-
-/* Small text – labels, secondary, tables */
-.stat-label, .pv-metric-label, .predicted-extra-label, .forecast-date,
-.flow-label, .flow-sub, .settings-link, .theme-toggle span,
-.pv-hourly-table th, .energy-table th, .energy-table td,
-.stat-sub, .flow-arrow, button, .chart-controls button, .toggle-btn,
-.pv-hourly-table td, .stats-footer span, .predicted-extra-label,
-.now-gauge .pv-metric-label, .pv-metric-label, .stat-label,
-.flow-label, .flow-sub, .settings-link, .forecast-date,
-.pv-hourly-table th, .energy-table th, .daily-breakdown-header h3 {
-  font-size: var(--fs-small);
-}
-
-/* Exceptions that must stay small */
-.flow-arrow { font-size: 2rem; }  /* arrows still big but fewer sizes */
-.flow-icon { font-size: 3.5rem; }
 
 .theme-toggle {
   background: var(--card-bg);
@@ -130,7 +85,7 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
   padding: 0.5rem;
   border-radius: 2rem;
   cursor: pointer;
-  font-size: var(--fs-medium);
+  font-size: 1.2rem;
   width: 40px;
   height: 40px;
   display: flex;
@@ -151,7 +106,7 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
   background: var(--card-bg);
   padding: 0.5rem 1rem;
   border-radius: 2rem;
-  font-size: var(--fs-small);
+  font-size: 0.9rem;
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
   transition: background 0.2s;
@@ -162,14 +117,14 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
   color: white;
 }
 
-/* Flow Card */
+/* Flow Card – unified radius */
 .flow-card {
   display: flex;
   align-items: center;
   justify-content: space-around;
   background: var(--card-bg);
   padding: 2.5rem 1.5rem;
-  border-radius: 2.5rem;
+  border-radius: var(--radius);   /* now 1rem */
   margin-bottom: 1.5rem;
   flex-wrap: wrap;
   gap: 1rem;
@@ -188,19 +143,19 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
 }
 
 .flow-label {
-  font-size: var(--fs-small);
+  font-size: 1.1rem;
   opacity: 0.8;
   color: var(--text-secondary);
 }
 
 .flow-value {
-  font-size: var(--fs-large);
+  font-size: 2rem;
   font-weight: 600;
   color: var(--text);
 }
 
 .flow-sub {
-  font-size: var(--fs-small);
+  font-size: 0.9rem;
   opacity: 0.7;
   margin-top: 0.25rem;
 }
@@ -225,10 +180,10 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
   100% { opacity: 0.5; transform: scale(1); }
 }
 
-/* Solar Forecast Banner */
+/* Solar Forecast Banner – unified radius */
 .pv-today-banner {
   background: var(--card-bg);
-  border-radius: 1.5rem;
+  border-radius: var(--radius);   /* now 1rem */
   padding: 1.5rem 2rem;
   margin-bottom: 2rem;
   box-shadow: var(--shadow);
@@ -249,7 +204,7 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
 }
 
 .forecast-date {
-  font-size: var(--fs-small);
+  font-size: 0.9rem;
   color: var(--text-secondary);
 }
 
@@ -274,17 +229,18 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
 }
 
 .pv-metric-label {
-  font-size: var(--fs-small);
+  font-size: 0.85rem;
   color: var(--text-secondary);
   margin-bottom: 0.25rem;
 }
 
 .pv-metric-value {
-  font-size: var(--fs-large);
+  font-size: 1.5rem;
   font-weight: 600;
   color: var(--text);
 }
 
+/* Additional predicted days */
 .predicted-extras {
   margin-top: 0.75rem;
   display: flex;
@@ -299,17 +255,18 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
 }
 
 .predicted-extra-label {
-  font-size: var(--fs-small);
+  font-size: 0.8rem;
   color: var(--text-secondary);
   margin-bottom: 0.1rem;
 }
 
 .predicted-extra-value {
-  font-size: var(--fs-large);
+  font-size: 1.5rem;
   font-weight: 600;
   color: var(--text);
 }
 
+/* Now gauge */
 .now-metric .now-gauge {
   display: flex;
   align-items: center;
@@ -333,7 +290,7 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
 }
 
 .gauge-percent {
-  font-size: var(--fs-medium);
+  font-size: 1rem;
   font-weight: 600;
   color: var(--text);
   min-width: 3rem;
@@ -350,7 +307,7 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
   height: 100%;
 }
 
-/* Stats Grid */
+/* Stats Grid – unified radius for cards */
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -361,36 +318,36 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
 .stat-card {
   background: var(--card-bg);
   padding: 1.2rem 0.8rem;
-  border-radius: 1rem;
+  border-radius: var(--radius);   /* now 1rem */
   text-align: center;
   box-shadow: var(--shadow);
   border: 1px solid var(--border);
 }
 
 .stat-label {
-  font-size: var(--fs-small);
+  font-size: 0.85rem;
   opacity: 0.8;
   margin-bottom: 0.5rem;
   color: var(--text-secondary);
 }
 
 .stat-value {
-  font-size: var(--fs-large);
+  font-size: 1.8rem;
   font-weight: 600;
   color: var(--text);
 }
 
 .stat-sub {
-  font-size: var(--fs-small);
+  font-size: 0.8rem;
   opacity: 0.7;
   margin-top: 0.25rem;
 }
 
-/* Chart Container */
+/* Chart Container – unified radius */
 .chart-container {
   background: var(--card-bg);
   padding: 1.5rem;
-  border-radius: 1rem;
+  border-radius: var(--radius);   /* now 1rem */
   margin-bottom: 2rem;
   height: 450px;
   position: relative;
@@ -420,9 +377,9 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
   border: 1px solid var(--border);
   color: var(--text);
   padding: 0.4rem 0.8rem;
-  border-radius: 2rem;
+  border-radius: 2rem;           /* pill shape kept for buttons */
   cursor: pointer;
-  font-size: var(--fs-small);
+  font-size: 0.8rem;
   transition: background 0.2s;
 }
 
@@ -433,10 +390,10 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
   border-color: var(--accent);
 }
 
-/* Daily Breakdown Containers */
+/* Daily Breakdown Containers – unified radius */
 .daily-breakdown-container {
   background: var(--card-bg);
-  border-radius: 1rem;
+  border-radius: var(--radius);   /* now 1rem */
   padding: 1.5rem;
   margin-top: 2rem;
   box-shadow: var(--shadow);
@@ -464,7 +421,7 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
   background: transparent;
   border: none;
   color: var(--text);
-  font-size: var(--fs-medium);
+  font-size: 1.2rem;
   cursor: pointer;
   padding: 0.5rem;
   transition: transform 0.2s;
@@ -495,7 +452,7 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
 .energy-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: var(--fs-small);
+  font-size: 0.85rem;
 }
 
 .energy-table th {
@@ -531,12 +488,13 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
   background: var(--bg);
 }
 
+/* Stats Footer – unified radius */
 .stats-footer {
   display: flex;
   justify-content: space-around;
   background: var(--card-bg);
   padding: 1rem;
-  border-radius: 1rem;
+  border-radius: var(--radius);   /* now 1rem */
   flex-wrap: wrap;
   gap: 1rem;
   box-shadow: var(--shadow);
@@ -553,10 +511,10 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
     font-size: 2.5rem;
   }
   .flow-label {
-    font-size: var(--fs-small);
+    font-size: 0.9rem;
   }
   .flow-value {
-    font-size: var(--fs-large);
+    font-size: 1.5rem;
   }
   .flow-arrow {
     font-size: 2rem;
@@ -566,13 +524,12 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
     flex-direction: column;
   }
   .stat-value {
-    font-size: var(--fs-large);
+    font-size: 1.4rem;
   }
   .chart-container {
     height: 350px;
   }
 
-  /* Solar Forecast Banner – mobile stack */
   .pv-today-banner {
     padding: 1.2rem 1rem;
   }
@@ -597,11 +554,11 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
   .pv-metric-label {
     margin-bottom: 0;
     margin-right: 1rem;
-    font-size: var(--fs-small);
+    font-size: 0.9rem;
   }
 
   .pv-metric-value {
-    font-size: var(--fs-large);
+    font-size: 1.3rem;
   }
 
   .now-metric .now-gauge {
@@ -614,10 +571,9 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
   }
 
   .gauge-percent {
-    font-size: var(--fs-small);
+    font-size: 0.9rem;
   }
 
-  /* Extra prediction days */
   .predicted-extras {
     display: flex;
     flex-direction: row;
@@ -633,20 +589,18 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
   }
 
   .predicted-extra-label {
-    font-size: var(--fs-small);
+    font-size: 0.8rem;
   }
 
   .predicted-extra-value {
-    font-size: var(--fs-medium);
+    font-size: 1.1rem;
   }
 
-  /* Sparkline */
   .pv-sparkline-container {
     width: 100%;
     height: 180px;
   }
 
-  /* Mobile hourly table */
   .pv-hourly-table {
     display: block;
     margin-top: 1rem;
@@ -655,7 +609,7 @@ h1, h2, h3, h4, .chart-header h3, .daily-breakdown-header h3, .pv-today-header h
   .pv-hourly-table table {
     width: 100%;
     border-collapse: collapse;
-    font-size: var(--fs-small);
+    font-size: 0.8rem;
   }
 
   .pv-hourly-table th,
