@@ -204,6 +204,37 @@ async function updateCurrent() {
 
     updateFlowArrows(currentSolarWatts, consumption, battCharge, battDischarge, gridImport, gridExport);
 
+    // --- Dynamically change Flaticon icon colours based on activity ---
+    const solarIcon = document.getElementById('icon-solar');
+    const batteryIcon = document.getElementById('icon-battery');
+    const homeIcon = document.getElementById('icon-home');
+    const gridIcon = document.getElementById('icon-grid');
+
+    if (solarIcon) {
+      solarIcon.style.color = currentSolarWatts > 0 ? 'var(--solar)' : 'var(--text)';
+    }
+    if (batteryIcon) {
+      if (battCharge > battDischarge) {
+        batteryIcon.style.color = 'var(--battery)';   // charging
+      } else if (battDischarge > battCharge) {
+        batteryIcon.style.color = '#f59e0b';          // discharging
+      } else {
+        batteryIcon.style.color = 'var(--text)';
+      }
+    }
+    if (homeIcon) {
+      homeIcon.style.color = consumption > 0 ? 'var(--home)' : 'var(--text)';
+    }
+    if (gridIcon) {
+      if (gridImport > gridExport) {
+        gridIcon.style.color = 'var(--grid)';   // importing
+      } else if (gridExport > gridImport) {
+        gridIcon.style.color = '#3b82f6';       // exporting
+      } else {
+        gridIcon.style.color = 'var(--text)';
+      }
+    }
+
     const cfgRes = await fetch('/api/public-config');
     const cfg = await cfgRes.json();
     const currency = cfg.savings_currency || '€';
@@ -266,23 +297,18 @@ async function updateForecast() {
     banner.style.display = 'block';
     
     const now = new Date();
-    const todayDate = now.toLocaleDateString('en-CA');   // YYYY-MM-DD local
+    const todayDate = now.toLocaleDateString('en-CA');
 
-    // Find today's entry
     let todayIdx = data.daily.findIndex(d => d.date === todayDate);
-    if (todayIdx === -1) {
-      todayIdx = 0;
-    }
+    if (todayIdx === -1) todayIdx = 0;
     const today = data.daily[todayIdx];
     const tomorrow = data.daily[todayIdx + 1] || null;
     const nextDay = data.daily[todayIdx + 2] || null;
     
-    // Update metric values
     document.getElementById('pv-generated').textContent = (today.actual_so_far || 0).toFixed(1) + ' kWh';
     const predictedToday = today.total_kwh - (today.actual_so_far || 0);
     document.getElementById('pv-predicted').textContent = predictedToday.toFixed(1) + ' kWh';
     
-    // Set day labels for future days
     if (tomorrow) {
       document.getElementById('pred-day1-label').textContent = getDayName(tomorrow.date);
       document.getElementById('pv-tomorrow').textContent = tomorrow.total_kwh.toFixed(1) + ' kWh';
@@ -298,10 +324,8 @@ async function updateForecast() {
       document.getElementById('pv-nextday').textContent = '-- kWh';
     }
     
-    // Date for the header
     document.getElementById('forecast-date').textContent = now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
     
-    // Fetch actual power history for today
     const historyRes = await fetch('/api/history?days=1');
     const historyData = await historyRes.json();
     
@@ -315,7 +339,6 @@ async function updateForecast() {
       y: d.solar_kw
     }));
     
-    // Build 30‑minute interval buckets from 06:00 to 19:00
     const intervals = [];
     const intervalLabels = [];
     for (let h = 6; h <= 19; h += 0.5) {
@@ -342,7 +365,6 @@ async function updateForecast() {
       return { x: ts, y: avg };
     }).filter(p => p !== null && p.x <= now.getTime());
     
-    // Forecast data for whole day 6 AM‑7 PM
     const forecastHourly = data.hourly.filter(h => {
       const d = new Date(h.period_end);
       return d.toISOString().startsWith(todayDate) &&
@@ -353,7 +375,6 @@ async function updateForecast() {
       y: h.pv_estimate
     }));
     
-    // Build forecast map per interval
     const forecastByInterval = {};
     forecastHourly.forEach(p => {
       const d = new Date(p.x);
@@ -364,7 +385,6 @@ async function updateForecast() {
       forecastByInterval[bucketTime] = p.y;
     });
     
-    // Populate mobile table
     const tbody = document.getElementById('pv-hourly-body');
     if (tbody) {
       tbody.innerHTML = '';
@@ -384,12 +404,9 @@ async function updateForecast() {
     }
     
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const actualColor = '#3b82f6';
+    const forecastColor = isDark ? '#fbbf24' : '#d97706';
     
-    // Distinct colors for actual and forecast
-    const actualColor = '#3b82f6';                     // blue
-    const forecastColor = isDark ? '#fbbf24' : '#d97706';  // solar yellow
-    
-    // Build datasets
     sparklineChart.data.datasets = [
       {
         label: 'Actual',
@@ -400,7 +417,7 @@ async function updateForecast() {
         tension: 0.4,
         pointRadius: 0,
         fill: false,
-        borderDash: []                  // solid
+        borderDash: []
       },
       {
         label: 'Forecast',
@@ -411,11 +428,10 @@ async function updateForecast() {
         tension: 0.4,
         pointRadius: 0,
         fill: true,
-        borderDash: [5, 5]             // dotted
+        borderDash: [5, 5]
       }
     ];
     
-    // Apply gradient fill to forecast line only
     const ctx = sparklineChart.ctx;
     const chartArea = sparklineChart.chartArea;
     if (chartArea && sparklineChart.data.datasets[1].data.length > 0) {
@@ -430,7 +446,6 @@ async function updateForecast() {
       sparklineChart.data.datasets[1].backgroundColor = gradient;
     }
     
-    // Axis range 6 AM – 7 PM
     const startTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 6, 0, 0).getTime();
     const endTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 19, 0, 0).getTime();
     sparklineChart.options.scales.x.min = startTime;
@@ -442,7 +457,6 @@ async function updateForecast() {
     
     sparklineChart.update();
     
-    // Update system capacity from settings
     try {
       const cfgRes = await fetch('/api/public-config');
       const cfg = await cfgRes.json();
