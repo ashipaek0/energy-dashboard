@@ -331,7 +331,7 @@ async function updateForecast() {
       sparklineChart.data.datasets = [{
         data: chartData,
         borderColor: lineColor,
-        backgroundColor: 'transparent', // gradient fills later
+        backgroundColor: 'transparent',
         borderWidth: 2,
         tension: 0.4,
         pointRadius: 0,
@@ -341,6 +341,15 @@ async function updateForecast() {
       sparklineChart.options.scales.x.ticks.color = isDark ? '#f8fafc' : '#0f172a';
       sparklineChart.options.scales.y.ticks.color = isDark ? '#f8fafc' : '#0f172a';
       sparklineChart.options.scales.y.max = systemCapacityKwp || undefined;
+      
+      // Force x-axis to display 6 AM to 7 PM local time
+      const startTime = new Date();
+      startTime.setHours(6,0,0,0);
+      const endTime = new Date();
+      endTime.setHours(19,0,0,0);
+      sparklineChart.options.scales.x.min = startTime.getTime();
+      sparklineChart.options.scales.x.max = endTime.getTime();
+      
       sparklineChart.update();
       
       applySparklineGradient();
