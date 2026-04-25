@@ -179,88 +179,102 @@ h1 {
   100% { opacity: 0.5; transform: scale(1); }
 }
 
-/* Solar Forecast Banner */
-.forecast-banner {
+/* PV Today Banner */
+.pv-today-banner {
   background: var(--card-bg);
-  border-radius: 2rem;
+  border-radius: 1.5rem;
   padding: 1.5rem;
   margin-bottom: 2rem;
   box-shadow: var(--shadow);
   border: 1px solid var(--border);
-  position: relative;
-  overflow: hidden;
 }
 
-.forecast-banner::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 60px;
-  background: linear-gradient(to bottom, rgba(59,130,246,0.15), transparent);
-  pointer-events: none;
-}
-
-[data-theme="dark"] .forecast-banner::before {
-  background: linear-gradient(to bottom, rgba(251,191,36,0.1), transparent);
-}
-
-.forecast-header {
+.pv-today-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.5rem;
-}
-
-.forecast-header h3 {
-  font-weight: 500;
-  color: var(--text);
-}
-
-.forecast-source {
-  font-size: 0.8rem;
-  opacity: 0.6;
-}
-
-.forecast-chart-container {
-  height: 160px;
+  align-items: baseline;
   margin-bottom: 1rem;
 }
 
-.forecast-cards {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 1rem;
-}
-
-.forecast-card {
-  background: var(--bg);
-  border-radius: 1rem;
-  padding: 1rem 0.5rem;
-  text-align: center;
-  border: 1px solid var(--border);
-}
-
-.forecast-card .day {
+.pv-today-header h3 {
   font-weight: 600;
+  color: var(--text);
+}
+
+.forecast-date {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.pv-today-body {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+
+.pv-metrics {
+  display: flex;
+  gap: 1.5rem;
+  flex: 1;
+  min-width: 280px;
+}
+
+.pv-metric {
+  display: flex;
+  flex-direction: column;
+}
+
+.pv-metric-label {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
   margin-bottom: 0.25rem;
 }
 
-.forecast-card .icon {
-  font-size: 1.8rem;
-  margin: 0.25rem 0;
-}
-
-.forecast-card .kwh {
-  font-size: 1.2rem;
+.pv-metric-value {
+  font-size: 1.5rem;
   font-weight: 600;
-  color: var(--solar);
+  color: var(--text);
 }
 
-.forecast-card .peak {
-  font-size: 0.8rem;
-  opacity: 0.7;
+.now-metric .now-gauge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.gauge-bar-bg {
+  width: 80px;
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.gauge-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--solar);
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.gauge-percent {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  min-width: 2.5rem;
+}
+
+.pv-sparkline-container {
+  flex: 2;
+  min-width: 250px;
+  height: 100px;
+}
+
+.pv-sparkline-container canvas {
+  width: 100%;
+  height: 100%;
 }
 
 /* Stats Grid */
@@ -483,10 +497,11 @@ h1 {
   .chart-container {
     height: 350px;
   }
-  .forecast-cards {
-    grid-template-columns: repeat(2, 1fr);
+  .pv-today-body {
+    flex-direction: column;
+    align-items: stretch;
   }
-  .forecast-chart-container {
-    height: 120px;
+  .pv-sparkline-container {
+    width: 100%;
   }
 }
