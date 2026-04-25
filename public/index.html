@@ -71,17 +71,6 @@
           <div class="pv-metric">
             <span class="pv-metric-label">Predicted</span>
             <span class="pv-metric-value" id="pv-predicted">0 kWh</span>
-            <!-- Future days stacked below -->
-            <div class="predicted-extras">
-              <div class="predicted-extra">
-                <span class="predicted-extra-label" id="pred-day1-label">Tomorrow</span>
-                <span class="predicted-extra-value" id="pv-tomorrow">0 kWh</span>
-              </div>
-              <div class="predicted-extra">
-                <span class="predicted-extra-label" id="pred-day2-label">Next Day</span>
-                <span class="predicted-extra-value" id="pv-nextday">0 kWh</span>
-              </div>
-            </div>
           </div>
           <div class="pv-metric now-metric">
             <span class="pv-metric-label">Now</span>
@@ -93,9 +82,35 @@
             </div>
           </div>
         </div>
+
+        <!-- Extra predicted days: on desktop inside predicted (if desired), but we move it here for mobile -->
+        <div class="predicted-extras" id="predicted-extras-row">
+          <div class="predicted-extra">
+            <span class="predicted-extra-label" id="pred-day1-label">Tomorrow</span>
+            <span class="predicted-extra-value" id="pv-tomorrow">0 kWh</span>
+          </div>
+          <div class="predicted-extra">
+            <span class="predicted-extra-label" id="pred-day2-label">Next Day</span>
+            <span class="predicted-extra-value" id="pv-nextday">0 kWh</span>
+          </div>
+        </div>
+
         <div class="pv-sparkline-container">
           <canvas id="pv-sparkline" width="600" height="200"></canvas>
         </div>
+      </div>
+      <!-- Mobile hourly table -->
+      <div class="pv-hourly-table" id="pv-hourly-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Actual (kW)</th>
+              <th>Forecast (kW)</th>
+            </tr>
+          </thead>
+          <tbody id="pv-hourly-body"></tbody>
+        </table>
       </div>
     </div>
 
