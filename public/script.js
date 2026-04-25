@@ -126,7 +126,7 @@ function initCharts() {
       },
       plugins: {
         tooltip: { enabled: false },
-        legend: {                           // LEGEND NOW VISIBLE
+        legend: {
           display: true,
           labels: {
             color: textColor,
@@ -265,33 +265,42 @@ async function updateForecast() {
     
     banner.style.display = 'block';
     
-    const today = data.daily[0];
-    const tomorrow = data.daily.length > 1 ? data.daily[1] : null;
-    const nextDay = data.daily.length > 2 ? data.daily[2] : null;
+    const now = new Date();
+    const todayDate = now.toLocaleDateString('en-CA');   // YYYY-MM-DD local
+
+    // Find today's entry
+    let todayIdx = data.daily.findIndex(d => d.date === todayDate);
+    if (todayIdx === -1) {
+      // fallback to first entry
+      todayIdx = 0;
+    }
+    const today = data.daily[todayIdx];
+    const tomorrow = data.daily[todayIdx + 1] || null;
+    const nextDay = data.daily[todayIdx + 2] || null;
     
+    // Update metric values
     document.getElementById('pv-generated').textContent = (today.actual_so_far || 0).toFixed(1) + ' kWh';
     const predictedToday = today.total_kwh - (today.actual_so_far || 0);
     document.getElementById('pv-predicted').textContent = predictedToday.toFixed(1) + ' kWh';
     
+    // Set day labels for future days
     if (tomorrow) {
       document.getElementById('pred-day1-label').textContent = getDayName(tomorrow.date);
       document.getElementById('pv-tomorrow').textContent = tomorrow.total_kwh.toFixed(1) + ' kWh';
     } else {
-      document.getElementById('pred-day1-label').textContent = 'Tomorrow';
+      document.getElementById('pred-day1-label').textContent = '--';
       document.getElementById('pv-tomorrow').textContent = '-- kWh';
     }
     if (nextDay) {
       document.getElementById('pred-day2-label').textContent = getDayName(nextDay.date);
       document.getElementById('pv-nextday').textContent = nextDay.total_kwh.toFixed(1) + ' kWh';
     } else {
-      document.getElementById('pred-day2-label').textContent = 'Next Day';
+      document.getElementById('pred-day2-label').textContent = '--';
       document.getElementById('pv-nextday').textContent = '-- kWh';
     }
     
-    const now = new Date();
+    // Date for the header
     document.getElementById('forecast-date').textContent = now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-    
-    const todayDate = now.toLocaleDateString('en-CA');
     
     // Fetch actual power history for today
     const historyRes = await fetch('/api/history?days=1');
@@ -307,7 +316,7 @@ async function updateForecast() {
       y: d.solar_kw
     }));
     
-    // Build 30-minute interval buckets
+    // Build 30‑minute interval buckets from 06:00 to 19:00
     const intervals = [];
     for (let h = 6; h <= 19; h += 0.5) {
       const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), Math.floor(h), (h % 1) * 60, 0);
@@ -332,7 +341,7 @@ async function updateForecast() {
       return { x: ts, y: avg };
     }).filter(p => p !== null && p.x <= now.getTime());
     
-    // Forecast data for whole day 6 AM-7 PM (not filtered by now)
+    // Forecast data for whole day 6 AM‑7 PM (all hours)
     const forecastHourly = data.hourly.filter(h => {
       const d = new Date(h.period_end);
       return d.toISOString().startsWith(todayDate) &&
@@ -346,7 +355,7 @@ async function updateForecast() {
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     
     // Distinct colors for actual and forecast
-    const actualColor = '#3b82f6';  // blue
+    const actualColor = '#3b82f6';                     // blue
     const forecastColor = isDark ? '#fbbf24' : '#d97706';  // solar yellow
     
     // Build datasets
@@ -355,23 +364,23 @@ async function updateForecast() {
         label: 'Actual',
         data: actualData,
         borderColor: actualColor,
-        backgroundColor: 'transparent',  // no fill
+        backgroundColor: 'transparent',
         borderWidth: 2,
         tension: 0.4,
         pointRadius: 0,
         fill: false,
-        borderDash: []                   // solid line
+        borderDash: []                  // solid
       },
       {
         label: 'Forecast',
         data: forecastHourly,
         borderColor: forecastColor,
-        backgroundColor: 'transparent',  // will be replaced by gradient
+        backgroundColor: 'transparent', // will be replaced by gradient below
         borderWidth: 2,
         tension: 0.4,
         pointRadius: 0,
         fill: true,
-        borderDash: [5, 5]              // dotted line
+        borderDash: [5, 5]             // dotted
       }
     ];
     
@@ -390,7 +399,7 @@ async function updateForecast() {
       sparklineChart.data.datasets[1].backgroundColor = gradient;
     }
     
-    // Axis range
+    // Axis range 6 AM – 7 PM
     const startTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 6, 0, 0).getTime();
     const endTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 19, 0, 0).getTime();
     sparklineChart.options.scales.x.min = startTime;
@@ -398,12 +407,11 @@ async function updateForecast() {
     sparklineChart.options.scales.y.max = systemCapacityKwp || undefined;
     sparklineChart.options.scales.x.ticks.color = isDark ? '#f8fafc' : '#0f172a';
     sparklineChart.options.scales.y.ticks.color = isDark ? '#f8fafc' : '#0f172a';
-    
-    // Update legend label colors
     sparklineChart.options.plugins.legend.labels.color = isDark ? '#f8fafc' : '#0f172a';
     
     sparklineChart.update();
     
+    // Update system capacity from settings
     try {
       const cfgRes = await fetch('/api/public-config');
       const cfg = await cfgRes.json();
