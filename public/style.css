@@ -273,8 +273,8 @@ h1 {
 }
 
 .gauge-bar-bg {
-  width: 120px;        /* wider */
-  height: 12px;        /* thicker */
+  width: 120px;
+  height: 12px;
   background: var(--border);
   border-radius: 6px;
   overflow: hidden;
@@ -500,6 +500,7 @@ h1 {
   color: var(--text);
 }
 
+/* ---------- MOBILE (< 600px) ---------- */
 @media (max-width: 600px) {
   .flow-card {
     padding: 1.5rem 1rem;
@@ -526,12 +527,84 @@ h1 {
   .chart-container {
     height: 350px;
   }
+
+  /* Solar Forecast Banner – mobile stack */
+  .pv-today-banner {
+    padding: 1.2rem 1rem;
+  }
+
   .pv-today-body {
     flex-direction: column;
-    align-items: stretch;
+    gap: 1rem;
   }
+
+  .pv-metrics {
+    flex-direction: column;
+    gap: 0.8rem;
+    min-width: 0;
+  }
+
+  /* Each metric row: label left, value right */
+  .pv-metric {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+
+  .pv-metric-label {
+    margin-bottom: 0;
+    margin-right: 1rem;
+    font-size: 0.9rem;
+  }
+
+  .pv-metric-value {
+    font-size: 1.3rem;
+  }
+
+  /* Predicted extras: row layout */
+  .predicted-extras {
+    margin-top: 0.4rem;
+    flex-direction: row;
+    gap: 1.5rem;
+  }
+
+  .predicted-extra {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 0.4rem;
+  }
+
+  .predicted-extra-label {
+    font-size: 0.8rem;
+  }
+
+  .predicted-extra-value {
+    font-size: 1.1rem;
+  }
+
+  /* Now gauge – compact */
+  .now-metric .now-gauge {
+    gap: 0.5rem;
+  }
+
+  .gauge-bar-bg {
+    width: 80px;
+    height: 10px;
+  }
+
+  .gauge-percent {
+    font-size: 0.9rem;
+  }
+
+  /* Sparkline */
   .pv-sparkline-container {
     width: 100%;
-    height: 200px;
+    height: 180px;
+  }
+
+  /* Legend */
+  .sparkline-legend {
+    text-align: center;
+    margin-top: 0.5rem;
   }
 }
