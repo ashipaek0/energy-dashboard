@@ -179,14 +179,15 @@ h1 {
   100% { opacity: 0.5; transform: scale(1); }
 }
 
-/* PV Today Banner */
+/* PV Today Banner - Expanded */
 .pv-today-banner {
   background: var(--card-bg);
   border-radius: 1.5rem;
-  padding: 1.5rem;
+  padding: 1.5rem 2rem;
   margin-bottom: 2rem;
   box-shadow: var(--shadow);
   border: 1px solid var(--border);
+  min-height: 240px; /* increased */
 }
 
 .pv-today-header {
@@ -208,7 +209,7 @@ h1 {
 
 .pv-today-body {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 2rem;
   flex-wrap: wrap;
 }
@@ -218,6 +219,7 @@ h1 {
   gap: 1.5rem;
   flex: 1;
   min-width: 280px;
+  align-items: flex-start;
 }
 
 .pv-metric {
@@ -234,6 +236,30 @@ h1 {
 .pv-metric-value {
   font-size: 1.5rem;
   font-weight: 600;
+  color: var(--text);
+}
+
+/* Additional predicted days under the main predicted value */
+.predicted-extras {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.predicted-extra {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+}
+
+.predicted-extra-label {
+  color: var(--text-secondary);
+  margin-right: 1rem;
+}
+
+.predicted-extra-value {
+  font-weight: 500;
   color: var(--text);
 }
 
@@ -268,8 +294,8 @@ h1 {
 
 .pv-sparkline-container {
   flex: 2;
-  min-width: 250px;
-  height: 100px;
+  min-width: 300px;
+  height: 200px; /* taller graph */
 }
 
 .pv-sparkline-container canvas {
@@ -503,5 +529,6 @@ h1 {
   }
   .pv-sparkline-container {
     width: 100%;
+    height: 200px;
   }
 }
