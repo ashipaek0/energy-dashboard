@@ -554,40 +554,67 @@ app.get('/api/savings', async (req, res) => {
     const rate = parseFloat(rateRow?.value) || 0.30;
     const currency = getConfig('savings_currency') || '€';
 
-    const now = new Date();
-    
-    // Helper: get total solar energy for a period by grouping records by local date
-    function getTotalSolarSince(startDate) {
-      const startUnix = Math.floor(startDate.getTime() / 1000);
-      // Fetch all relevant records
+    // --- Get TODAY's solar directly from live sensor (HA or MQTT) ---
+    let todaySolar = 0;
+    try {
+      const haEnabled = await isSourceEnabled('ha_enabled');
+      const mqttEnabled = await isSourceEnabled('mqtt_enabled');
+      if (mqttEnabled && mqttValues.daily_solar !== undefined) {
+        todaySolar = mqttValues.daily_solar;
+      } else if (haEnabled) {
+        const haEntity = getConfig('ha_entity_daily_solar');
+        if (haEntity) {
+          const raw = await getHAState(haEntity).catch(() => 0);
+          todaySolar = parseFloat(raw) || 0;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch live daily solar for savings, falling back to history:', e.message);
+      // fallback to history if live fails
+      const now = new Date();
+      const todayStart = new Date(now); todayStart.setHours(0,0,0,0);
+      const startUnix = Math.floor(todayStart.getTime() / 1000);
       const rows = db.prepare(`
         SELECT timestamp, daily_solar FROM history 
         WHERE timestamp >= ? AND daily_solar IS NOT NULL
         ORDER BY timestamp ASC
       `).all(startUnix);
-      
-      // Group by local date and take max for each day
+      let maxVal = 0;
+      rows.forEach(row => {
+        const date = new Date(row.timestamp * 1000).toLocaleDateString('en-CA');
+        if (date === new Date().toLocaleDateString('en-CA') && row.daily_solar > maxVal) {
+          maxVal = row.daily_solar;
+        }
+      });
+      todaySolar = maxVal;
+    }
+
+    const todaySavings = todaySolar * rate;
+
+    // Helper: get total solar energy for a period (week, month, all-time) from history
+    function getTotalSolarSince(startDate) {
+      const startUnix = Math.floor(startDate.getTime() / 1000);
+      const rows = db.prepare(`
+        SELECT timestamp, daily_solar FROM history 
+        WHERE timestamp >= ? AND daily_solar IS NOT NULL
+        ORDER BY timestamp ASC
+      `).all(startUnix);
       const dailyMax = {};
       rows.forEach(row => {
-        const date = new Date(row.timestamp * 1000).toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
+        const date = new Date(row.timestamp * 1000).toLocaleDateString('en-CA');
         const val = row.daily_solar;
         if (!dailyMax[date] || val > dailyMax[date]) {
           dailyMax[date] = val;
         }
       });
-      
       return Object.values(dailyMax).reduce((sum, val) => sum + val, 0);
     }
 
-    // Today
-    const todayStart = new Date(now); 
-    todayStart.setHours(0,0,0,0);
-    const todaySolar = getTotalSolarSince(todayStart);
-    const todaySavings = todaySolar * rate;
+    const now = new Date();
 
     // This Week (starting Monday)
     const day = now.getDay();
-    const diff = (day === 0 ? 6 : day - 1); // Monday = 1, Sunday = 0
+    const diff = (day === 0 ? 6 : day - 1);
     const weekStart = new Date(now); 
     weekStart.setDate(now.getDate() - diff); 
     weekStart.setHours(0,0,0,0);
