@@ -734,25 +734,47 @@ app.get('/api/solar-forecast', async (req, res) => {
       return await fetchOpenMeteoForecast(res, lat, lon, capacityKwp);
     }
 
-    // --- Combine actual solar generated today with remaining forecast ---
-    const todayDate = new Date().toLocaleDateString('en-CA'); // local date YYYY-MM-DD
-    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
-    const todayStartUnix = Math.floor(todayStart.getTime() / 1000);
-    
-    // Get actual solar energy generated so far today (kWh) using local date grouping
-    const todayRows = db.prepare(`
-      SELECT timestamp, daily_solar FROM history 
-      WHERE timestamp >= ? AND daily_solar IS NOT NULL
-      ORDER BY timestamp ASC
-    `).all(todayStartUnix);
+    // --- Get today's actual generation FROM THE LIVE SENSOR, not the history table ---
     let actualTodayKwh = 0;
-    const todayLocalDate = todayDate;
-    todayRows.forEach(row => {
-      const rowDate = new Date(row.timestamp * 1000).toLocaleDateString('en-CA');
-      if (rowDate === todayLocalDate) {
-        actualTodayKwh = Math.max(actualTodayKwh, row.daily_solar);
+    const todayDate = new Date().toLocaleDateString('en-CA'); // local date YYYY-MM-DD
+
+    try {
+      const haEnabled = await isSourceEnabled('ha_enabled');
+      const mqttEnabled = await isSourceEnabled('mqtt_enabled');
+
+      if (mqttEnabled && mqttValues.daily_solar !== undefined) {
+        // Use live MQTT value if available
+        actualTodayKwh = mqttValues.daily_solar;
+      } else if (haEnabled) {
+        const haEntity = getConfig('ha_entity_daily_solar');
+        if (haEntity) {
+          const raw = await getHAState(haEntity).catch(() => 0);
+          actualTodayKwh = parseFloat(raw) || 0;
+        }
       }
-    });
+    } catch (e) {
+      console.warn('Failed to fetch live daily solar for forecast, falling back to history:', e.message);
+    }
+
+    // Fallback to history if live sensor is unavailable or gives zero (but still might be correct)
+    if (actualTodayKwh === 0) {
+      // Use the history table as a last resort
+      const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+      const todayStartUnix = Math.floor(todayStart.getTime() / 1000);
+      const todayRows = db.prepare(`
+        SELECT timestamp, daily_solar FROM history 
+        WHERE timestamp >= ? AND daily_solar IS NOT NULL
+        ORDER BY timestamp ASC
+      `).all(todayStartUnix);
+      let maxVal = 0;
+      todayRows.forEach(row => {
+        const rowDate = new Date(row.timestamp * 1000).toLocaleDateString('en-CA');
+        if (rowDate === todayDate && row.daily_solar > maxVal) {
+          maxVal = row.daily_solar;
+        }
+      });
+      actualTodayKwh = maxVal;
+    }
 
     // Aggregate forecast data to daily totals (remaining only)
     const dailyMap = new Map();
