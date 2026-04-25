@@ -538,13 +538,13 @@ h1 {
     gap: 1rem;
   }
 
+  /* Main metrics: label left, value right */
   .pv-metrics {
     flex-direction: column;
     gap: 0.8rem;
     min-width: 0;
   }
 
-  /* Each metric row: label left, value right */
   .pv-metric {
     flex-direction: row;
     justify-content: space-between;
@@ -561,27 +561,6 @@ h1 {
     font-size: 1.3rem;
   }
 
-  /* Predicted extras: row layout */
-  .predicted-extras {
-    margin-top: 0.4rem;
-    flex-direction: row;
-    gap: 1.5rem;
-  }
-
-  .predicted-extra {
-    flex-direction: row;
-    align-items: baseline;
-    gap: 0.4rem;
-  }
-
-  .predicted-extra-label {
-    font-size: 0.8rem;
-  }
-
-  .predicted-extra-value {
-    font-size: 1.1rem;
-  }
-
   /* Now gauge – compact */
   .now-metric .now-gauge {
     gap: 0.5rem;
@@ -596,15 +575,65 @@ h1 {
     font-size: 0.9rem;
   }
 
+  /* Extra prediction days: own horizontal row above sparkline */
+  .predicted-extras {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-around;
+    margin-top: 0.5rem;
+    width: 100%;
+  }
+
+  .predicted-extra {
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+  }
+
+  .predicted-extra-label {
+    font-size: 0.8rem;
+  }
+
+  .predicted-extra-value {
+    font-size: 1.1rem;
+  }
+
   /* Sparkline */
   .pv-sparkline-container {
     width: 100%;
     height: 180px;
   }
 
-  /* Legend */
-  .sparkline-legend {
-    text-align: center;
-    margin-top: 0.5rem;
+  /* Mobile hourly table */
+  .pv-hourly-table {
+    display: block;
+    margin-top: 1rem;
   }
+
+  .pv-hourly-table table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+  }
+
+  .pv-hourly-table th,
+  .pv-hourly-table td {
+    padding: 0.3rem 0.5rem;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .pv-hourly-table th {
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+
+  .pv-hourly-table td {
+    color: var(--text);
+  }
+}
+
+/* Hide hourly table on desktop */
+.pv-hourly-table {
+  display: none;
 }

@@ -271,7 +271,6 @@ async function updateForecast() {
     // Find today's entry
     let todayIdx = data.daily.findIndex(d => d.date === todayDate);
     if (todayIdx === -1) {
-      // fallback to first entry
       todayIdx = 0;
     }
     const today = data.daily[todayIdx];
@@ -318,9 +317,11 @@ async function updateForecast() {
     
     // Build 30‑minute interval buckets from 06:00 to 19:00
     const intervals = [];
+    const intervalLabels = [];
     for (let h = 6; h <= 19; h += 0.5) {
       const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), Math.floor(h), (h % 1) * 60, 0);
       intervals.push(start.getTime());
+      intervalLabels.push(start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }));
     }
     
     const actualByInterval = {};
@@ -334,14 +335,14 @@ async function updateForecast() {
       actualByInterval[bucketTime].push(p.y);
     });
     
-    const actualData = intervals.map(ts => {
+    const actualData = intervals.map((ts, i) => {
       const values = actualByInterval[ts] || [];
       if (values.length === 0) return null;
       const avg = values.reduce((a,b) => a+b, 0) / values.length;
       return { x: ts, y: avg };
     }).filter(p => p !== null && p.x <= now.getTime());
     
-    // Forecast data for whole day 6 AM‑7 PM (all hours)
+    // Forecast data for whole day 6 AM‑7 PM
     const forecastHourly = data.hourly.filter(h => {
       const d = new Date(h.period_end);
       return d.toISOString().startsWith(todayDate) &&
@@ -351,6 +352,36 @@ async function updateForecast() {
       x: new Date(h.period_end).getTime(),
       y: h.pv_estimate
     }));
+    
+    // Build forecast map per interval
+    const forecastByInterval = {};
+    forecastHourly.forEach(p => {
+      const d = new Date(p.x);
+      const hour = d.getHours();
+      const minute = d.getMinutes();
+      const bucketMinute = Math.floor(minute / 30) * 30;
+      const bucketTime = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, bucketMinute, 0).getTime();
+      forecastByInterval[bucketTime] = p.y;
+    });
+    
+    // Populate mobile table
+    const tbody = document.getElementById('pv-hourly-body');
+    if (tbody) {
+      tbody.innerHTML = '';
+      intervals.forEach((ts, i) => {
+        const timeLabel = intervalLabels[i];
+        const actualVal = actualData.find(a => a.x === ts);
+        const forecastVal = forecastByInterval[ts] !== undefined ? forecastByInterval[ts] : 0;
+        const actualKw = actualVal ? actualVal.y.toFixed(1) : '-';
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${timeLabel}</td>
+          <td>${actualKw}</td>
+          <td>${forecastVal.toFixed(1)}</td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
     
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     
@@ -375,7 +406,7 @@ async function updateForecast() {
         label: 'Forecast',
         data: forecastHourly,
         borderColor: forecastColor,
-        backgroundColor: 'transparent', // will be replaced by gradient below
+        backgroundColor: 'transparent',
         borderWidth: 2,
         tension: 0.4,
         pointRadius: 0,
