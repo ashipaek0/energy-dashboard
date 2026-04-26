@@ -87,11 +87,16 @@
           </div>
         </div>
 
-        <!-- Weather column: heading, big icon, tiny text -->
+        <!-- Weather column with current icon + two small forecast icons to the right -->
         <div class="weather-column">
           <span class="weather-heading">Current Weather</span>
-          <div class="weather-icon-big" id="weather-icon">
-            <i class="fi fi-sr-sun" id="weather-i"></i>
+          <div class="weather-icons-row">
+            <div class="weather-icon-big" id="weather-icon">
+              <i class="fi fi-sr-sun" id="weather-i"></i>
+            </div>
+            <div class="weather-forecast-icons" id="weather-forecast-icons">
+              <!-- filled by JS -->
+            </div>
           </div>
           <div class="weather-details" id="weather-details">
             <span class="weather-temp" id="weather-temp">--°</span>

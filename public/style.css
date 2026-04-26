@@ -163,7 +163,7 @@ h1, h2, h3, h4,
   text-align: center;
 }
 
-/* Icons (Flaticon) – decorative size */
+/* Icons (Flaticon) – decorative size, not part of text scale */
 .flow-icon {
   font-size: 3.5rem;
   margin-bottom: 0.5rem;
@@ -201,7 +201,7 @@ h1, h2, h3, h4,
   margin-top: 0.15rem;
 }
 
-/* Arrows – larger */
+/* Arrows – now larger */
 .flow-arrow {
   font-size: 3.5rem;
   opacity: 0.7;
@@ -231,6 +231,7 @@ h1, h2, h3, h4,
   gap: 0.4rem;
   margin-top: 0.5rem;
 }
+
 .solar-now-gauge .gauge-bar-bg {
   width: 80px;
   height: 8px;
@@ -238,6 +239,7 @@ h1, h2, h3, h4,
   border-radius: 4px;
   overflow: hidden;
 }
+
 .solar-now-gauge .gauge-bar-fill {
   height: 100%;
   width: 0%;
@@ -245,6 +247,7 @@ h1, h2, h3, h4,
   border-radius: 4px;
   transition: width 0.5s ease;
 }
+
 .solar-now-gauge .gauge-percent {
   font-size: var(--fs-small);
   font-weight: 600;
@@ -313,13 +316,13 @@ h1, h2, h3, h4,
   color: var(--text);
 }
 
-/* Weather column – expanded */
+/* Weather column – expanded with forecast icons to the right */
 .weather-column {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.4rem;
-  min-width: 110px;
+  gap: 0.3rem;
+  min-width: 180px;   /* wider to accommodate extra icons */
 }
 
 .weather-heading {
@@ -328,13 +331,31 @@ h1, h2, h3, h4,
   color: var(--text-secondary);
 }
 
+.weather-icons-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
 .weather-icon-big {
   font-size: 4rem;
+  line-height: 1;
 }
 
 .weather-icon-big i {
   font-size: inherit;
-  color: var(--text);            /* default, will be overridden by JS */
+  color: var(--text);            /* default, overridden by JS */
+}
+
+.weather-forecast-icons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.weather-forecast-icons i {
+  font-size: 1.8rem;
+  color: var(--text-secondary);
 }
 
 .weather-details {
@@ -598,8 +619,16 @@ h1, h2, h3, h4,
     align-items: stretch;
   }
 
+  .weather-icons-row {
+    gap: 0.5rem;
+  }
+
   .weather-icon-big {
     font-size: 3rem;
+  }
+
+  .weather-forecast-icons i {
+    font-size: 1.5rem;
   }
 
   .pv-sparkline-container {
