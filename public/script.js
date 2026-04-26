@@ -311,7 +311,6 @@ async function updateForecast() {
     const tomorrow = data.daily[todayIdx + 1] || null;
     const nextDay = data.daily[todayIdx + 2] || null;
 
-    // Today's total (combined actual + remaining)
     document.getElementById('pv-today-value').textContent = (today.total_kwh || 0).toFixed(1) + ' kWh';
     
     if (tomorrow) {
@@ -332,25 +331,29 @@ async function updateForecast() {
     document.getElementById('forecast-date').textContent =
       now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 
-    // Weather icon
-    if (data.weather && data.weather.icon_class) {
-      document.getElementById('weather-i').className = data.weather.icon_class;
+    // Weather information
+    if (data.weather) {
+      const w = data.weather;
+      document.getElementById('weather-i').className = w.icon_class || 'fi fi-sr-sun';
+      document.getElementById('weather-temp').textContent = w.temp != null ? w.temp.toFixed(0) + '°C' : '--°';
+      document.getElementById('weather-desc').textContent = w.desc || '';
+      document.getElementById('weather-extra').textContent = w.extra || '';
     }
 
-    // Sparkline (actual + forecast)
+    // Sparkline: actual + forecast for today, 7 AM – 7 PM
     const historyRes = await fetch('/api/history?days=1');
     const historyData = await historyRes.json();
     const actualPoints = historyData
       .filter(d => {
         const date = new Date(d.timestamp);
         return date.toLocaleDateString('en-CA') === todayDate &&
-               date.getHours() >= 6 && date.getHours() <= 19;
+               date.getHours() >= 7 && date.getHours() <= 19;
       })
       .map(d => ({ x: d.timestamp, y: d.solar_kw }));
 
     const intervals = [];
     const intervalLabels = [];
-    for (let h = 6; h <= 19; h += 0.5) {
+    for (let h = 7; h <= 19; h += 0.5) {
       const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), Math.floor(h), (h % 1) * 60, 0);
       intervals.push(start.getTime());
       intervalLabels.push(start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }));
@@ -377,7 +380,7 @@ async function updateForecast() {
       .filter(h => {
         const d = new Date(h.period_end);
         return d.toISOString().startsWith(todayDate) &&
-               d.getHours() >= 6 && d.getHours() <= 19;
+               d.getHours() >= 7 && d.getHours() <= 19;
       })
       .map(h => ({ x: new Date(h.period_end).getTime(), y: h.pv_estimate }));
 
@@ -431,7 +434,7 @@ async function updateForecast() {
       sparklineChart.data.datasets[1].backgroundColor = gradient;
     }
 
-    sparklineChart.options.scales.x.min = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 6,0,0).getTime();
+    sparklineChart.options.scales.x.min = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 7,0,0).getTime();
     sparklineChart.options.scales.x.max = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 19,0,0).getTime();
     sparklineChart.options.scales.y.max = systemCapacityKwp || undefined;
     sparklineChart.options.scales.x.ticks.color = isDark ? '#f8fafc' : '#0f172a';
