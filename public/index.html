@@ -59,9 +59,9 @@
       <span id="grid-to-battery-arrow">↑</span> Grid charging battery <span id="grid-to-battery-arrow">↑</span>
     </div>
 
-    <!-- Solar Forecast – New Compact Row -->
+    <!-- Solar Forecast – Weather icon between numbers and sparkline -->
     <div class="pv-today-banner" id="forecast-banner" style="display:none;">
-      <div class="pv-top-row">
+      <div class="pv-top-bar">
         <h3>Solar Forecast</h3>
         <div class="now-gauge" id="now-inline-gauge">
           <div class="gauge-bar-bg">
@@ -69,13 +69,11 @@
           </div>
           <span class="gauge-percent" id="gauge-percent">0%</span>
         </div>
-        <div class="weather-icon" id="weather-icon" title="Weather">
-          <i class="fi fi-sr-sun" id="weather-i"></i>
-        </div>
         <span class="forecast-date" id="forecast-date"></span>
       </div>
 
-      <div class="pv-content">
+      <div class="pv-main-row">
+        <!-- Forecast numbers -->
         <div class="pv-days">
           <div class="pv-day" id="today-day">
             <span class="pv-day-label">Today</span>
@@ -91,6 +89,12 @@
           </div>
         </div>
 
+        <!-- Large weather icon in the centre -->
+        <div class="weather-icon-big" id="weather-icon">
+          <i class="fi fi-sr-sun" id="weather-i"></i>
+        </div>
+
+        <!-- Sparkline (50% width) -->
         <div class="pv-sparkline-container">
           <canvas id="pv-sparkline" width="400" height="160"></canvas>
         </div>
