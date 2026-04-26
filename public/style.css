@@ -142,7 +142,7 @@ h1, h2, h3, h4,
 /* Flow Card – unified radius */
 .flow-card {
   display: flex;
-  align-items: center;
+  align-items: center;          /* vertically center all flex items */
   justify-content: space-around;
   background: var(--card-bg);
   padding: 2.5rem 1.5rem;
@@ -154,15 +154,22 @@ h1, h2, h3, h4,
   border: 1px solid var(--border);
 }
 
+/* Each flow item now acts as a column with fixed height, so icons align perfectly */
 .flow-item {
-  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;      /* centers everything vertically */
+  min-height: 150px;            /* enough space for icon + label + value + optional sub */
   min-width: 130px;
+  text-align: center;
 }
 
 /* Icons (Flaticon) – decorative size, not part of text scale */
 .flow-icon {
   font-size: 3.5rem;
   margin-bottom: 0.5rem;
+  line-height: 1;
 }
 
 .flow-icon i {
@@ -175,28 +182,32 @@ h1, h2, h3, h4,
   font-size: var(--fs-small);
   opacity: 0.8;
   color: var(--text-secondary);
+  margin-bottom: 0.25rem;
 }
 
 .flow-value {
   font-size: var(--fs-large);
   font-weight: 600;
   color: var(--text);
+  margin-bottom: 0.1rem;
 }
 
 .flow-sub {
   font-size: var(--fs-small);
   opacity: 0.7;
-  margin-top: 0.25rem;
+  margin-top: 0.15rem;
 }
 
+/* Arrows – now larger */
 .flow-arrow {
-  font-size: 2.8rem;
+  font-size: 3.5rem;            /* increased from 2.8rem */
   opacity: 0.7;
   transition: color 0.3s ease;
   min-width: 50px;
   text-align: center;
   color: var(--text-secondary);
   font-weight: bold;
+  align-self: center;           /* keep arrows vertically centred */
 }
 
 .flow-arrow.flowing {
@@ -530,10 +541,14 @@ h1, h2, h3, h4,
     font-size: var(--fs-large);
   }
   .flow-arrow {
-    font-size: 2rem;
+    font-size: 2.5rem;
     display: none;
   }
   .flow-card {
+    flex-direction: column;
+  }
+  .flow-item {
+    min-height: auto;      /* remove fixed height on mobile so items collapse naturally */
     flex-direction: column;
   }
   .stat-value {
