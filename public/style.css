@@ -178,6 +178,11 @@ h1, h2, h3, h4,
   display: block;
 }
 
+/* Make the battery icon vertical */
+#icon-battery {
+  transform: rotate(90deg);
+}
+
 .flow-label {
   font-size: var(--fs-small);
   opacity: 0.8;
