@@ -18,9 +18,10 @@ let currentSolarWatts = 0;
 let systemCapacityKwp = 2.1;   // updated from settings
 
 function formatCurrency(amount, currency) {
-  return currency + ' ' + amount.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
+  // Round to whole number and remove decimals
+  const rounded = Math.round(amount);
+  return currency + ' ' + rounded.toLocaleString(undefined, {
+    maximumFractionDigits: 0
   });
 }
 
@@ -339,21 +340,20 @@ async function updateForecast() {
       document.getElementById('weather-desc').textContent = w.desc || '';
       document.getElementById('weather-extra').textContent = w.extra || '';
 
-      // Set icon colour based on weather description
       const iconEl = document.getElementById('weather-i');
       const desc = (w.desc || '').toLowerCase();
       if (desc.includes('clear') || desc.includes('sunny')) {
-        iconEl.style.color = '#f59e0b';            // warm yellow
+        iconEl.style.color = '#f59e0b';
       } else if (desc.includes('partly cloudy')) {
-        iconEl.style.color = '#eab308';            // amber
+        iconEl.style.color = '#eab308';
       } else if (desc.includes('cloudy') || desc.includes('overcast')) {
-        iconEl.style.color = '#9ca3af';            // gray
+        iconEl.style.color = '#9ca3af';
       } else if (desc.includes('rain') || desc.includes('drizzle')) {
-        iconEl.style.color = '#3b82f6';            // blue
+        iconEl.style.color = '#3b82f6';
       } else if (desc.includes('fog')) {
-        iconEl.style.color = '#94a3b8';            // light gray
+        iconEl.style.color = '#94a3b8';
       } else {
-        iconEl.style.color = 'var(--text)';        // default
+        iconEl.style.color = 'var(--text)';
       }
     }
 
