@@ -33,6 +33,7 @@ const upload = multer({
 let db;
 const DB_PATH = './data/energy.db';
 
+// MQTT client declared early to avoid initialization errors
 let mqttClient = null;
 const mqttValues = {
   consumption: 0, solar: 0, battery_charge: 0, battery_discharge: 0,
@@ -784,7 +785,7 @@ app.get('/api/solar-forecast', async (req, res) => {
     const hourly = forecastData.slice(0, 96);
     const result = { daily, hourly, source };
 
-    // Fetch weather data: current weather + daily weather codes for next two days
+    // Fetch weather data: current weather + daily weather for next two days
     if (lat && lon) {
       try {
         // Current weather (icon, temp, humidity, feels like)
@@ -798,7 +799,6 @@ app.get('/api/solar-forecast', async (req, res) => {
           const currentData = await currentRes.json();
           const cw = currentData.current_weather;
           temp = cw.temperature;
-          // Map weather code to icon
           const code = cw.weathercode;
           const mapping = weatherCodeMap[code] || DEFAULT_WEATHER;
           iconClass = mapping.icon;
@@ -815,28 +815,46 @@ app.get('/api/solar-forecast', async (req, res) => {
           }
         }
 
-        // Daily weather codes for the next two days (tomorrow and day after)
-        let forecastIcons = [];
-        // We have the solar daily array already, so we can use those dates
+        // Daily forecast weather for the next 2 days (full details)
+        let forecastWeather = [];
         if (daily.length > 1) {
           const tomorrowDate = daily[1].date;
-          // day after tomorrow = daily[2] if exists
           const dayAfterDate = daily.length > 2 ? daily[2].date : null;
-          const dailyWeatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weathercode&timezone=auto&forecast_days=3`;
-          const dailyRes = await fetch(dailyWeatherUrl);
-          if (dailyRes.ok) {
-            const dailyData = await dailyRes.json();
-            const dailyWeatherCodes = dailyData.daily.weathercode; // array, index 0 = today, 1 = tomorrow, 2 = day after
-            const dailyDates = dailyData.daily.time; // array of strings YYYY-MM-DD
-            const tomorrowMapping = dailyDates.indexOf(tomorrowDate) !== -1 ? weatherCodeMap[dailyWeatherCodes[dailyDates.indexOf(tomorrowDate)]] || DEFAULT_WEATHER : DEFAULT_WEATHER;
-            forecastIcons.push({ date: tomorrowDate, icon_class: tomorrowMapping.icon });
-            if (dayAfterDate && dailyDates.indexOf(dayAfterDate) !== -1) {
-              const dayAfterMapping = weatherCodeMap[dailyWeatherCodes[dailyDates.indexOf(dayAfterDate)]] || DEFAULT_WEATHER;
-              forecastIcons.push({ date: dayAfterDate, icon_class: dayAfterMapping.icon });
+
+          // Fetch daily weather data: weather code, max temp, apparent max temp, avg humidity
+          const dailyWeatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weathercode,temperature_2m_max,apparent_temperature_max,relativehumidity_2m_mean&timezone=auto&forecast_days=3`;
+          const dailyWeatherRes = await fetch(dailyWeatherUrl);
+          if (dailyWeatherRes.ok) {
+            const dailyWeatherData = await dailyWeatherRes.json();
+            const dates = dailyWeatherData.daily.time;
+            const codes = dailyWeatherData.daily.weathercode;
+            const temps = dailyWeatherData.daily.temperature_2m_max;
+            const feels = dailyWeatherData.daily.apparent_temperature_max;
+            const humids = dailyWeatherData.daily.relativehumidity_2m_mean;
+
+            // Helper to build a weather entry for a given date
+            function buildWeatherEntry(date) {
+              const idx = dates.indexOf(date);
+              if (idx === -1) return null;
+              const mapping = weatherCodeMap[codes[idx]] || DEFAULT_WEATHER;
+              return {
+                date,
+                icon_class: mapping.icon,
+                desc: mapping.desc,
+                temp: temps[idx],
+                extra: (feels[idx] != null ? `Feels ${feels[idx].toFixed(0)}°C` : '') +
+                       (humids[idx] != null ? ` · Humidity ${humids[idx].toFixed(0)}%` : '')
+              };
             }
-          } else {
-            forecastIcons.push({ date: tomorrowDate, icon_class: DEFAULT_WEATHER.icon });
-            if (dayAfterDate) forecastIcons.push({ date: dayAfterDate, icon_class: DEFAULT_WEATHER.icon });
+
+            if (tomorrowDate) {
+              const tomorrowEntry = buildWeatherEntry(tomorrowDate);
+              if (tomorrowEntry) forecastWeather.push(tomorrowEntry);
+            }
+            if (dayAfterDate) {
+              const dayAfterEntry = buildWeatherEntry(dayAfterDate);
+              if (dayAfterEntry) forecastWeather.push(dayAfterEntry);
+            }
           }
         }
 
@@ -846,14 +864,14 @@ app.get('/api/solar-forecast', async (req, res) => {
           temp,
           extra: (feelsLike != null ? `Feels ${feelsLike.toFixed(0)}°C` : '') +
                  (humidity != null ? ` · Humidity ${humidity}%` : ''),
-          forecast_icons: forecastIcons
+          forecast_weather: forecastWeather   // array of objects with date, icon_class, desc, temp, extra
         };
       } catch (e) {
         console.warn('Weather data fetch failed:', e.message);
-        result.weather = { ...DEFAULT_WEATHER, temp: null, extra: '', forecast_icons: [] };
+        result.weather = { ...DEFAULT_WEATHER, temp: null, extra: '', forecast_weather: [] };
       }
     } else {
-      result.weather = { ...DEFAULT_WEATHER, temp: null, extra: '', forecast_icons: [] };
+      result.weather = { ...DEFAULT_WEATHER, temp: null, extra: '', forecast_weather: [] };
     }
 
     forecastCache = { data: result, timestamp: now };
