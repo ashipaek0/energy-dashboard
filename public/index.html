@@ -100,7 +100,7 @@
           </div>
         </div>
 
-        <!-- Sparkline (narrower, 40% width) -->
+        <!-- Sparkline (now flexes to fill the remaining space) -->
         <div class="pv-sparkline-container">
           <canvas id="pv-sparkline" width="300" height="160"></canvas>
         </div>
@@ -184,24 +184,21 @@
       <span>Grid Last Off: <span id="grid-last-off">--</span></span>
     </div>
 
-    <!-- Power Overview Chart -->
+    <!-- Power Overview Chart (only 24h option) -->
     <div class="chart-container">
       <div class="chart-header">
         <h3>Power Overview</h3>
         <div class="chart-controls">
           <button data-range="1" class="active">24h</button>
-          <button data-range="7">7d</button>
-          <button data-range="30">30d</button>
-          <button data-range="90">90d</button>
         </div>
       </div>
       <canvas id="powerChart"></canvas>
     </div>
 
-    <!-- Daily Energy Bar Chart -->
+    <!-- Daily Energy Bar Chart (title simplified) -->
     <div class="chart-container">
       <div class="chart-header">
-        <h3>Daily Energy (Last 7 Days)</h3>
+        <h3>Daily Energy</h3>
       </div>
       <canvas id="energyBarChart"></canvas>
     </div>
