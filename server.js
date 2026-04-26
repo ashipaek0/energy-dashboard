@@ -310,7 +310,7 @@ app.use(express.json());
 
 app.get('/api/public-config', async (req, res) => {
   try {
-    const keys = ['dashboard_title', 'dashboard_logo', 'savings_currency', 'savings_rate'];
+    const keys = ['dashboard_title', 'dashboard_logo', 'savings_currency', 'savings_rate', 'solar_capacity_kwp'];
     const config = {};
     for (const key of keys) {
       config[key] = getConfig(key);
