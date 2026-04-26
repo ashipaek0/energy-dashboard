@@ -33,6 +33,7 @@ const upload = multer({
 let db;
 const DB_PATH = './data/energy.db';
 
+// MQTT client declared early to avoid initialization errors
 let mqttClient = null;
 const mqttValues = {
   consumption: 0, solar: 0, battery_charge: 0, battery_discharge: 0,
@@ -41,6 +42,24 @@ const mqttValues = {
   daily_grid_import: 0, daily_grid_export: 0
 };
 const topicKeyMap = {};
+
+// Weather code mapping to Flaticon UIcons classes
+const weatherCodeMap = {
+  0: { icon: 'fi fi-sr-sun', desc: 'Clear Sky' },
+  1: { icon: 'fi fi-sr-sun', desc: 'Mainly Clear' },
+  2: { icon: 'fi fi-sr-cloud-sun', desc: 'Partly Cloudy' },
+  3: { icon: 'fi fi-sr-cloud', desc: 'Overcast' },
+  45: { icon: 'fi fi-sr-cloud', desc: 'Fog' },
+  48: { icon: 'fi fi-sr-cloud', desc: 'Depositing Rime Fog' },
+  51: { icon: 'fi fi-sr-cloud-rain', desc: 'Light Drizzle' },
+  53: { icon: 'fi fi-sr-cloud-rain', desc: 'Moderate Drizzle' },
+  55: { icon: 'fi fi-sr-cloud-rain', desc: 'Dense Drizzle' },
+  61: { icon: 'fi fi-sr-cloud-rain', desc: 'Slight Rain' },
+  63: { icon: 'fi fi-sr-cloud-rain', desc: 'Moderate Rain' },
+  65: { icon: 'fi fi-sr-cloud-rain', desc: 'Heavy Rain' },
+  80: { icon: 'fi fi-sr-cloud-rain', desc: 'Rain Showers' }
+};
+const DEFAULT_WEATHER = { icon: 'fi fi-sr-sun', desc: 'Clear Sky' };
 
 function parseGridState(state) {
   if (state === null || state === undefined) return 0;
@@ -551,6 +570,7 @@ app.get('/api/savings', async (req, res) => {
     const rate = parseFloat(rateRow?.value) || 0.30;
     const currency = getConfig('savings_currency') || '€';
 
+    // --- Get TODAY's solar directly from live sensor (HA or MQTT) ---
     let todaySolar = 0;
     try {
       const haEnabled = await isSourceEnabled('ha_enabled');
@@ -567,6 +587,7 @@ app.get('/api/savings', async (req, res) => {
     } catch (e) {
       console.warn('Failed to fetch live daily solar for savings, falling back to history:', e.message);
     }
+    // Fallback to history if live value is zero
     if (todaySolar === 0) {
       const now = new Date();
       const todayStart = new Date(now); todayStart.setHours(0,0,0,0);
@@ -587,6 +608,7 @@ app.get('/api/savings', async (req, res) => {
     }
     const todaySavings = todaySolar * rate;
 
+    // Helper: get total solar energy for a period (week, month, all-time) from history
     function getTotalSolarSince(startDate) {
       const startUnix = Math.floor(startDate.getTime() / 1000);
       const rows = db.prepare(`
@@ -606,16 +628,22 @@ app.get('/api/savings', async (req, res) => {
     }
 
     const now = new Date();
-    const dayOfWeek = now.getDay();
-    const diff = (dayOfWeek === 0 ? 6 : dayOfWeek - 1);
-    const weekStart = new Date(now); weekStart.setDate(now.getDate() - diff); weekStart.setHours(0,0,0,0);
+
+    // This Week (starting Monday)
+    const day = now.getDay();
+    const diff = (day === 0 ? 6 : day - 1);
+    const weekStart = new Date(now); 
+    weekStart.setDate(now.getDate() - diff); 
+    weekStart.setHours(0,0,0,0);
     const weekSolar = getTotalSolarSince(weekStart);
     const weekSavings = weekSolar * rate;
 
+    // This Month
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const monthSolar = getTotalSolarSince(monthStart);
     const monthSavings = monthSolar * rate;
 
+    // All-time – first check for manual override
     let allTimeSavings;
     const overrideValStr = getConfig('all_time_pv_savings_override');
     if (overrideValStr && !isNaN(parseFloat(overrideValStr))) {
@@ -649,25 +677,7 @@ app.get('/api/savings', async (req, res) => {
   }
 });
 
-// Weather codes mapping
-const weatherCodeMap = {
-  0: { icon: 'fi fi-sr-sun', desc: 'Clear Sky' },
-  1: { icon: 'fi fi-sr-sun', desc: 'Mainly Clear' },
-  2: { icon: 'fi fi-sr-cloud-sun', desc: 'Partly Cloudy' },
-  3: { icon: 'fi fi-sr-cloud', desc: 'Overcast' },
-  45: { icon: 'fi fi-sr-cloud', desc: 'Fog' },
-  48: { icon: 'fi fi-sr-cloud', desc: 'Depositing Rime Fog' },
-  51: { icon: 'fi fi-sr-cloud-rain', desc: 'Light Drizzle' },
-  53: { icon: 'fi fi-sr-cloud-rain', desc: 'Moderate Drizzle' },
-  55: { icon: 'fi fi-sr-cloud-rain', desc: 'Dense Drizzle' },
-  61: { icon: 'fi fi-sr-cloud-rain', desc: 'Slight Rain' },
-  63: { icon: 'fi fi-sr-cloud-rain', desc: 'Moderate Rain' },
-  65: { icon: 'fi fi-sr-cloud-rain', desc: 'Heavy Rain' },
-  80: { icon: 'fi fi-sr-cloud-rain', desc: 'Rain Showers' },
-};
-const DEFAULT_WEATHER = { icon: 'fi fi-sr-sun', desc: 'Clear Sky' };
-
-// Helper function for Open-Meteo forecast (unchanged)
+// Helper function for Open-Meteo forecast (unused as standalone, kept for reference)
 async function fetchOpenMeteoForecast(res, lat, lon, capacityKwp) {
   if (!lat || !lon || capacityKwp <= 0) {
     return res.json({ error: 'Location or capacity not configured' });
@@ -697,6 +707,7 @@ async function fetchOpenMeteoForecast(res, lat, lon, capacityKwp) {
   return res.json({ daily, hourly: hourlyOut, source: 'open-meteo' });
 }
 
+// Helper function to get Open-Meteo forecast data (returns forecasts array and source)
 async function getOpenMeteoData(lat, lon, capacityKwp) {
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=4`;
   const response = await fetch(url);
@@ -711,6 +722,7 @@ async function getOpenMeteoData(lat, lon, capacityKwp) {
   return { forecasts, source: 'open-meteo' };
 }
 
+// Solar Forecast endpoint (cached)
 let forecastCache = { data: null, timestamp: 0 };
 const FORECAST_CACHE_MS = 3 * 60 * 60 * 1000;
 
@@ -741,7 +753,9 @@ app.get('/api/solar-forecast', async (req, res) => {
     let forecastData = null;
     let source = 'none';
 
+    // Attempt Solcast if key is provided
     if (solcastKey) {
+      // Try resource ID first (preferred)
       if (resourceId) {
         try {
           const url = `https://api.solcast.com.au/rooftop_sites/${resourceId}/forecasts?format=json&api_key=${solcastKey}`;
@@ -756,10 +770,12 @@ app.get('/api/solar-forecast', async (req, res) => {
               source = 'solcast';
             }
           } else {
-            console.warn('Solcast (resource) fetch failed:', response.status, await response.text());
+            const errorText = await response.text();
+            console.warn('Solcast (resource) fetch failed:', response.status, errorText);
           }
         } catch (e) { console.warn('Solcast (resource) error:', e.message); }
       }
+      // Fallback to lat/lon if resource ID not provided or failed
       if (!forecastData && lat && lon) {
         try {
           const tilt = parseFloat(getConfig('solar_tilt')) || 30;
@@ -776,12 +792,14 @@ app.get('/api/solar-forecast', async (req, res) => {
               source = 'solcast';
             }
           } else {
-            console.warn('Solcast (lat/lon) fetch failed:', response.status, await response.text());
+            const errorText = await response.text();
+            console.warn('Solcast (lat/lon) fetch failed:', response.status, errorText);
           }
         } catch (e) { console.warn('Solcast (lat/lon) error:', e.message); }
       }
     }
 
+    // If Solcast didn't work, fall back to Open-Meteo
     if (!forecastData) {
       if (!lat || !lon) {
         return res.json({ error: 'Location (lat/lon) required for Open-Meteo fallback' });
@@ -796,8 +814,11 @@ app.get('/api/solar-forecast', async (req, res) => {
       }
     }
 
+    // --- From here, we have forecastData from either source ---
+    // Get today's actual generation from live sensor (with fallback)
     let actualTodayKwh = 0;
-    const todayDate = new Date().toLocaleDateString('en-CA');
+    const todayDate = new Date().toLocaleDateString('en-CA'); // local date YYYY-MM-DD
+
     try {
       const haEnabled = await isSourceEnabled('ha_enabled');
       const mqttEnabled = await isSourceEnabled('mqtt_enabled');
@@ -813,6 +834,8 @@ app.get('/api/solar-forecast', async (req, res) => {
     } catch (e) {
       console.warn('Failed to fetch live daily solar for forecast, falling back to history:', e.message);
     }
+
+    // Fallback to history if live value is zero (sensor might be offline)
     if (actualTodayKwh === 0) {
       const todayStart = new Date(); todayStart.setHours(0,0,0,0);
       const todayStartUnix = Math.floor(todayStart.getTime() / 1000);
@@ -831,6 +854,7 @@ app.get('/api/solar-forecast', async (req, res) => {
       actualTodayKwh = maxVal;
     }
 
+    // Aggregate forecast data to daily totals
     const dailyMap = new Map();
     forecastData.forEach(f => {
       const date = f.period_end.split('T')[0];
@@ -841,6 +865,8 @@ app.get('/api/solar-forecast', async (req, res) => {
     });
 
     const daily = Array.from(dailyMap.values()).slice(0, 4);
+    
+    // For the current day, replace total_kwh with actual + remaining forecast
     for (const dayEntry of daily) {
       if (dayEntry.date === todayDate) {
         dayEntry.total_kwh = actualTodayKwh + dayEntry.total_kwh;
@@ -850,9 +876,10 @@ app.get('/api/solar-forecast', async (req, res) => {
     }
 
     const hourly = forecastData.slice(0, 96);
+
     const result = { daily, hourly, source };
 
-    // Add weather data
+    // Add weather data from Open-Meteo if lat/lon available
     if (lat && lon) {
       try {
         const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=weathercode&timezone=auto&forecast_days=1`;
@@ -887,5 +914,291 @@ app.get('/api/solar-forecast', async (req, res) => {
   }
 });
 
-// ... rest of server.js (test-forecast, backup/restore, settings API, etc.) remains identical to the previous version ...
-// (For brevity, the remaining unchanged endpoints are not repeated; they are the same as in the last provided server.js.)
+app.get('/api/test-forecast', authMiddleware, async (req, res) => {
+  try {
+    const latStr = getConfig('solar_latitude');
+    const lonStr = getConfig('solar_longitude');
+    const capStr = getConfig('solar_capacity_kwp');
+    
+    if (!latStr || !lonStr || !capStr) {
+      return res.status(400).json({ error: 'Latitude, longitude, and capacity are required' });
+    }
+    
+    const lat = parseFloat(latStr);
+    const lon = parseFloat(lonStr);
+    const capacityKwp = parseFloat(capStr);
+    
+    if (isNaN(lat) || isNaN(lon)) {
+      return res.status(400).json({ error: 'Invalid latitude or longitude format' });
+    }
+    if (isNaN(capacityKwp) || capacityKwp <= 0) {
+      return res.status(400).json({ error: 'System capacity must be a positive number (kWp)' });
+    }
+
+    const solcastKey = getConfig('solcast_api_key');
+    const resourceId = getConfig('solcast_resource_id');
+    const tilt = parseFloat(getConfig('solar_tilt')) || 30;
+    const azimuth = parseFloat(getConfig('solar_azimuth')) || 180;
+    const lossFactor = parseFloat(getConfig('solar_loss_factor')) || 0.9;
+    const installDate = getConfig('solar_install_date') || '2020-01-01';
+
+    let source = 'none';
+    let dailyTotal = 0;
+    let peak = 0;
+
+    if (solcastKey) {
+      // Try resource ID first
+      if (resourceId) {
+        try {
+          const url = `https://api.solcast.com.au/rooftop_sites/${resourceId}/forecasts?format=json&api_key=${solcastKey}`;
+          const response = await fetch(url);
+          if (response.ok) {
+            const data = await response.json();
+            const forecasts = data.forecasts || [];
+            const today = new Date().toISOString().split('T')[0];
+            forecasts.forEach(f => {
+              if (f.period_end.startsWith(today)) {
+                dailyTotal += f.pv_estimate;
+                peak = Math.max(peak, f.pv_estimate);
+              }
+            });
+            source = 'solcast';
+          }
+        } catch (e) { console.warn('Solcast (resource) test failed:', e.message); }
+      }
+      // Fallback to lat/lon
+      if (source === 'none') {
+        try {
+          const url = `https://api.solcast.com.au/world_pv_power/forecasts?latitude=${lat}&longitude=${lon}&capacity=${capacityKwp}&tilt=${tilt}&azimuth=${azimuth}&loss_factor=${lossFactor}&install_date=${installDate}&format=json&api_key=${solcastKey}`;
+          const response = await fetch(url);
+          if (response.ok) {
+            const data = await response.json();
+            const forecasts = data.forecasts || [];
+            const today = new Date().toISOString().split('T')[0];
+            forecasts.forEach(f => {
+              if (f.period_end.startsWith(today)) {
+                dailyTotal += f.pv_estimate;
+                peak = Math.max(peak, f.pv_estimate);
+              }
+            });
+            source = 'solcast';
+          }
+        } catch (e) { console.warn('Solcast (lat/lon) test failed:', e.message); }
+      }
+    }
+
+    if (source === 'none') {
+      // Open-Meteo fallback
+      try {
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=1`;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Open-Meteo API error: ${response.status}`);
+        const data = await response.json();
+        const conversionFactor = capacityKwp / 1000;
+        const hourly = data.hourly;
+        const today = new Date().toISOString().split('T')[0];
+        hourly.time.forEach((t, i) => {
+          if (t.startsWith(today)) {
+            const pv = hourly.shortwave_radiation[i] * conversionFactor;
+            dailyTotal += pv;
+            peak = Math.max(peak, pv);
+          }
+        });
+        source = 'open-meteo';
+      } catch (e) {
+        return res.status(500).json({ error: `Forecast service unavailable: ${e.message}` });
+      }
+    }
+
+    res.json({
+      success: true,
+      source,
+      today_estimate_kwh: dailyTotal.toFixed(2),
+      peak_kw: peak.toFixed(2)
+    });
+  } catch (err) {
+    console.error('Test forecast error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Backup & Restore (protected) ---
+app.get('/api/backup', authMiddleware, (req, res) => {
+  try {
+    if (db) db.close();
+    res.download(DB_PATH, `energy-dashboard-backup-${Date.now()}.db`, (err) => {
+      initializeDatabase();
+      if (err) console.error('Backup download error:', err);
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/restore', authMiddleware, upload.single('dbfile'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const tempPath = req.file.path;
+  try {
+    const testDb = new Database(tempPath);
+    testDb.prepare('SELECT 1').get();
+    testDb.close();
+    
+    if (db) db.close();
+    if (mqttClient) { mqttClient.end(); mqttClient = null; }
+    
+    fs.copyFileSync(tempPath, DB_PATH);
+    initializeDatabase();
+    await setupMqtt();
+    fs.unlinkSync(tempPath);
+    
+    res.json({ success: true, message: 'Database restored successfully' });
+  } catch (err) {
+    try { fs.unlinkSync(tempPath); } catch (e) {}
+    try { initializeDatabase(); } catch (e) {}
+    res.status(500).json({ error: 'Invalid database file: ' + err.message });
+  }
+});
+
+// --- Settings API (protected) ---
+app.use('/api/settings', authMiddleware);
+
+app.get('/api/settings', async (req, res) => {
+  const rows = db.prepare('SELECT key, value FROM config').all();
+  const config = {};
+  rows.forEach(r => { config[r.key] = r.value; });
+  res.json(config);
+});
+
+app.post('/api/settings', async (req, res) => {
+  const updates = req.body;
+  try {
+    const stmt = db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)');
+    for (const [key, value] of Object.entries(updates)) {
+      stmt.run(key, String(value));
+    }
+    if ('mqtt_broker_url' in updates || 'mqtt_username' in updates || 'mqtt_password' in updates || 'mqtt_enabled' in updates) {
+      await restartMqtt();
+    }
+    // Clear forecast cache only if a forecast-related setting changed
+    const forecastKeys = [
+      'forecast_enabled', 'solar_latitude', 'solar_longitude', 'solar_tilt',
+      'solar_azimuth', 'solar_capacity_kwp', 'solcast_api_key', 'solcast_resource_id',
+      'solar_loss_factor', 'solar_install_date'
+    ];
+    if (Object.keys(updates).some(k => forecastKeys.includes(k))) {
+      forecastCache = { data: null, timestamp: 0 };
+      console.log('Forecast cache cleared – settings changed');
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Settings] Save error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/ha/entities', authMiddleware, async (req, res) => {
+  let haUrl = req.query.url;
+  let haToken = req.query.token;
+  if (!haUrl || !haToken) {
+    haUrl = getConfig('ha_url');
+    haToken = getConfig('ha_token');
+  }
+  if (!haUrl || !haToken) return res.status(400).json({ error: 'HA not configured' });
+  try {
+    const response = await fetch(`${haUrl}/api/states`, {
+      headers: { 'Authorization': `Bearer ${haToken}` }
+    });
+    if (!response.ok) throw new Error(`HA error ${response.status}`);
+    const data = await response.json();
+    const sensors = data.filter(e => e.entity_id.startsWith('sensor.') || e.entity_id.startsWith('binary_sensor.')).map(e => e.entity_id);
+    res.json(sensors);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/test-mqtt', authMiddleware, async (req, res) => {
+  let brokerUrl = req.query.broker;
+  if (!brokerUrl) brokerUrl = getConfig('mqtt_broker_url');
+  if (!brokerUrl) return res.status(400).json({ error: 'MQTT broker URL not configured' });
+  const options = {};
+  const username = req.query.username || getConfig('mqtt_username');
+  const password = req.query.password || getConfig('mqtt_password');
+  if (username) options.username = username;
+  if (password) options.password = password;
+  const testClient = mqtt.connect(brokerUrl, options);
+  let responded = false;
+  const timeout = setTimeout(() => {
+    if (!responded) {
+      testClient.end();
+      res.status(500).json({ error: 'Connection timeout' });
+    }
+  }, 5000);
+  testClient.on('connect', () => {
+    clearTimeout(timeout);
+    testClient.end();
+    if (!responded) {
+      responded = true;
+      res.json({ success: true, message: 'Connected to MQTT broker' });
+    }
+  });
+  testClient.on('error', (err) => {
+    clearTimeout(timeout);
+    testClient.end();
+    if (!responded) {
+      responded = true;
+      res.status(500).json({ error: err.message });
+    }
+  });
+});
+
+app.get('/api/test-mqtt-topic', authMiddleware, async (req, res) => {
+  let brokerUrl = req.query.broker;
+  if (!brokerUrl) brokerUrl = getConfig('mqtt_broker_url');
+  if (!brokerUrl) return res.status(400).json({ error: 'MQTT broker URL not configured' });
+  const topic = req.query.topic;
+  if (!topic) return res.status(400).json({ error: 'Topic required' });
+  const options = {};
+  const username = req.query.username || getConfig('mqtt_username');
+  const password = req.query.password || getConfig('mqtt_password');
+  if (username) options.username = username;
+  if (password) options.password = password;
+  const testClient = mqtt.connect(brokerUrl, options);
+  let responded = false;
+  const timeout = setTimeout(() => {
+    if (!responded) {
+      testClient.end();
+      res.status(500).json({ error: 'No message received within 5 seconds' });
+    }
+  }, 5000);
+  testClient.on('connect', () => { testClient.subscribe(topic); });
+  testClient.on('message', (recTopic, message) => {
+    if (recTopic === topic) {
+      clearTimeout(timeout);
+      testClient.end();
+      if (!responded) {
+        responded = true;
+        const val = parseFloat(message.toString());
+        if (!isNaN(val)) {
+          res.json({ success: true, value: val });
+        } else {
+          res.json({ success: true, value: null, raw: message.toString() });
+        }
+      }
+    }
+  });
+  testClient.on('error', (err) => {
+    clearTimeout(timeout);
+    testClient.end();
+    if (!responded) {
+      responded = true;
+      res.status(500).json({ error: err.message });
+    }
+  });
+});
+
+app.get('/settings', authMiddleware, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'settings.html'));
+});
+
+app.listen(PORT, () => console.log(`Energy dashboard running on port ${PORT}`));
