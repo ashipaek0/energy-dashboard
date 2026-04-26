@@ -33,7 +33,6 @@ const upload = multer({
 let db;
 const DB_PATH = './data/energy.db';
 
-// MQTT client declared early to avoid initialization errors
 let mqttClient = null;
 const mqttValues = {
   consumption: 0, solar: 0, battery_charge: 0, battery_discharge: 0,
@@ -43,7 +42,7 @@ const mqttValues = {
 };
 const topicKeyMap = {};
 
-// Weather code mapping
+// Weather code mapping (Flaticon icon classes)
 const weatherCodeMap = {
   0: { icon: 'fi fi-sr-sun', desc: 'Clear Sky' },
   1: { icon: 'fi fi-sr-sun', desc: 'Mainly Clear' },
@@ -178,10 +177,7 @@ async function isSourceEnabled(source) {
 }
 
 async function setupMqtt() {
-  if (mqttClient) {
-    mqttClient.end();
-    mqttClient = null;
-  }
+  if (mqttClient) { mqttClient.end(); mqttClient = null; }
   for (let k in topicKeyMap) delete topicKeyMap[k];
   const enabled = await isSourceEnabled('mqtt_enabled');
   if (!enabled) return;
@@ -192,7 +188,6 @@ async function setupMqtt() {
   const password = getConfig('mqtt_password');
   if (username) options.username = username;
   if (password) options.password = password;
-
   mqttClient = mqtt.connect(brokerUrl, options);
   mqttClient.on('connect', async () => {
     console.log('MQTT connected');
@@ -206,10 +201,7 @@ async function setupMqtt() {
     const topics = [];
     for (const k of topicKeys) {
       const topic = getConfig(k);
-      if (topic) {
-        topics.push(topic);
-        topicKeyMap[topic] = k.replace('mqtt_topic_', '');
-      }
+      if (topic) { topics.push(topic); topicKeyMap[topic] = k.replace('mqtt_topic_', ''); }
     }
     if (topics.length) mqttClient.subscribe(topics);
   });
@@ -222,9 +214,7 @@ async function setupMqtt() {
   mqttClient.on('error', (err) => console.error('MQTT error:', err));
 }
 
-async function restartMqtt() {
-  await setupMqtt();
-}
+async function restartMqtt() { await setupMqtt(); }
 
 async function getHAState(entityId, haUrl = null, haToken = null) {
   if (!haUrl) haUrl = getConfig('ha_url');
@@ -242,7 +232,6 @@ async function pollAndCache() {
   try {
     const haEnabled = await isSourceEnabled('ha_enabled');
     const mqttEnabled = await isSourceEnabled('mqtt_enabled');
-
     async function getValue(mqttKey, haEntityKey) {
       if (mqttEnabled && mqttValues[mqttKey] !== undefined) return mqttValues[mqttKey];
       if (haEnabled) {
@@ -254,17 +243,14 @@ async function pollAndCache() {
       }
       return 0;
     }
-
     const consumption = await getValue('consumption', 'ha_entity_consumption');
     const battCharge = await getValue('battery_charge', 'ha_entity_battery_charge');
     const battDischarge = await getValue('battery_discharge', 'ha_entity_battery_discharge');
     const gridImport = await getValue('grid_import', 'ha_entity_grid_import');
     const gridExport = await getValue('grid_export', 'ha_entity_grid_export');
     const batterySoc = await getValue('battery_soc', 'ha_entity_battery_soc');
-
     const solarPower = await getValue('solar', 'ha_entity_solar');
     const dailySolar = await getValue('daily_solar', 'ha_entity_daily_solar');
-
     const dailyConsumption = await getValue('daily_consumption', 'ha_entity_daily_consumption');
     const dailyBattCharge = await getValue('daily_battery_charge', 'ha_entity_daily_battery_charge');
     const dailyBattDischarge = await getValue('daily_battery_discharge', 'ha_entity_daily_battery_discharge');
@@ -293,11 +279,8 @@ async function pollAndCache() {
         }
       } catch (e) { console.error('Grid status polling error:', e); }
     }
-
     console.log(`Cached at ${new Date().toISOString()}`);
-  } catch (err) {
-    console.error('Polling error:', err);
-  }
+  } catch (err) { console.error('Polling error:', err); }
 }
 
 pollAndCache();
@@ -312,16 +295,12 @@ app.get('/api/public-config', async (req, res) => {
   try {
     const keys = ['dashboard_title', 'dashboard_logo', 'savings_currency', 'savings_rate', 'solar_capacity_kwp'];
     const config = {};
-    for (const key of keys) {
-      config[key] = getConfig(key);
-    }
+    for (const key of keys) { config[key] = getConfig(key); }
     config.dashboard_title = config.dashboard_title || '⚡ Energy Dashboard';
     config.savings_currency = config.savings_currency || '€';
     config.savings_rate = config.savings_rate || '0.30';
     res.json(config);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/current', async (req, res) => {
@@ -329,11 +308,7 @@ app.get('/api/current', async (req, res) => {
     const latest = db.prepare('SELECT * FROM history ORDER BY timestamp DESC LIMIT 1').get();
     const rateRow = db.prepare('SELECT value FROM config WHERE key = ?').get('savings_rate');
     const rate = parseFloat(rateRow?.value) || 0.30;
-    const allTimeSolar = db.prepare(`
-      SELECT SUM(daily_solar) as total FROM (
-        SELECT MAX(daily_solar) as daily_solar FROM history GROUP BY date(timestamp, 'unixepoch')
-      )
-    `).get();
+    const allTimeSolar = db.prepare(`SELECT SUM(daily_solar) as total FROM (SELECT MAX(daily_solar) as daily_solar FROM history GROUP BY date(timestamp, 'unixepoch'))`).get();
     const allTimeSavings = (allTimeSolar?.total || 0) * rate;
     if (latest) {
       const curr = getConfig('savings_currency') || '€';
@@ -357,12 +332,8 @@ app.get('/api/current', async (req, res) => {
         all_time_savings: allTimeSavings,
         timestamp: latest.timestamp * 1000
       });
-    } else {
-      res.json({ error: 'No data yet' });
-    }
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    } else { res.json({ error: 'No data yet' }); }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/history', async (req, res) => {
@@ -381,9 +352,7 @@ app.get('/api/history', async (req, res) => {
       grid_export_kw: r.grid_export / 1000,
       timestamp: r.timestamp * 1000
     })));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/daily', async (req, res) => {
@@ -403,9 +372,7 @@ app.get('/api/daily', async (req, res) => {
       GROUP BY day ORDER BY day ASC
     `).all(since);
     res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/monthly', async (req, res) => {
@@ -461,10 +428,7 @@ app.get('/api/monthly', async (req, res) => {
       };
     });
     res.json(result);
-  } catch (err) {
-    console.error('Monthly query error:', err);
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { console.error('Monthly query error:', err); res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/grid/status', async (req, res) => {
@@ -481,9 +445,7 @@ app.get('/api/grid/status', async (req, res) => {
       lastOn: lastOn ? lastOn.timestamp * 1000 : null,
       lastOff: lastOff ? lastOff.timestamp * 1000 : null
     });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 function getGridStateAt(timestamp) {
@@ -546,10 +508,7 @@ app.get('/api/grid/hours', async (req, res) => {
     }
     
     res.json({ period, hours: Math.round(hours * 10) / 10 });
-  } catch (err) {
-    console.error('[Grid Hours] Error:', err);
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { console.error('[Grid Hours] Error:', err); res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/debug/timezone', async (req, res) => {
@@ -617,9 +576,7 @@ app.get('/api/savings', async (req, res) => {
       rows.forEach(row => {
         const date = new Date(row.timestamp * 1000).toLocaleDateString('en-CA');
         const val = row.daily_solar;
-        if (!dailyMax[date] || val > dailyMax[date]) {
-          dailyMax[date] = val;
-        }
+        if (!dailyMax[date] || val > dailyMax[date]) { dailyMax[date] = val; }
       });
       return Object.values(dailyMax).reduce((sum, val) => sum + val, 0);
     }
@@ -640,16 +597,12 @@ app.get('/api/savings', async (req, res) => {
     if (overrideValStr && !isNaN(parseFloat(overrideValStr))) {
       allTimeSavings = parseFloat(overrideValStr);
     } else {
-      const allTimeRows = db.prepare(`
-        SELECT timestamp, daily_solar FROM history WHERE daily_solar IS NOT NULL ORDER BY timestamp ASC
-      `).all();
+      const allTimeRows = db.prepare(`SELECT timestamp, daily_solar FROM history WHERE daily_solar IS NOT NULL ORDER BY timestamp ASC`).all();
       const allDailyMax = {};
       allTimeRows.forEach(row => {
         const date = new Date(row.timestamp * 1000).toLocaleDateString('en-CA');
         const val = row.daily_solar;
-        if (!allDailyMax[date] || val > allDailyMax[date]) {
-          allDailyMax[date] = val;
-        }
+        if (!allDailyMax[date] || val > allDailyMax[date]) { allDailyMax[date] = val; }
       });
       const allTimeSolar = Object.values(allDailyMax).reduce((sum, val) => sum + val, 0);
       allTimeSavings = allTimeSolar * rate;
@@ -662,43 +615,10 @@ app.get('/api/savings', async (req, res) => {
       month: monthSavings || 0,
       all: allTimeSavings || 0
     });
-  } catch (err) {
-    console.error('Savings error:', err);
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { console.error('Savings error:', err); res.status(500).json({ error: err.message }); }
 });
 
-// Helper function for Open-Meteo forecast (unused as standalone)
-async function fetchOpenMeteoForecast(res, lat, lon, capacityKwp) {
-  if (!lat || !lon || capacityKwp <= 0) {
-    return res.json({ error: 'Location or capacity not configured' });
-  }
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=4`;
-  const response = await fetch(url);
-  const data = await response.json();
-  
-  const conversionFactor = capacityKwp / 1000;
-  const hourly = data.hourly;
-  const forecastData = hourly.time.map((t, i) => ({
-    period_end: new Date(t).toISOString(),
-    pv_estimate: hourly.shortwave_radiation[i] * conversionFactor
-  }));
-  
-  const dailyMap = new Map();
-  forecastData.forEach(f => {
-    const date = f.period_end.split('T')[0];
-    const existing = dailyMap.get(date) || { date, total_kwh: 0, peak_kw: 0, source: 'open-meteo' };
-    existing.total_kwh += f.pv_estimate;
-    existing.peak_kw = Math.max(existing.peak_kw, f.pv_estimate);
-    dailyMap.set(date, existing);
-  });
-  
-  const daily = Array.from(dailyMap.values()).slice(0, 4);
-  const hourlyOut = forecastData.slice(0, 96);
-  return res.json({ daily, hourly: hourlyOut, source: 'open-meteo' });
-}
-
-// Helper function to get Open-Meteo forecast data (returns forecasts array and source)
+// Helper: get Open-Meteo solar forecast data (unchanged)
 async function getOpenMeteoData(lat, lon, capacityKwp) {
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=4`;
   const response = await fetch(url);
@@ -864,37 +784,26 @@ app.get('/api/solar-forecast', async (req, res) => {
     const hourly = forecastData.slice(0, 96);
     const result = { daily, hourly, source };
 
-    // Fetch weather data (icon and current details)
+    // Fetch weather data: current weather + daily weather codes for next two days
     if (lat && lon) {
       try {
-        // First get weather code for icon
-        const weatherCodeUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=weathercode&timezone=auto&forecast_days=1`;
-        const weatherCodeRes = await fetch(weatherCodeUrl);
-        let iconClass = DEFAULT_WEATHER.icon;
-        let weatherDesc = DEFAULT_WEATHER.desc;
-        if (weatherCodeRes.ok) {
-          const weatherData = await weatherCodeRes.json();
-          const nowHour = new Date().getHours();
-          const hourlyTimes = weatherData.hourly.time.map(t => new Date(t));
-          for (let i = 0; i < hourlyTimes.length; i++) {
-            if (hourlyTimes[i].getHours() === nowHour) {
-              const code = weatherData.hourly.weathercode[i];
-              const mapping = weatherCodeMap[code] || DEFAULT_WEATHER;
-              iconClass = mapping.icon;
-              weatherDesc = mapping.desc;
-              break;
-            }
-          }
-        }
-
-        // Then get current weather for temperature, feels like, humidity
+        // Current weather (icon, temp, humidity, feels like)
         const currentUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=relativehumidity_2m,apparent_temperature&timezone=auto&forecast_days=1`;
         const currentRes = await fetch(currentUrl);
         let temp = null, feelsLike = null, humidity = null;
+        let iconClass = DEFAULT_WEATHER.icon;
+        let weatherDesc = DEFAULT_WEATHER.desc;
+
         if (currentRes.ok) {
           const currentData = await currentRes.json();
           const cw = currentData.current_weather;
           temp = cw.temperature;
+          // Map weather code to icon
+          const code = cw.weathercode;
+          const mapping = weatherCodeMap[code] || DEFAULT_WEATHER;
+          iconClass = mapping.icon;
+          weatherDesc = mapping.desc;
+
           const hourlyData = currentData.hourly;
           const times = hourlyData.time.map(t => new Date(t));
           for (let i = 0; i < times.length; i++) {
@@ -906,19 +815,45 @@ app.get('/api/solar-forecast', async (req, res) => {
           }
         }
 
+        // Daily weather codes for the next two days (tomorrow and day after)
+        let forecastIcons = [];
+        // We have the solar daily array already, so we can use those dates
+        if (daily.length > 1) {
+          const tomorrowDate = daily[1].date;
+          // day after tomorrow = daily[2] if exists
+          const dayAfterDate = daily.length > 2 ? daily[2].date : null;
+          const dailyWeatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weathercode&timezone=auto&forecast_days=3`;
+          const dailyRes = await fetch(dailyWeatherUrl);
+          if (dailyRes.ok) {
+            const dailyData = await dailyRes.json();
+            const dailyWeatherCodes = dailyData.daily.weathercode; // array, index 0 = today, 1 = tomorrow, 2 = day after
+            const dailyDates = dailyData.daily.time; // array of strings YYYY-MM-DD
+            const tomorrowMapping = dailyDates.indexOf(tomorrowDate) !== -1 ? weatherCodeMap[dailyWeatherCodes[dailyDates.indexOf(tomorrowDate)]] || DEFAULT_WEATHER : DEFAULT_WEATHER;
+            forecastIcons.push({ date: tomorrowDate, icon_class: tomorrowMapping.icon });
+            if (dayAfterDate && dailyDates.indexOf(dayAfterDate) !== -1) {
+              const dayAfterMapping = weatherCodeMap[dailyWeatherCodes[dailyDates.indexOf(dayAfterDate)]] || DEFAULT_WEATHER;
+              forecastIcons.push({ date: dayAfterDate, icon_class: dayAfterMapping.icon });
+            }
+          } else {
+            forecastIcons.push({ date: tomorrowDate, icon_class: DEFAULT_WEATHER.icon });
+            if (dayAfterDate) forecastIcons.push({ date: dayAfterDate, icon_class: DEFAULT_WEATHER.icon });
+          }
+        }
+
         result.weather = {
           icon_class: iconClass,
           desc: weatherDesc,
           temp,
           extra: (feelsLike != null ? `Feels ${feelsLike.toFixed(0)}°C` : '') +
-                 (humidity != null ? ` · Humidity ${humidity}%` : '')
+                 (humidity != null ? ` · Humidity ${humidity}%` : ''),
+          forecast_icons: forecastIcons
         };
       } catch (e) {
         console.warn('Weather data fetch failed:', e.message);
-        result.weather = DEFAULT_WEATHER;
+        result.weather = { ...DEFAULT_WEATHER, temp: null, extra: '', forecast_icons: [] };
       }
     } else {
-      result.weather = DEFAULT_WEATHER;
+      result.weather = { ...DEFAULT_WEATHER, temp: null, extra: '', forecast_icons: [] };
     }
 
     forecastCache = { data: result, timestamp: now };
@@ -929,6 +864,7 @@ app.get('/api/solar-forecast', async (req, res) => {
   }
 });
 
+// Test forecast endpoint (unchanged)
 app.get('/api/test-forecast', authMiddleware, async (req, res) => {
   try {
     const latStr = getConfig('solar_latitude');
@@ -962,7 +898,6 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
     let peak = 0;
 
     if (solcastKey) {
-      // Try resource ID first
       if (resourceId) {
         try {
           const url = `https://api.solcast.com.au/rooftop_sites/${resourceId}/forecasts?format=json&api_key=${solcastKey}`;
@@ -981,7 +916,6 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
           }
         } catch (e) { console.warn('Solcast (resource) test failed:', e.message); }
       }
-      // Fallback to lat/lon
       if (source === 'none') {
         try {
           const url = `https://api.solcast.com.au/world_pv_power/forecasts?latitude=${lat}&longitude=${lon}&capacity=${capacityKwp}&tilt=${tilt}&azimuth=${azimuth}&loss_factor=${lossFactor}&install_date=${installDate}&format=json&api_key=${solcastKey}`;
@@ -1003,7 +937,6 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
     }
 
     if (source === 'none') {
-      // Open-Meteo fallback
       try {
         const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=1`;
         const response = await fetch(url);
@@ -1031,10 +964,7 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
       today_estimate_kwh: dailyTotal.toFixed(2),
       peak_kw: peak.toFixed(2)
     });
-  } catch (err) {
-    console.error('Test forecast error:', err);
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { console.error('Test forecast error:', err); res.status(500).json({ error: err.message }); }
 });
 
 // --- Backup & Restore (protected) ---
@@ -1045,9 +975,7 @@ app.get('/api/backup', authMiddleware, (req, res) => {
       initializeDatabase();
       if (err) console.error('Backup download error:', err);
     });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/restore', authMiddleware, upload.single('dbfile'), async (req, res) => {
@@ -1105,10 +1033,7 @@ app.post('/api/settings', async (req, res) => {
       console.log('Forecast cache cleared – settings changed');
     }
     res.json({ success: true });
-  } catch (err) {
-    console.error('[Settings] Save error:', err);
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { console.error('[Settings] Save error:', err); res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/ha/entities', authMiddleware, async (req, res) => {
@@ -1127,9 +1052,7 @@ app.get('/api/ha/entities', authMiddleware, async (req, res) => {
     const data = await response.json();
     const sensors = data.filter(e => e.entity_id.startsWith('sensor.') || e.entity_id.startsWith('binary_sensor.')).map(e => e.entity_id);
     res.json(sensors);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/test-mqtt', authMiddleware, async (req, res) => {
@@ -1144,26 +1067,17 @@ app.get('/api/test-mqtt', authMiddleware, async (req, res) => {
   const testClient = mqtt.connect(brokerUrl, options);
   let responded = false;
   const timeout = setTimeout(() => {
-    if (!responded) {
-      testClient.end();
-      res.status(500).json({ error: 'Connection timeout' });
-    }
+    if (!responded) { testClient.end(); res.status(500).json({ error: 'Connection timeout' }); }
   }, 5000);
   testClient.on('connect', () => {
     clearTimeout(timeout);
     testClient.end();
-    if (!responded) {
-      responded = true;
-      res.json({ success: true, message: 'Connected to MQTT broker' });
-    }
+    if (!responded) { responded = true; res.json({ success: true, message: 'Connected to MQTT broker' }); }
   });
   testClient.on('error', (err) => {
     clearTimeout(timeout);
     testClient.end();
-    if (!responded) {
-      responded = true;
-      res.status(500).json({ error: err.message });
-    }
+    if (!responded) { responded = true; res.status(500).json({ error: err.message }); }
   });
 });
 
@@ -1181,10 +1095,7 @@ app.get('/api/test-mqtt-topic', authMiddleware, async (req, res) => {
   const testClient = mqtt.connect(brokerUrl, options);
   let responded = false;
   const timeout = setTimeout(() => {
-    if (!responded) {
-      testClient.end();
-      res.status(500).json({ error: 'No message received within 5 seconds' });
-    }
+    if (!responded) { testClient.end(); res.status(500).json({ error: 'No message received within 5 seconds' }); }
   }, 5000);
   testClient.on('connect', () => { testClient.subscribe(topic); });
   testClient.on('message', (recTopic, message) => {
@@ -1194,21 +1105,15 @@ app.get('/api/test-mqtt-topic', authMiddleware, async (req, res) => {
       if (!responded) {
         responded = true;
         const val = parseFloat(message.toString());
-        if (!isNaN(val)) {
-          res.json({ success: true, value: val });
-        } else {
-          res.json({ success: true, value: null, raw: message.toString() });
-        }
+        if (!isNaN(val)) { res.json({ success: true, value: val }); }
+        else { res.json({ success: true, value: null, raw: message.toString() }); }
       }
     }
   });
   testClient.on('error', (err) => {
     clearTimeout(timeout);
     testClient.end();
-    if (!responded) {
-      responded = true;
-      res.status(500).json({ error: err.message });
-    }
+    if (!responded) { responded = true; res.status(500).json({ error: err.message }); }
   });
 });
 
