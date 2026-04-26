@@ -332,14 +332,16 @@ async function updateForecast() {
     document.getElementById('forecast-date').textContent =
       now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 
-    // Weather information + dynamic icon color
+    // Weather information
     if (data.weather) {
       const w = data.weather;
+      // Current icon
       document.getElementById('weather-i').className = w.icon_class || 'fi fi-sr-sun';
       document.getElementById('weather-temp').textContent = w.temp != null ? w.temp.toFixed(0) + '°C' : '--°';
       document.getElementById('weather-desc').textContent = w.desc || '';
       document.getElementById('weather-extra').textContent = w.extra || '';
 
+      // Dynamic colour for current weather icon
       const iconEl = document.getElementById('weather-i');
       const desc = (w.desc || '').toLowerCase();
       if (desc.includes('clear') || desc.includes('sunny')) {
@@ -354,6 +356,20 @@ async function updateForecast() {
         iconEl.style.color = '#94a3b8';
       } else {
         iconEl.style.color = 'var(--text)';
+      }
+
+      // Forecast icons for next two days (to the right)
+      const ficonsContainer = document.getElementById('weather-forecast-icons');
+      if (ficonsContainer) {
+        ficonsContainer.innerHTML = '';
+        if (w.forecast_icons && w.forecast_icons.length > 0) {
+          w.forecast_icons.forEach(fi => {
+            const el = document.createElement('i');
+            el.className = fi.icon_class;
+            el.style.color = 'var(--text-secondary)';
+            ficonsContainer.appendChild(el);
+          });
+        }
       }
     }
 
