@@ -204,23 +204,13 @@ async function updateCurrent() {
 
     updateFlowArrows(currentSolarWatts, consumption, battCharge, battDischarge, gridImport, gridExport);
 
-    // --- Dynamically change Flaticon icon colours based on activity ---
+    // --- Dynamically change icon colours ---
     const solarIcon = document.getElementById('icon-solar');
-    const batteryIcon = document.getElementById('icon-battery');
     const homeIcon = document.getElementById('icon-home');
     const gridIcon = document.getElementById('icon-grid');
 
     if (solarIcon) {
       solarIcon.style.color = currentSolarWatts > 0 ? 'var(--solar)' : 'var(--text)';
-    }
-    if (batteryIcon) {
-      if (battCharge > battDischarge) {
-        batteryIcon.style.color = 'var(--battery)';   // charging
-      } else if (battDischarge > battCharge) {
-        batteryIcon.style.color = '#f59e0b';          // discharging
-      } else {
-        batteryIcon.style.color = 'var(--text)';
-      }
     }
     if (homeIcon) {
       homeIcon.style.color = consumption > 0 ? 'var(--home)' : 'var(--text)';
@@ -232,6 +222,22 @@ async function updateCurrent() {
         gridIcon.style.color = '#3b82f6';       // exporting
       } else {
         gridIcon.style.color = 'var(--text)';
+      }
+    }
+
+    // --- Update battery gauge fill level and colour ---
+    const batteryFill = document.getElementById('battery-fill');
+    if (batteryFill) {
+      // Set height based on SOC percentage
+      batteryFill.style.height = battSoc + '%';
+
+      // Set fill colour based on charging/discharging state
+      if (battCharge > battDischarge) {
+        batteryFill.style.background = 'var(--battery)';   // charging: green
+      } else if (battDischarge > battCharge) {
+        batteryFill.style.background = '#f59e0b';          // discharging: orange
+      } else {
+        batteryFill.style.background = 'var(--text)';      // idle
       }
     }
 
