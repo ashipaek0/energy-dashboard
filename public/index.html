@@ -26,7 +26,7 @@
       </div>
     </header>
 
-    <!-- Flow Card (Flaticon icons with IDs for colour changes) -->
+    <!-- Flow Card (Flaticon icons + custom battery gauge) -->
     <div class="flow-card">
       <div class="flow-item solar">
         <div class="flow-icon"><i id="icon-solar" class="fi fi-sr-sun"></i></div>
@@ -35,7 +35,15 @@
       </div>
       <div class="flow-arrow solar-home">→</div>
       <div class="flow-item battery">
-        <div class="flow-icon"><i id="icon-battery" class="fi fi-sr-battery-full"></i></div>
+        <!-- Custom vertical battery gauge replaces the icon -->
+        <div class="flow-icon battery-icon-wrapper">
+          <div class="battery-gauge" id="battery-gauge">
+            <div class="battery-terminal"></div>
+            <div class="battery-body">
+              <div class="battery-fill" id="battery-fill"></div>
+            </div>
+          </div>
+        </div>
         <div class="flow-label">Battery</div>
         <div class="flow-value" id="flow-battery-soc">--%</div>
         <div class="flow-sub" id="flow-battery-power">⚡ 0 W</div>
