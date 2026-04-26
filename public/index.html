@@ -26,16 +26,22 @@
       </div>
     </header>
 
-    <!-- Flow Card (Flaticon icons) -->
+    <!-- Flow Card (Flaticon icons + NOW gauge under Solar) -->
     <div class="flow-card">
       <div class="flow-item solar">
         <div class="flow-icon"><i id="icon-solar" class="fi fi-sr-sun"></i></div>
         <div class="flow-label">Solar</div>
         <div class="flow-value" id="flow-solar">0 W</div>
+        <!-- NOW gauge placed here -->
+        <div class="solar-now-gauge" id="solar-now-gauge">
+          <div class="gauge-bar-bg">
+            <div class="gauge-bar-fill" id="gauge-bar-fill"></div>
+          </div>
+          <span class="gauge-percent" id="gauge-percent">0%</span>
+        </div>
       </div>
       <div class="flow-arrow solar-home">→</div>
       <div class="flow-item battery">
-        <!-- Battery icon rotated vertically (CSS) -->
         <div class="flow-icon"><i id="icon-battery" class="fi fi-sr-battery-full"></i></div>
         <div class="flow-label">Battery</div>
         <div class="flow-value" id="flow-battery-soc">--%</div>
@@ -59,16 +65,10 @@
       <span id="grid-to-battery-arrow">↑</span> Grid charging battery <span id="grid-to-battery-arrow">↑</span>
     </div>
 
-    <!-- Solar Forecast – Weather icon between numbers and sparkline -->
+    <!-- Solar Forecast – now without the gauge -->
     <div class="pv-today-banner" id="forecast-banner" style="display:none;">
       <div class="pv-top-bar">
         <h3>Solar Forecast</h3>
-        <div class="now-gauge" id="now-inline-gauge">
-          <div class="gauge-bar-bg">
-            <div class="gauge-bar-fill" id="gauge-bar-fill"></div>
-          </div>
-          <span class="gauge-percent" id="gauge-percent">0%</span>
-        </div>
         <span class="forecast-date" id="forecast-date"></span>
       </div>
 
@@ -89,7 +89,7 @@
           </div>
         </div>
 
-        <!-- Large weather icon in the centre -->
+        <!-- Large weather icon -->
         <div class="weather-icon-big" id="weather-icon">
           <i class="fi fi-sr-sun" id="weather-i"></i>
         </div>
@@ -100,7 +100,7 @@
         </div>
       </div>
 
-      <!-- Mobile hourly table (unchanged) -->
+      <!-- Mobile hourly table -->
       <div class="pv-hourly-table" id="pv-hourly-table">
         <table>
           <thead>
