@@ -15,7 +15,7 @@ const visibilityPrefs = {
 };
 
 let currentSolarWatts = 0;
-let systemCapacityKwp = 2.1;   // updated from settings
+let systemCapacityKwp = 2.6;   // updated from settings
 
 function formatCurrency(amount, currency) {
   return currency + ' ' + amount.toLocaleString(undefined, {
@@ -702,7 +702,7 @@ async function loadBranding() {
       document.getElementById('logo-img').style.display = 'inline';
     }
     if (cfg.solar_capacity_kwp) {
-      systemCapacityKwp = parseFloat(cfg.solar_capacity_kwp) || 2.1;
+      systemCapacityKwp = parseFloat(cfg.solar_capacity_kwp) || 2.6;
     }
   } catch (e) {}
 }
