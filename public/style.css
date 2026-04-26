@@ -142,7 +142,7 @@ h1, h2, h3, h4,
 /* Flow Card – unified radius */
 .flow-card {
   display: flex;
-  align-items: center;          /* vertically center all flex items */
+  align-items: center;
   justify-content: space-around;
   background: var(--card-bg);
   padding: 2.5rem 1.5rem;
@@ -159,13 +159,13 @@ h1, h2, h3, h4,
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;      /* centers everything vertically */
-  min-height: 150px;            /* enough space for icon + label + value + optional sub */
+  justify-content: center;
+  min-height: 150px;
   min-width: 130px;
   text-align: center;
 }
 
-/* Icons (Flaticon) – decorative size, not part of text scale */
+/* Icons (Flaticon) */
 .flow-icon {
   font-size: 3.5rem;
   margin-bottom: 0.5rem;
@@ -178,9 +178,9 @@ h1, h2, h3, h4,
   display: block;
 }
 
-/* Make the battery icon vertical */
+/* Vertical battery – corrected orientation */
 #icon-battery {
-  transform: rotate(90deg);
+  transform: rotate(270deg);
 }
 
 .flow-label {
@@ -205,14 +205,14 @@ h1, h2, h3, h4,
 
 /* Arrows – now larger */
 .flow-arrow {
-  font-size: 3.5rem;            /* increased from 2.8rem */
+  font-size: 3.5rem;
   opacity: 0.7;
   transition: color 0.3s ease;
   min-width: 50px;
   text-align: center;
   color: var(--text-secondary);
   font-weight: bold;
-  align-self: center;           /* keep arrows vertically centred */
+  align-self: center;
 }
 
 .flow-arrow.flowing {
@@ -412,7 +412,7 @@ h1, h2, h3, h4,
   border: 1px solid var(--border);
   color: var(--text);
   padding: 0.4rem 0.8rem;
-  border-radius: 2rem;           /* pill shape remains for buttons */
+  border-radius: 2rem;
   cursor: pointer;
   font-size: var(--fs-small);
   transition: background 0.2s;
@@ -563,7 +563,6 @@ h1, h2, h3, h4,
     height: 350px;
   }
 
-  /* Solar Forecast Banner – mobile stack */
   .pv-today-banner {
     padding: 1.2rem 1rem;
   }
@@ -608,7 +607,6 @@ h1, h2, h3, h4,
     font-size: var(--fs-small);
   }
 
-  /* Extra prediction days */
   .predicted-extras {
     display: flex;
     flex-direction: row;
@@ -631,13 +629,11 @@ h1, h2, h3, h4,
     font-size: var(--fs-medium);
   }
 
-  /* Sparkline */
   .pv-sparkline-container {
     width: 100%;
     height: 180px;
   }
 
-  /* Mobile hourly table */
   .pv-hourly-table {
     display: block;
     margin-top: 1rem;
