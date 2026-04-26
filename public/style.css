@@ -224,7 +224,7 @@ h1, h2, h3, h4,
   100% { opacity: 0.5; transform: scale(1); }
 }
 
-/* Solar Forecast Banner – new compact design */
+/* Solar Forecast Banner – new design with big weather icon */
 .pv-today-banner {
   background: var(--card-bg);
   border-radius: var(--radius);
@@ -234,21 +234,20 @@ h1, h2, h3, h4,
   border: 1px solid var(--border);
 }
 
-.pv-top-row {
+.pv-top-bar {
   display: flex;
   align-items: center;
   gap: 1rem;
   margin-bottom: 1rem;
 }
 
-.pv-top-row h3 {
+.pv-top-bar h3 {
   font-size: var(--fs-large);
   font-weight: 600;
   margin: 0;
   white-space: nowrap;
 }
 
-/* Now gauge beside heading */
 .now-gauge {
   display: flex;
   align-items: center;
@@ -257,7 +256,7 @@ h1, h2, h3, h4,
 }
 
 .gauge-bar-bg {
-  width: 100px;           /* slightly smaller to fit beside heading */
+  width: 100px;
   height: 10px;
   background: var(--border);
   border-radius: 5px;
@@ -280,13 +279,6 @@ h1, h2, h3, h4,
   text-align: left;
 }
 
-/* Weather icon */
-.weather-icon i {
-  font-size: 1.8rem;
-  color: var(--text);
-  display: block;
-}
-
 .forecast-date {
   font-size: var(--fs-small);
   color: var(--text-secondary);
@@ -294,17 +286,18 @@ h1, h2, h3, h4,
   text-align: right;
 }
 
-.pv-content {
+/* Main row: days, icon, sparkline */
+.pv-main-row {
   display: flex;
-  gap: 1.5rem;
-  align-items: flex-start;
+  align-items: center;
+  gap: 1rem;
 }
 
 .pv-days {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
-  min-width: 130px;
+  gap: 0.5rem;
+  min-width: 120px;
 }
 
 .pv-day {
@@ -323,11 +316,27 @@ h1, h2, h3, h4,
   color: var(--text);
 }
 
+/* Big weather icon in the centre */
+.weather-icon-big {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+}
+
+.weather-icon-big i {
+  font-size: 4rem;         /* big and visible */
+  color: var(--text);
+}
+
+/* Sparkline – exactly 50% of the row */
 .pv-sparkline-container {
-  flex: 1 1 0;               /* take remaining half */
+  flex: 1 1 50%;            /* takes up half the remaining space */
   height: 180px;
   min-width: 300px;
 }
+
 .pv-sparkline-container canvas {
   width: 100%;
   height: 100%;
@@ -553,12 +562,13 @@ h1, h2, h3, h4,
     padding: 1.2rem 1rem;
   }
 
-  .pv-top-row {
-    flex-wrap: wrap;
+  .pv-main-row {
+    flex-direction: column;
+    align-items: stretch;
   }
 
-  .pv-content {
-    flex-direction: column;
+  .weather-icon-big i {
+    font-size: 3rem;
   }
 
   .pv-sparkline-container {
