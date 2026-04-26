@@ -43,7 +43,7 @@ const mqttValues = {
 };
 const topicKeyMap = {};
 
-// Weather code mapping to Flaticon UIcons classes
+// Weather code mapping
 const weatherCodeMap = {
   0: { icon: 'fi fi-sr-sun', desc: 'Clear Sky' },
   1: { icon: 'fi fi-sr-sun', desc: 'Mainly Clear' },
@@ -570,7 +570,6 @@ app.get('/api/savings', async (req, res) => {
     const rate = parseFloat(rateRow?.value) || 0.30;
     const currency = getConfig('savings_currency') || '€';
 
-    // --- Get TODAY's solar directly from live sensor (HA or MQTT) ---
     let todaySolar = 0;
     try {
       const haEnabled = await isSourceEnabled('ha_enabled');
@@ -587,7 +586,6 @@ app.get('/api/savings', async (req, res) => {
     } catch (e) {
       console.warn('Failed to fetch live daily solar for savings, falling back to history:', e.message);
     }
-    // Fallback to history if live value is zero
     if (todaySolar === 0) {
       const now = new Date();
       const todayStart = new Date(now); todayStart.setHours(0,0,0,0);
@@ -608,7 +606,6 @@ app.get('/api/savings', async (req, res) => {
     }
     const todaySavings = todaySolar * rate;
 
-    // Helper: get total solar energy for a period (week, month, all-time) from history
     function getTotalSolarSince(startDate) {
       const startUnix = Math.floor(startDate.getTime() / 1000);
       const rows = db.prepare(`
@@ -628,22 +625,16 @@ app.get('/api/savings', async (req, res) => {
     }
 
     const now = new Date();
-
-    // This Week (starting Monday)
-    const day = now.getDay();
-    const diff = (day === 0 ? 6 : day - 1);
-    const weekStart = new Date(now); 
-    weekStart.setDate(now.getDate() - diff); 
-    weekStart.setHours(0,0,0,0);
+    const dayOfWeek = now.getDay();
+    const diff = (dayOfWeek === 0 ? 6 : dayOfWeek - 1);
+    const weekStart = new Date(now); weekStart.setDate(now.getDate() - diff); weekStart.setHours(0,0,0,0);
     const weekSolar = getTotalSolarSince(weekStart);
     const weekSavings = weekSolar * rate;
 
-    // This Month
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const monthSolar = getTotalSolarSince(monthStart);
     const monthSavings = monthSolar * rate;
 
-    // All-time – first check for manual override
     let allTimeSavings;
     const overrideValStr = getConfig('all_time_pv_savings_override');
     if (overrideValStr && !isNaN(parseFloat(overrideValStr))) {
@@ -677,7 +668,7 @@ app.get('/api/savings', async (req, res) => {
   }
 });
 
-// Helper function for Open-Meteo forecast (unused as standalone, kept for reference)
+// Helper function for Open-Meteo forecast (unused as standalone)
 async function fetchOpenMeteoForecast(res, lat, lon, capacityKwp) {
   if (!lat || !lon || capacityKwp <= 0) {
     return res.json({ error: 'Location or capacity not configured' });
@@ -814,10 +805,8 @@ app.get('/api/solar-forecast', async (req, res) => {
       }
     }
 
-    // --- From here, we have forecastData from either source ---
-    // Get today's actual generation from live sensor (with fallback)
     let actualTodayKwh = 0;
-    const todayDate = new Date().toLocaleDateString('en-CA'); // local date YYYY-MM-DD
+    const todayDate = new Date().toLocaleDateString('en-CA');
 
     try {
       const haEnabled = await isSourceEnabled('ha_enabled');
@@ -835,7 +824,6 @@ app.get('/api/solar-forecast', async (req, res) => {
       console.warn('Failed to fetch live daily solar for forecast, falling back to history:', e.message);
     }
 
-    // Fallback to history if live value is zero (sensor might be offline)
     if (actualTodayKwh === 0) {
       const todayStart = new Date(); todayStart.setHours(0,0,0,0);
       const todayStartUnix = Math.floor(todayStart.getTime() / 1000);
@@ -854,7 +842,6 @@ app.get('/api/solar-forecast', async (req, res) => {
       actualTodayKwh = maxVal;
     }
 
-    // Aggregate forecast data to daily totals
     const dailyMap = new Map();
     forecastData.forEach(f => {
       const date = f.period_end.split('T')[0];
@@ -866,7 +853,6 @@ app.get('/api/solar-forecast', async (req, res) => {
 
     const daily = Array.from(dailyMap.values()).slice(0, 4);
     
-    // For the current day, replace total_kwh with actual + remaining forecast
     for (const dayEntry of daily) {
       if (dayEntry.date === todayDate) {
         dayEntry.total_kwh = actualTodayKwh + dayEntry.total_kwh;
@@ -876,30 +862,59 @@ app.get('/api/solar-forecast', async (req, res) => {
     }
 
     const hourly = forecastData.slice(0, 96);
-
     const result = { daily, hourly, source };
 
-    // Add weather data from Open-Meteo if lat/lon available
+    // Fetch weather data (icon and current details)
     if (lat && lon) {
       try {
-        const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=weathercode&timezone=auto&forecast_days=1`;
-        const weatherRes = await fetch(weatherUrl);
-        if (weatherRes.ok) {
-          const weatherData = await weatherRes.json();
+        // First get weather code for icon
+        const weatherCodeUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=weathercode&timezone=auto&forecast_days=1`;
+        const weatherCodeRes = await fetch(weatherCodeUrl);
+        let iconClass = DEFAULT_WEATHER.icon;
+        let weatherDesc = DEFAULT_WEATHER.desc;
+        if (weatherCodeRes.ok) {
+          const weatherData = await weatherCodeRes.json();
           const nowHour = new Date().getHours();
           const hourlyTimes = weatherData.hourly.time.map(t => new Date(t));
-          let weatherCode = 0;
           for (let i = 0; i < hourlyTimes.length; i++) {
             if (hourlyTimes[i].getHours() === nowHour) {
-              weatherCode = weatherData.hourly.weathercode[i];
+              const code = weatherData.hourly.weathercode[i];
+              const mapping = weatherCodeMap[code] || DEFAULT_WEATHER;
+              iconClass = mapping.icon;
+              weatherDesc = mapping.desc;
               break;
             }
           }
-          const mapping = weatherCodeMap[weatherCode] || DEFAULT_WEATHER;
-          result.weather = { icon_class: mapping.icon, description: mapping.desc };
         }
+
+        // Then get current weather for temperature, feels like, humidity
+        const currentUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=relativehumidity_2m,apparent_temperature&timezone=auto&forecast_days=1`;
+        const currentRes = await fetch(currentUrl);
+        let temp = null, feelsLike = null, humidity = null;
+        if (currentRes.ok) {
+          const currentData = await currentRes.json();
+          const cw = currentData.current_weather;
+          temp = cw.temperature;
+          const hourlyData = currentData.hourly;
+          const times = hourlyData.time.map(t => new Date(t));
+          for (let i = 0; i < times.length; i++) {
+            if (times[i].getHours() === new Date().getHours()) {
+              feelsLike = hourlyData.apparent_temperature[i];
+              humidity = hourlyData.relativehumidity_2m[i];
+              break;
+            }
+          }
+        }
+
+        result.weather = {
+          icon_class: iconClass,
+          desc: weatherDesc,
+          temp,
+          extra: (feelsLike != null ? `Feels ${feelsLike.toFixed(0)}°C` : '') +
+                 (humidity != null ? ` · Humidity ${humidity}%` : '')
+        };
       } catch (e) {
-        console.warn('Weather fetch failed:', e.message);
+        console.warn('Weather data fetch failed:', e.message);
         result.weather = DEFAULT_WEATHER;
       }
     } else {
