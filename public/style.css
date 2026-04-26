@@ -62,13 +62,14 @@ header {
   align-items: center;
   margin-bottom: 1.5rem;
 }
-
 .header-left { display: flex; align-items: center; }
 .header-right { display: flex; align-items: center; gap: 1rem; }
 #logo-img { height: 40px; margin-right: 1rem; border-radius: 8px; }
 
 h1, h2, h3, h4,
-.pv-today-header h3, .chart-header h3, .daily-breakdown-header h3 {
+.pv-today-header h3,
+.chart-header h3,
+.daily-breakdown-header h3 {
   font-size: var(--fs-large); font-weight: 600; color: var(--text);
 }
 .chart-header h3 { font-weight: 500; }
