@@ -32,7 +32,6 @@
         <div class="flow-icon"><i id="icon-solar" class="fi fi-sr-sun"></i></div>
         <div class="flow-label">Solar</div>
         <div class="flow-value" id="flow-solar">0 W</div>
-        <!-- NOW gauge placed here -->
         <div class="solar-now-gauge" id="solar-now-gauge">
           <div class="gauge-bar-bg">
             <div class="gauge-bar-fill" id="gauge-bar-fill"></div>
@@ -65,7 +64,7 @@
       <span id="grid-to-battery-arrow">↑</span> Grid charging battery <span id="grid-to-battery-arrow">↑</span>
     </div>
 
-    <!-- Solar Forecast – now without the gauge -->
+    <!-- Solar Forecast – redesigned row -->
     <div class="pv-today-banner" id="forecast-banner" style="display:none;">
       <div class="pv-top-bar">
         <h3>Solar Forecast</h3>
@@ -73,7 +72,6 @@
       </div>
 
       <div class="pv-main-row">
-        <!-- Forecast numbers -->
         <div class="pv-days">
           <div class="pv-day" id="today-day">
             <span class="pv-day-label">Today</span>
@@ -89,18 +87,25 @@
           </div>
         </div>
 
-        <!-- Large weather icon -->
-        <div class="weather-icon-big" id="weather-icon">
-          <i class="fi fi-sr-sun" id="weather-i"></i>
+        <!-- Weather column: heading, big icon, tiny text -->
+        <div class="weather-column">
+          <span class="weather-heading">Current Weather</span>
+          <div class="weather-icon-big" id="weather-icon">
+            <i class="fi fi-sr-sun" id="weather-i"></i>
+          </div>
+          <div class="weather-details" id="weather-details">
+            <span class="weather-temp" id="weather-temp">--°</span>
+            <span class="weather-desc" id="weather-desc">--</span>
+            <span class="weather-extra" id="weather-extra">--</span>
+          </div>
         </div>
 
-        <!-- Sparkline (50% width) -->
+        <!-- Sparkline (narrower, 40% width) -->
         <div class="pv-sparkline-container">
-          <canvas id="pv-sparkline" width="400" height="160"></canvas>
+          <canvas id="pv-sparkline" width="300" height="160"></canvas>
         </div>
       </div>
 
-      <!-- Mobile hourly table -->
       <div class="pv-hourly-table" id="pv-hourly-table">
         <table>
           <thead>
@@ -212,13 +217,7 @@
           <table id="daily-table" class="energy-table">
             <thead>
               <tr>
-                <th>Date</th>
-                <th>Load</th>
-                <th>Solar PV</th>
-                <th>Battery charged</th>
-                <th>Battery discharged</th>
-                <th>Grid used</th>
-                <th>Grid exported</th>
+                <th>Date</th><th>Load</th><th>Solar PV</th><th>Battery charged</th><th>Battery discharged</th><th>Grid used</th><th>Grid exported</th>
               </tr>
             </thead>
             <tbody id="daily-table-body"></tbody>
@@ -238,13 +237,7 @@
           <table id="monthly-table" class="energy-table">
             <thead>
               <tr>
-                <th>Month</th>
-                <th>Load</th>
-                <th>Solar PV</th>
-                <th>Battery charged</th>
-                <th>Battery discharged</th>
-                <th>Grid used</th>
-                <th>Grid exported</th>
+                <th>Month</th><th>Load</th><th>Solar PV</th><th>Battery charged</th><th>Battery discharged</th><th>Grid used</th><th>Grid exported</th>
               </tr>
             </thead>
             <tbody id="monthly-table-body"></tbody>
