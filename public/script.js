@@ -15,7 +15,7 @@ const visibilityPrefs = {
 };
 
 let currentSolarWatts = 0;
-let systemCapacityKwp = 2.6;   // updated from settings
+let systemCapacityKwp = 2.1;   // updated from settings
 
 function formatCurrency(amount, currency) {
   return currency + ' ' + amount.toLocaleString(undefined, {
@@ -228,23 +228,19 @@ async function updateCurrent() {
     // --- Battery icon: change Flaticon class based on SOC & colour based on state ---
     const batteryIcon = document.getElementById('icon-battery');
     if (batteryIcon) {
-      // Choose the appropriate Flaticon class
       let batteryClass = 'fi fi-sr-battery-empty';
       if (battSoc >= 76)      batteryClass = 'fi fi-sr-battery-full';
       else if (battSoc >= 51) batteryClass = 'fi fi-sr-battery-three-quarters';
       else if (battSoc >= 26) batteryClass = 'fi fi-sr-battery-half';
       else if (battSoc >= 1)  batteryClass = 'fi fi-sr-battery-quarter';
-      // else remains empty
-
       batteryIcon.className = batteryClass;
 
-      // Colour based on charging / discharging
       if (battCharge > battDischarge) {
-        batteryIcon.style.color = 'var(--battery)';   // green
+        batteryIcon.style.color = 'var(--battery)';
       } else if (battDischarge > battCharge) {
-        batteryIcon.style.color = '#f59e0b';          // orange
+        batteryIcon.style.color = '#f59e0b';
       } else {
-        batteryIcon.style.color = 'var(--text)';      // idle
+        batteryIcon.style.color = 'var(--text)';
       }
     }
 
@@ -297,18 +293,15 @@ async function updateSavings() {
 
 async function updateForecast() {
   const banner = document.getElementById('forecast-banner');
-  
   try {
     const res = await fetch('/api/solar-forecast');
     const data = await res.json();
-    
     if (data.error || !data.daily || data.daily.length === 0) {
       banner.style.display = 'none';
       return;
     }
-    
     banner.style.display = 'block';
-    
+
     const now = new Date();
     const todayDate = now.toLocaleDateString('en-CA');
 
@@ -317,10 +310,9 @@ async function updateForecast() {
     const today = data.daily[todayIdx];
     const tomorrow = data.daily[todayIdx + 1] || null;
     const nextDay = data.daily[todayIdx + 2] || null;
-    
-    document.getElementById('pv-generated').textContent = (today.actual_so_far || 0).toFixed(1) + ' kWh';
-    const predictedToday = today.total_kwh - (today.actual_so_far || 0);
-    document.getElementById('pv-predicted').textContent = predictedToday.toFixed(1) + ' kWh';
+
+    // Today's total (combined actual + remaining)
+    document.getElementById('pv-today-value').textContent = (today.total_kwh || 0).toFixed(1) + ' kWh';
     
     if (tomorrow) {
       document.getElementById('pred-day1-label').textContent = getDayName(tomorrow.date);
@@ -336,22 +328,26 @@ async function updateForecast() {
       document.getElementById('pred-day2-label').textContent = '--';
       document.getElementById('pv-nextday').textContent = '-- kWh';
     }
-    
-    document.getElementById('forecast-date').textContent = now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-    
+
+    document.getElementById('forecast-date').textContent =
+      now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+
+    // Weather icon
+    if (data.weather && data.weather.icon_class) {
+      document.getElementById('weather-i').className = data.weather.icon_class;
+    }
+
+    // Sparkline (actual + forecast)
     const historyRes = await fetch('/api/history?days=1');
     const historyData = await historyRes.json();
-    
-    const actualPoints = historyData.filter(d => {
-      const date = new Date(d.timestamp);
-      return date.toLocaleDateString('en-CA') === todayDate &&
-             date.getHours() >= 6 &&
-             date.getHours() <= 19;
-    }).map(d => ({
-      x: d.timestamp,
-      y: d.solar_kw
-    }));
-    
+    const actualPoints = historyData
+      .filter(d => {
+        const date = new Date(d.timestamp);
+        return date.toLocaleDateString('en-CA') === todayDate &&
+               date.getHours() >= 6 && date.getHours() <= 19;
+      })
+      .map(d => ({ x: d.timestamp, y: d.solar_kw }));
+
     const intervals = [];
     const intervalLabels = [];
     for (let h = 6; h <= 19; h += 0.5) {
@@ -359,7 +355,7 @@ async function updateForecast() {
       intervals.push(start.getTime());
       intervalLabels.push(start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }));
     }
-    
+
     const actualByInterval = {};
     actualPoints.forEach(p => {
       const d = new Date(p.x);
@@ -370,24 +366,21 @@ async function updateForecast() {
       if (!actualByInterval[bucketTime]) actualByInterval[bucketTime] = [];
       actualByInterval[bucketTime].push(p.y);
     });
-    
-    const actualData = intervals.map((ts, i) => {
+
+    const actualData = intervals.map(ts => {
       const values = actualByInterval[ts] || [];
       if (values.length === 0) return null;
-      const avg = values.reduce((a,b) => a+b, 0) / values.length;
-      return { x: ts, y: avg };
+      return { x: ts, y: values.reduce((a,b) => a+b, 0) / values.length };
     }).filter(p => p !== null && p.x <= now.getTime());
-    
-    const forecastHourly = data.hourly.filter(h => {
-      const d = new Date(h.period_end);
-      return d.toISOString().startsWith(todayDate) &&
-             d.getHours() >= 6 &&
-             d.getHours() <= 19;
-    }).map(h => ({
-      x: new Date(h.period_end).getTime(),
-      y: h.pv_estimate
-    }));
-    
+
+    const forecastHourly = data.hourly
+      .filter(h => {
+        const d = new Date(h.period_end);
+        return d.toISOString().startsWith(todayDate) &&
+               d.getHours() >= 6 && d.getHours() <= 19;
+      })
+      .map(h => ({ x: new Date(h.period_end).getTime(), y: h.pv_estimate }));
+
     const forecastByInterval = {};
     forecastHourly.forEach(p => {
       const d = new Date(p.x);
@@ -397,7 +390,8 @@ async function updateForecast() {
       const bucketTime = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, bucketMinute, 0).getTime();
       forecastByInterval[bucketTime] = p.y;
     });
-    
+
+    // Populate mobile table
     const tbody = document.getElementById('pv-hourly-body');
     if (tbody) {
       tbody.innerHTML = '';
@@ -415,69 +409,43 @@ async function updateForecast() {
         tbody.appendChild(row);
       });
     }
-    
+
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     const actualColor = '#3b82f6';
     const forecastColor = isDark ? '#fbbf24' : '#d97706';
-    
+
     sparklineChart.data.datasets = [
-      {
-        label: 'Actual',
-        data: actualData,
-        borderColor: actualColor,
-        backgroundColor: 'transparent',
-        borderWidth: 2,
-        tension: 0.4,
-        pointRadius: 0,
-        fill: false,
-        borderDash: []
-      },
-      {
-        label: 'Forecast',
-        data: forecastHourly,
-        borderColor: forecastColor,
-        backgroundColor: 'transparent',
-        borderWidth: 2,
-        tension: 0.4,
-        pointRadius: 0,
-        fill: true,
-        borderDash: [5, 5]
-      }
+      { label: 'Actual', data: actualData, borderColor: actualColor, backgroundColor: 'transparent', borderWidth: 2, tension: 0.4, pointRadius: 0, fill: false, borderDash: [] },
+      { label: 'Forecast', data: forecastHourly, borderColor: forecastColor, backgroundColor: 'transparent', borderWidth: 2, tension: 0.4, pointRadius: 0, fill: true, borderDash: [5,5] }
     ];
-    
+
     const ctx = sparklineChart.ctx;
     const chartArea = sparklineChart.chartArea;
     if (chartArea && sparklineChart.data.datasets[1].data.length > 0) {
       const gradient = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
       const hex = forecastColor;
-      const r = parseInt(hex.slice(1,3), 16);
-      const g = parseInt(hex.slice(3,5), 16);
-      const b = parseInt(hex.slice(5,7), 16);
-      gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.1)`);
-      gradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.3)`);
-      gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.5)`);
+      const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+      gradient.addColorStop(0, `rgba(${r},${g},${b},0.1)`);
+      gradient.addColorStop(0.5, `rgba(${r},${g},${b},0.3)`);
+      gradient.addColorStop(1, `rgba(${r},${g},${b},0.5)`);
       sparklineChart.data.datasets[1].backgroundColor = gradient;
     }
-    
-    const startTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 6, 0, 0).getTime();
-    const endTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 19, 0, 0).getTime();
-    sparklineChart.options.scales.x.min = startTime;
-    sparklineChart.options.scales.x.max = endTime;
+
+    sparklineChart.options.scales.x.min = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 6,0,0).getTime();
+    sparklineChart.options.scales.x.max = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 19,0,0).getTime();
     sparklineChart.options.scales.y.max = systemCapacityKwp || undefined;
     sparklineChart.options.scales.x.ticks.color = isDark ? '#f8fafc' : '#0f172a';
     sparklineChart.options.scales.y.ticks.color = isDark ? '#f8fafc' : '#0f172a';
     sparklineChart.options.plugins.legend.labels.color = isDark ? '#f8fafc' : '#0f172a';
-    
     sparklineChart.update();
-    
+
+    updateNowGauge();
+
     try {
       const cfgRes = await fetch('/api/public-config');
       const cfg = await cfgRes.json();
       systemCapacityKwp = parseFloat(cfg.solar_capacity_kwp) || 2.1;
-    } catch (e) {}
-    
-    updateNowGauge();
-    
+    } catch(e) {}
   } catch (e) {
     console.error('Forecast error:', e);
     banner.style.display = 'none';
@@ -702,7 +670,7 @@ async function loadBranding() {
       document.getElementById('logo-img').style.display = 'inline';
     }
     if (cfg.solar_capacity_kwp) {
-      systemCapacityKwp = parseFloat(cfg.solar_capacity_kwp) || 2.6;
+      systemCapacityKwp = parseFloat(cfg.solar_capacity_kwp) || 2.1;
     }
   } catch (e) {}
 }
