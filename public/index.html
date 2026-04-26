@@ -87,21 +87,43 @@
           </div>
         </div>
 
-        <!-- Weather column with current icon + two small forecast icons to the right -->
-        <div class="weather-column">
-          <span class="weather-heading">Current Weather</span>
-          <div class="weather-icons-row">
+        <!-- Weather section: current weather + two forecast columns side by side -->
+        <div class="weather-section">
+          <div class="weather-column">
+            <span class="weather-heading">Current Weather</span>
             <div class="weather-icon-big" id="weather-icon">
               <i class="fi fi-sr-sun" id="weather-i"></i>
             </div>
-            <div class="weather-forecast-icons" id="weather-forecast-icons">
-              <!-- filled by JS -->
+            <div class="weather-details" id="weather-details">
+              <span class="weather-temp" id="weather-temp">--°</span>
+              <span class="weather-desc" id="weather-desc">--</span>
+              <span class="weather-extra" id="weather-extra">--</span>
             </div>
           </div>
-          <div class="weather-details" id="weather-details">
-            <span class="weather-temp" id="weather-temp">--°</span>
-            <span class="weather-desc" id="weather-desc">--</span>
-            <span class="weather-extra" id="weather-extra">--</span>
+
+          <!-- Forecast weather columns (will be populated by JS) -->
+          <div class="weather-column" id="forecast-weather-1">
+            <span class="weather-heading" id="fcast-heading-1">--</span>
+            <div class="weather-icon-big">
+              <i class="fi fi-sr-sun" id="fcast-icon-1"></i>
+            </div>
+            <div class="weather-details">
+              <span class="weather-temp" id="fcast-temp-1">--°</span>
+              <span class="weather-desc" id="fcast-desc-1">--</span>
+              <span class="weather-extra" id="fcast-extra-1">--</span>
+            </div>
+          </div>
+
+          <div class="weather-column" id="forecast-weather-2">
+            <span class="weather-heading" id="fcast-heading-2">--</span>
+            <div class="weather-icon-big">
+              <i class="fi fi-sr-sun" id="fcast-icon-2"></i>
+            </div>
+            <div class="weather-details">
+              <span class="weather-temp" id="fcast-temp-2">--°</span>
+              <span class="weather-desc" id="fcast-desc-2">--</span>
+              <span class="weather-extra" id="fcast-extra-2">--</span>
+            </div>
           </div>
         </div>
 
