@@ -180,7 +180,7 @@ h1, h2, h3, h4,
 
 /* Make the battery icon vertical */
 #icon-battery {
-  transform: rotate(90deg);
+  transform: rotate(180deg);
 }
 
 .flow-label {
