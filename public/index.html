@@ -26,7 +26,7 @@
       </div>
     </header>
 
-    <!-- Flow Card (all Flaticon icons) -->
+    <!-- Flow Card (Flaticon icons) -->
     <div class="flow-card">
       <div class="flow-item solar">
         <div class="flow-icon"><i id="icon-solar" class="fi fi-sr-sun"></i></div>
@@ -35,7 +35,7 @@
       </div>
       <div class="flow-arrow solar-home">→</div>
       <div class="flow-item battery">
-        <!-- Flaticon battery icon – class changes dynamically via script.js based on SOC -->
+        <!-- Battery icon rotated vertically (CSS) -->
         <div class="flow-icon"><i id="icon-battery" class="fi fi-sr-battery-full"></i></div>
         <div class="flow-label">Battery</div>
         <div class="flow-value" id="flow-battery-soc">--%</div>
@@ -59,56 +59,48 @@
       <span id="grid-to-battery-arrow">↑</span> Grid charging battery <span id="grid-to-battery-arrow">↑</span>
     </div>
 
-    <!-- Solar Forecast – Expanded Row -->
+    <!-- Solar Forecast – New Compact Row -->
     <div class="pv-today-banner" id="forecast-banner" style="display:none;">
-      <div class="pv-today-header">
+      <div class="pv-top-row">
         <h3>Solar Forecast</h3>
+        <div class="now-gauge" id="now-inline-gauge">
+          <div class="gauge-bar-bg">
+            <div class="gauge-bar-fill" id="gauge-bar-fill"></div>
+          </div>
+          <span class="gauge-percent" id="gauge-percent">0%</span>
+        </div>
+        <div class="weather-icon" id="weather-icon" title="Weather">
+          <i class="fi fi-sr-sun" id="weather-i"></i>
+        </div>
         <span class="forecast-date" id="forecast-date"></span>
       </div>
-      <div class="pv-today-body">
-        <div class="pv-metrics">
-          <div class="pv-metric">
-            <span class="pv-metric-label">Generated</span>
-            <span class="pv-metric-value" id="pv-generated">0 kWh</span>
-          </div>
-          <div class="pv-metric">
-            <span class="pv-metric-label">Predicted</span>
-            <span class="pv-metric-value" id="pv-predicted">0 kWh</span>
-          </div>
-          <div class="pv-metric now-metric">
-            <span class="pv-metric-label">Now</span>
-            <div class="now-gauge">
-              <div class="gauge-bar-bg">
-                <div class="gauge-bar-fill" id="gauge-bar-fill"></div>
-              </div>
-              <span class="gauge-percent" id="gauge-percent">0%</span>
-            </div>
-          </div>
-        </div>
 
-        <div class="predicted-extras" id="predicted-extras-row">
-          <div class="predicted-extra">
-            <span class="predicted-extra-label" id="pred-day1-label">Tomorrow</span>
-            <span class="predicted-extra-value" id="pv-tomorrow">0 kWh</span>
+      <div class="pv-content">
+        <div class="pv-days">
+          <div class="pv-day" id="today-day">
+            <span class="pv-day-label">Today</span>
+            <span class="pv-day-value" id="pv-today-value">0 kWh</span>
           </div>
-          <div class="predicted-extra">
-            <span class="predicted-extra-label" id="pred-day2-label">Next Day</span>
-            <span class="predicted-extra-value" id="pv-nextday">0 kWh</span>
+          <div class="pv-day" id="day1-day">
+            <span class="pv-day-label" id="pred-day1-label">Monday</span>
+            <span class="pv-day-value" id="pv-tomorrow">0 kWh</span>
+          </div>
+          <div class="pv-day" id="day2-day">
+            <span class="pv-day-label" id="pred-day2-label">Tuesday</span>
+            <span class="pv-day-value" id="pv-nextday">0 kWh</span>
           </div>
         </div>
 
         <div class="pv-sparkline-container">
-          <canvas id="pv-sparkline" width="600" height="200"></canvas>
+          <canvas id="pv-sparkline" width="400" height="160"></canvas>
         </div>
       </div>
+
+      <!-- Mobile hourly table (unchanged) -->
       <div class="pv-hourly-table" id="pv-hourly-table">
         <table>
           <thead>
-            <tr>
-              <th>Time</th>
-              <th>Actual (kW)</th>
-              <th>Forecast (kW)</th>
-            </tr>
+            <tr><th>Time</th><th>Actual (kW)</th><th>Forecast (kW)</th></tr>
           </thead>
           <tbody id="pv-hourly-body"></tbody>
         </table>
@@ -200,7 +192,7 @@
     <!-- Daily Energy Bar Chart -->
     <div class="chart-container">
       <div class="chart-header">
-        <h3>Daily Energy</h3>
+        <h3>Daily Energy (Last 7 Days)</h3>
       </div>
       <canvas id="energyBarChart"></canvas>
     </div>
