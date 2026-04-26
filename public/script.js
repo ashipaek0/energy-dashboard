@@ -471,33 +471,118 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
 }
 
 async function updateGridStatus() {
-  // unchanged
+  try {
+    const res = await fetch('/api/grid/status');
+    const d = await res.json();
+    if (!d.configured) {
+      document.getElementById('grid-state').textContent = 'Not configured';
+      return;
+    }
+    document.getElementById('grid-state').textContent = d.current ? '⚡ ON' : '⚫ OFF';
+    document.getElementById('grid-state').style.color = d.current ? 'var(--battery)' : 'var(--grid)';
+    document.getElementById('grid-last-on').textContent = d.lastOn ? new Date(d.lastOn).toLocaleString() : 'Never';
+    document.getElementById('grid-last-off').textContent = d.lastOff ? new Date(d.lastOff).toLocaleString() : 'Never';
+
+    const periods = ['day', 'week', 'month', 'year'];
+    for (const p of periods) {
+      const hRes = await fetch(`/api/grid/hours?period=${p}`);
+      const hData = await hRes.json();
+      document.getElementById(`grid-hours-${p}`).textContent = formatHoursToHM(hData.hours);
+    }
+  } catch (e) { console.error('Grid error:', e); }
 }
 
 async function updateChart(days = 1) {
-  // unchanged
+  try {
+    const res = await fetch(`/api/history?days=${days}`);
+    const data = await res.json();
+    if (!data.length) return;
+
+    let timeUnit = 'hour';
+    if (days >= 7) timeUnit = 'day';
+    if (days >= 30) timeUnit = 'week';
+    powerChart.options.scales.x.time.unit = timeUnit;
+
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const newDatasets = [
+      { label: 'Load', data: [], borderColor: isDark ? '#8b5cf6' : '#7c3aed', tension: 0.4, borderWidth: 1, fill: true },
+      { label: 'Solar PV', data: [], borderColor: isDark ? '#fbbf24' : '#d97706', tension: 0.4, borderWidth: 1, fill: true },
+      { label: 'Battery Charge', data: [], borderColor: isDark ? '#10b981' : '#059669', tension: 0.4, borderWidth: 1, fill: true },
+      { label: 'Battery Discharge', data: [], borderColor: '#f59e0b', tension: 0.4, borderWidth: 1, fill: true },
+      { label: 'Grid Import', data: [], borderColor: isDark ? '#ef4444' : '#dc2626', tension: 0.4, borderWidth: 1, fill: true },
+      { label: 'Grid Export', data: [], borderColor: '#3b82f6', tension: 0.4, borderWidth: 1, fill: true }
+    ];
+    newDatasets.forEach(ds => { ds.hidden = (visibilityPrefs[ds.label] === false); });
+    data.forEach(d => {
+      newDatasets[0].data.push({ x: d.timestamp, y: d.consumption_kw });
+      newDatasets[1].data.push({ x: d.timestamp, y: d.solar_kw });
+      newDatasets[2].data.push({ x: d.timestamp, y: d.battery_charge_kw });
+      newDatasets[3].data.push({ x: d.timestamp, y: d.battery_discharge_kw });
+      newDatasets[4].data.push({ x: d.timestamp, y: d.grid_import_kw });
+      newDatasets[5].data.push({ x: d.timestamp, y: d.grid_export_kw });
+    });
+    powerChart.data.datasets = newDatasets;
+    powerChart.update();
+    applyGradientFills(powerChart);
+  } catch (e) { console.error(e); }
 }
 
 async function updateEnergyBarChart() {
-  // unchanged
+  try {
+    const res = await fetch('/api/daily?days=7');
+    const data = await res.json();
+    if (!data.length) return;
+    const labels = data.map(d => {
+      const date = new Date(d.day + 'T00:00:00');
+      return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    });
+    energyBarChart.data.labels = labels;
+    energyBarChart.data.datasets[0].data = data.map(d => d.solar_kwh);
+    energyBarChart.data.datasets[1].data = data.map(d => d.grid_import_kwh);
+    energyBarChart.data.datasets[2].data = data.map(d => d.consumption_kwh);
+    energyBarChart.update();
+  } catch (e) { console.error('Energy bar chart error:', e); }
 }
 
 async function updateMonthlyTable() {
-  // unchanged
+  try {
+    const res = await fetch('/api/monthly');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const tbody = document.getElementById('monthly-table-body');
+    tbody.innerHTML = '';
+    data.reverse().forEach(row => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${row.month}</td><td>${row.consumption_kwh.toFixed(1)} kWh</td><td>${row.solar_kwh.toFixed(1)} kWh</td><td>${row.battery_charge_kwh.toFixed(1)} kWh</td><td>${row.battery_discharge_kwh.toFixed(1)} kWh</td><td>${row.grid_import_kwh.toFixed(1)} kWh</td><td>${row.grid_export_kwh.toFixed(1)} kWh</td>`;
+      tbody.appendChild(tr);
+    });
+  } catch (e) {
+    console.error('Monthly table error:', e);
+    document.getElementById('monthly-table-body').innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--grid);">Error loading data</td></tr>';
+  }
 }
 
 async function updateDailyTable() {
-  // unchanged
+  try {
+    const res = await fetch('/api/daily?days=30');
+    const data = await res.json();
+    const tbody = document.getElementById('daily-table-body');
+    tbody.innerHTML = '';
+    data.reverse().forEach(row => {
+      const date = new Date(row.day + 'T00:00:00');
+      const formattedDate = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${formattedDate}</td><td>${row.consumption_kwh.toFixed(1)} kWh</td><td>${row.solar_kwh.toFixed(1)} kWh</td><td>${row.battery_charge_kwh.toFixed(1)} kWh</td><td>${row.battery_discharge_kwh.toFixed(1)} kWh</td><td>${row.grid_import_kwh.toFixed(1)} kWh</td><td>${row.grid_export_kwh.toFixed(1)} kWh</td>`;
+      tbody.appendChild(tr);
+    });
+  } catch (e) { console.error('Daily table error:', e); }
 }
 
 async function loadBranding() {
   try {
     const res = await fetch('/api/public-config');
     const cfg = await res.json();
-    if (cfg.dashboard_title) {
-      document.getElementById('dashboard-title').textContent = cfg.dashboard_title;
-      document.title = cfg.dashboard_title;
-    }
+    if (cfg.dashboard_title) { document.getElementById('dashboard-title').textContent = cfg.dashboard_title; document.title = cfg.dashboard_title; }
     if (cfg.dashboard_logo) { document.getElementById('logo-img').src = cfg.dashboard_logo; document.getElementById('logo-img').style.display = 'inline'; }
     if (cfg.solar_capacity_kwp) systemCapacityKwp = parseFloat(cfg.solar_capacity_kwp) || 2.1;
   } catch (e) {}
@@ -521,8 +606,7 @@ function toggleTheme() {
   const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', newTheme);
   localStorage.setItem('theme', newTheme);
-  const themeToggle = document.getElementById('theme-toggle');
-  themeToggle.innerHTML = newTheme === 'dark' ? '<span class="theme-icon">☀️</span>' : '<span class="theme-icon">🌙</span>';
+  document.getElementById('theme-toggle').innerHTML = newTheme === 'dark' ? '<span class="theme-icon">☀️</span>' : '<span class="theme-icon">🌙</span>';
   updateChartColors();
   if (powerChart) applyGradientFills(powerChart);
   updateForecast();
@@ -556,16 +640,12 @@ function updateChartColors() {
 }
 
 document.getElementById('toggle-daily-details').addEventListener('click', () => {
-  const content = document.getElementById('daily-breakdown-content');
-  const btn = document.getElementById('toggle-daily-details');
-  content.classList.toggle('collapsed');
-  btn.classList.toggle('collapsed');
+  document.getElementById('daily-breakdown-content').classList.toggle('collapsed');
+  document.getElementById('toggle-daily-details').classList.toggle('collapsed');
 });
 document.getElementById('toggle-monthly-details').addEventListener('click', () => {
-  const content = document.getElementById('monthly-breakdown-content');
-  const btn = document.getElementById('toggle-monthly-details');
-  content.classList.toggle('collapsed');
-  btn.classList.toggle('collapsed');
+  document.getElementById('monthly-breakdown-content').classList.toggle('collapsed');
+  document.getElementById('toggle-monthly-details').classList.toggle('collapsed');
 });
 document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
 document.querySelectorAll('.chart-controls button').forEach(btn => {
