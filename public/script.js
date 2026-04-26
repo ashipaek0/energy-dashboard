@@ -204,7 +204,7 @@ async function updateCurrent() {
 
     updateFlowArrows(currentSolarWatts, consumption, battCharge, battDischarge, gridImport, gridExport);
 
-    // --- Dynamically change icon colours ---
+    // --- Dynamic icon colours for solar, home, grid ---
     const solarIcon = document.getElementById('icon-solar');
     const homeIcon = document.getElementById('icon-home');
     const gridIcon = document.getElementById('icon-grid');
@@ -225,19 +225,26 @@ async function updateCurrent() {
       }
     }
 
-    // --- Update battery gauge fill level and colour ---
-    const batteryFill = document.getElementById('battery-fill');
-    if (batteryFill) {
-      // Set height based on SOC percentage
-      batteryFill.style.height = battSoc + '%';
+    // --- Battery icon: change Flaticon class based on SOC & colour based on state ---
+    const batteryIcon = document.getElementById('icon-battery');
+    if (batteryIcon) {
+      // Choose the appropriate Flaticon class
+      let batteryClass = 'fi fi-sr-battery-empty';
+      if (battSoc >= 76)      batteryClass = 'fi fi-sr-battery-full';
+      else if (battSoc >= 51) batteryClass = 'fi fi-sr-battery-three-quarters';
+      else if (battSoc >= 26) batteryClass = 'fi fi-sr-battery-half';
+      else if (battSoc >= 1)  batteryClass = 'fi fi-sr-battery-quarter';
+      // else remains empty
 
-      // Set fill colour based on charging/discharging state
+      batteryIcon.className = batteryClass;
+
+      // Colour based on charging / discharging
       if (battCharge > battDischarge) {
-        batteryFill.style.background = 'var(--battery)';   // charging: green
+        batteryIcon.style.color = 'var(--battery)';   // green
       } else if (battDischarge > battCharge) {
-        batteryFill.style.background = '#f59e0b';          // discharging: orange
+        batteryIcon.style.color = '#f59e0b';          // orange
       } else {
-        batteryFill.style.background = 'var(--text)';      // idle
+        batteryIcon.style.color = 'var(--text)';      // idle
       }
     }
 
