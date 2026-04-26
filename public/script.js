@@ -331,13 +331,30 @@ async function updateForecast() {
     document.getElementById('forecast-date').textContent =
       now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 
-    // Weather information
+    // Weather information + dynamic icon color
     if (data.weather) {
       const w = data.weather;
       document.getElementById('weather-i').className = w.icon_class || 'fi fi-sr-sun';
       document.getElementById('weather-temp').textContent = w.temp != null ? w.temp.toFixed(0) + '°C' : '--°';
       document.getElementById('weather-desc').textContent = w.desc || '';
       document.getElementById('weather-extra').textContent = w.extra || '';
+
+      // Set icon colour based on weather description
+      const iconEl = document.getElementById('weather-i');
+      const desc = (w.desc || '').toLowerCase();
+      if (desc.includes('clear') || desc.includes('sunny')) {
+        iconEl.style.color = '#f59e0b';            // warm yellow
+      } else if (desc.includes('partly cloudy')) {
+        iconEl.style.color = '#eab308';            // amber
+      } else if (desc.includes('cloudy') || desc.includes('overcast')) {
+        iconEl.style.color = '#9ca3af';            // gray
+      } else if (desc.includes('rain') || desc.includes('drizzle')) {
+        iconEl.style.color = '#3b82f6';            // blue
+      } else if (desc.includes('fog')) {
+        iconEl.style.color = '#94a3b8';            // light gray
+      } else {
+        iconEl.style.color = 'var(--text)';        // default
+      }
     }
 
     // Sparkline: actual + forecast for today, 7 AM – 7 PM
