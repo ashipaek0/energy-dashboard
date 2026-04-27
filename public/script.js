@@ -241,6 +241,36 @@ function setWeatherIconColor(iconEl, desc) {
   else iconEl.style.color = 'var(--text)';
 }
 
+function populateForecastWeather(index, weatherEntry, dayName) {
+  const container = document.getElementById(`forecast-weather-${index}`);
+  if (!container) return;
+
+  const heading = document.getElementById(`fcast-heading-${index}`);
+  const icon = document.getElementById(`fcast-icon-${index}`);
+  const temp = document.getElementById(`fcast-temp-${index}`);
+  const desc = document.getElementById(`fcast-desc-${index}`);
+  const extra = document.getElementById(`fcast-extra-${index}`);
+
+  // Always show the column (never hide it)
+  container.style.display = '';
+
+  heading.textContent = dayName || '--';
+  if (weatherEntry) {
+    icon.className = weatherEntry.icon_class || 'fi fi-sr-sun';
+    temp.textContent = weatherEntry.temp != null ? weatherEntry.temp.toFixed(0) + '°C' : '--°';
+    desc.textContent = weatherEntry.desc || '';
+    extra.textContent = weatherEntry.extra || '';
+    setWeatherIconColor(icon, weatherEntry.desc);
+  } else {
+    // Fallback: default icon, placeholder text
+    icon.className = 'fi fi-sr-sun';
+    temp.textContent = '--°';
+    desc.textContent = 'No data';
+    extra.textContent = '';
+    icon.style.color = 'var(--text-secondary)';
+  }
+}
+
 async function updateForecast() {
   const banner = document.getElementById('forecast-banner');
   try {
@@ -291,46 +321,23 @@ async function updateForecast() {
       document.getElementById('weather-extra').textContent = w.extra || '';
       setWeatherIconColor(document.getElementById('weather-i'), w.desc);
 
-      // Forecast weather columns
+      // Forecast weather columns – always populate with day names from solar data
       const forecastWeather = w.forecast_weather || [];
-      
+
       // First forecast day
-      const fw1 = forecastWeather.length > 0 ? forecastWeather[0] : null;
-      const heading1 = document.getElementById('fcast-heading-1');
-      const icon1 = document.getElementById('fcast-icon-1');
-      const temp1 = document.getElementById('fcast-temp-1');
-      const desc1 = document.getElementById('fcast-desc-1');
-      const extra1 = document.getElementById('fcast-extra-1');
-      if (fw1 && tomorrow) {
-        heading1.textContent = getDayName(tomorrow.date);
-        icon1.className = fw1.icon_class;
-        temp1.textContent = fw1.temp != null ? fw1.temp.toFixed(0) + '°C' : '--°';
-        desc1.textContent = fw1.desc || '';
-        extra1.textContent = fw1.extra || '';
-        setWeatherIconColor(icon1, fw1.desc);
-        document.getElementById('forecast-weather-1').style.display = '';
-      } else {
-        document.getElementById('forecast-weather-1').style.display = 'none';
+      let fw1 = forecastWeather.length > 0 ? forecastWeather[0] : null;
+      // If no entry but we have a tomorrow date, create a default one
+      if (!fw1 && tomorrow) {
+        fw1 = { icon_class: 'fi fi-sr-sun', desc: 'No data', temp: null, extra: '' };
       }
+      populateForecastWeather(1, fw1, tomorrow ? getDayName(tomorrow.date) : '--');
 
       // Second forecast day
-      const fw2 = forecastWeather.length > 1 ? forecastWeather[1] : null;
-      const heading2 = document.getElementById('fcast-heading-2');
-      const icon2 = document.getElementById('fcast-icon-2');
-      const temp2 = document.getElementById('fcast-temp-2');
-      const desc2 = document.getElementById('fcast-desc-2');
-      const extra2 = document.getElementById('fcast-extra-2');
-      if (fw2 && nextDay) {
-        heading2.textContent = getDayName(nextDay.date);
-        icon2.className = fw2.icon_class;
-        temp2.textContent = fw2.temp != null ? fw2.temp.toFixed(0) + '°C' : '--°';
-        desc2.textContent = fw2.desc || '';
-        extra2.textContent = fw2.extra || '';
-        setWeatherIconColor(icon2, fw2.desc);
-        document.getElementById('forecast-weather-2').style.display = '';
-      } else {
-        document.getElementById('forecast-weather-2').style.display = 'none';
+      let fw2 = forecastWeather.length > 1 ? forecastWeather[1] : null;
+      if (!fw2 && nextDay) {
+        fw2 = { icon_class: 'fi fi-sr-sun', desc: 'No data', temp: null, extra: '' };
       }
+      populateForecastWeather(2, fw2, nextDay ? getDayName(nextDay.date) : '--');
     }
 
     // Sparkline – 7 AM to 7 PM
