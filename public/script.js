@@ -280,6 +280,7 @@ async function updateForecast() {
     // Weather data
     if (data.weather) {
       const w = data.weather;
+      // Current weather (always show)
       document.getElementById('weather-i').className = w.icon_class || 'fi fi-sr-sun';
       document.getElementById('weather-temp').textContent = w.temp != null ? w.temp.toFixed(0) + '°C' : '--°';
       document.getElementById('weather-desc').textContent = w.desc || '';
@@ -287,24 +288,36 @@ async function updateForecast() {
       setWeatherIconColor(document.getElementById('weather-i'), w.desc);
 
       const forecastWeather = w.forecast_weather || [];
-
+      
       // First forecast day
-      const fw1 = forecastWeather[0] || { day_name: '--', icon_class: 'fi fi-sr-sun', desc: 'Clear Sky', temp: null, extra: 'No data' };
-      document.getElementById('fcast-heading-1').textContent = fw1.day_name || '--';
-      document.getElementById('fcast-icon-1').className = fw1.icon_class;
-      document.getElementById('fcast-temp-1').textContent = fw1.temp != null ? fw1.temp.toFixed(0) + '°C' : '--°';
-      document.getElementById('fcast-desc-1').textContent = fw1.desc || '';
-      document.getElementById('fcast-extra-1').textContent = fw1.extra || '';
-      setWeatherIconColor(document.getElementById('fcast-icon-1'), fw1.desc);
+      const fw1 = forecastWeather[0];
+      const col1 = document.getElementById('forecast-weather-1');
+      if (fw1 && fw1.temp != null) {
+        document.getElementById('fcast-heading-1').textContent = fw1.day_name || '--';
+        document.getElementById('fcast-icon-1').className = fw1.icon_class;
+        document.getElementById('fcast-temp-1').textContent = fw1.temp.toFixed(0) + '°C';
+        document.getElementById('fcast-desc-1').textContent = fw1.desc || '';
+        document.getElementById('fcast-extra-1').textContent = fw1.extra || '';
+        setWeatherIconColor(document.getElementById('fcast-icon-1'), fw1.desc);
+        col1.style.display = '';
+      } else {
+        col1.style.display = 'none';
+      }
 
       // Second forecast day
-      const fw2 = forecastWeather[1] || { day_name: '--', icon_class: 'fi fi-sr-sun', desc: 'Clear Sky', temp: null, extra: 'No data' };
-      document.getElementById('fcast-heading-2').textContent = fw2.day_name || '--';
-      document.getElementById('fcast-icon-2').className = fw2.icon_class;
-      document.getElementById('fcast-temp-2').textContent = fw2.temp != null ? fw2.temp.toFixed(0) + '°C' : '--°';
-      document.getElementById('fcast-desc-2').textContent = fw2.desc || '';
-      document.getElementById('fcast-extra-2').textContent = fw2.extra || '';
-      setWeatherIconColor(document.getElementById('fcast-icon-2'), fw2.desc);
+      const fw2 = forecastWeather[1];
+      const col2 = document.getElementById('forecast-weather-2');
+      if (fw2 && fw2.temp != null) {
+        document.getElementById('fcast-heading-2').textContent = fw2.day_name || '--';
+        document.getElementById('fcast-icon-2').className = fw2.icon_class;
+        document.getElementById('fcast-temp-2').textContent = fw2.temp.toFixed(0) + '°C';
+        document.getElementById('fcast-desc-2').textContent = fw2.desc || '';
+        document.getElementById('fcast-extra-2').textContent = fw2.extra || '';
+        setWeatherIconColor(document.getElementById('fcast-icon-2'), fw2.desc);
+        col2.style.display = '';
+      } else {
+        col2.style.display = 'none';
+      }
     }
 
     // Sparkline 7‑19
