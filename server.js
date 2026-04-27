@@ -33,7 +33,6 @@ const upload = multer({
 let db;
 const DB_PATH = './data/energy.db';
 
-// MQTT client declared early to avoid initialization errors
 let mqttClient = null;
 const mqttValues = {
   consumption: 0, solar: 0, battery_charge: 0, battery_discharge: 0,
@@ -287,6 +286,15 @@ async function pollAndCache() {
 pollAndCache();
 setInterval(pollAndCache, 30000);
 
+// --- Clear forecast cache at midnight ---
+setInterval(() => {
+  const now = new Date();
+  if (now.getHours() === 0 && now.getMinutes() === 0) {
+    forecastCache = { data: null, timestamp: 0 };
+    console.log('Forecast cache cleared at midnight');
+  }
+}, 60000); // check every minute
+
 // --- Public API ---
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -531,6 +539,7 @@ app.get('/api/savings', async (req, res) => {
     const currency = getConfig('savings_currency') || '€';
 
     let todaySolar = 0;
+    // Try live sensor
     try {
       const haEnabled = await isSourceEnabled('ha_enabled');
       const mqttEnabled = await isSourceEnabled('mqtt_enabled');
@@ -546,24 +555,46 @@ app.get('/api/savings', async (req, res) => {
     } catch (e) {
       console.warn('Failed to fetch live daily solar for savings, falling back to history:', e.message);
     }
+
+    // Safety guard: if the value is not clearly from today, force to 0
+    const todayDate = new Date().toLocaleDateString('en-CA');
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    const todayStartUnix = Math.floor(todayStart.getTime() / 1000);
+
+    // Check the most recent history row for today to see if it's actually after midnight
+    const latestTodayRow = db.prepare(`
+      SELECT timestamp, daily_solar FROM history 
+      WHERE timestamp >= ? AND daily_solar IS NOT NULL
+      ORDER BY timestamp DESC LIMIT 1
+    `).get(todayStartUnix);
+
+    // If no row exists for today or the existing value seems to be from yesterday (row timestamp is before midnight), force to 0
+    if (!latestTodayRow) {
+      todaySolar = 0;
+    } else {
+      const rowLocalDate = new Date(latestTodayRow.timestamp * 1000).toLocaleDateString('en-CA');
+      if (rowLocalDate !== todayDate) {
+        todaySolar = 0;
+      }
+    }
+
+    // If live sensor gave 0 but history has a valid today value, use the max from history
     if (todaySolar === 0) {
-      const now = new Date();
-      const todayStart = new Date(now); todayStart.setHours(0,0,0,0);
-      const startUnix = Math.floor(todayStart.getTime() / 1000);
       const rows = db.prepare(`
         SELECT timestamp, daily_solar FROM history 
         WHERE timestamp >= ? AND daily_solar IS NOT NULL
         ORDER BY timestamp ASC
-      `).all(startUnix);
+      `).all(todayStartUnix);
       let maxVal = 0;
       rows.forEach(row => {
-        const date = new Date(row.timestamp * 1000).toLocaleDateString('en-CA');
-        if (date === new Date().toLocaleDateString('en-CA') && row.daily_solar > maxVal) {
+        const rowDate = new Date(row.timestamp * 1000).toLocaleDateString('en-CA');
+        if (rowDate === todayDate && row.daily_solar > maxVal) {
           maxVal = row.daily_solar;
         }
       });
       todaySolar = maxVal;
     }
+
     const todaySavings = todaySolar * rate;
 
     function getTotalSolarSince(startDate) {
@@ -619,7 +650,7 @@ app.get('/api/savings', async (req, res) => {
   } catch (err) { console.error('Savings error:', err); res.status(500).json({ error: err.message }); }
 });
 
-// Helper: get Open-Meteo solar forecast data (unchanged)
+// Helper: get Open-Meteo solar forecast data
 async function getOpenMeteoData(lat, lon, capacityKwp) {
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=4`;
   const response = await fetch(url);
@@ -728,6 +759,8 @@ app.get('/api/solar-forecast', async (req, res) => {
 
     let actualTodayKwh = 0;
     const todayDate = new Date().toLocaleDateString('en-CA');
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    const todayStartUnix = Math.floor(todayStart.getTime() / 1000);
 
     try {
       const haEnabled = await isSourceEnabled('ha_enabled');
@@ -745,22 +778,36 @@ app.get('/api/solar-forecast', async (req, res) => {
       console.warn('Failed to fetch live daily solar for forecast, falling back to history:', e.message);
     }
 
+    // Safety: if live sensor gave 0, or if the most recent history row for today is not from today, use 0
     if (actualTodayKwh === 0) {
-      const todayStart = new Date(); todayStart.setHours(0,0,0,0);
-      const todayStartUnix = Math.floor(todayStart.getTime() / 1000);
-      const todayRows = db.prepare(`
+      const latestTodayRow = db.prepare(`
         SELECT timestamp, daily_solar FROM history 
         WHERE timestamp >= ? AND daily_solar IS NOT NULL
-        ORDER BY timestamp ASC
-      `).all(todayStartUnix);
-      let maxVal = 0;
-      todayRows.forEach(row => {
-        const rowDate = new Date(row.timestamp * 1000).toLocaleDateString('en-CA');
-        if (rowDate === todayDate && row.daily_solar > maxVal) {
-          maxVal = row.daily_solar;
+        ORDER BY timestamp DESC LIMIT 1
+      `).get(todayStartUnix);
+      if (!latestTodayRow) {
+        actualTodayKwh = 0;
+      } else {
+        const rowLocalDate = new Date(latestTodayRow.timestamp * 1000).toLocaleDateString('en-CA');
+        if (rowLocalDate !== todayDate) {
+          actualTodayKwh = 0;
+        } else {
+          // Fallback to max from history (existing logic)
+          const todayRows = db.prepare(`
+            SELECT timestamp, daily_solar FROM history 
+            WHERE timestamp >= ? AND daily_solar IS NOT NULL
+            ORDER BY timestamp ASC
+          `).all(todayStartUnix);
+          let maxVal = 0;
+          todayRows.forEach(row => {
+            const rowDate = new Date(row.timestamp * 1000).toLocaleDateString('en-CA');
+            if (rowDate === todayDate && row.daily_solar > maxVal) {
+              maxVal = row.daily_solar;
+            }
+          });
+          actualTodayKwh = maxVal;
         }
-      });
-      actualTodayKwh = maxVal;
+      }
     }
 
     const dailyMap = new Map();
@@ -785,10 +832,10 @@ app.get('/api/solar-forecast', async (req, res) => {
     const hourly = forecastData.slice(0, 96);
     const result = { daily, hourly, source };
 
-    // Fetch weather data: current weather + daily weather for next two days
+    // Fetch weather data (current + daily forecasts)
     if (lat && lon) {
       try {
-        // Current weather (icon, temp, humidity, feels like)
+        // Current weather
         const currentUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=relativehumidity_2m,apparent_temperature&timezone=auto&forecast_days=1`;
         const currentRes = await fetch(currentUrl);
         let temp = null, feelsLike = null, humidity = null;
@@ -815,13 +862,12 @@ app.get('/api/solar-forecast', async (req, res) => {
           }
         }
 
-        // Daily forecast weather for the next 2 days (full details)
+        // Daily forecast weather for the next 2 days
         let forecastWeather = [];
         if (daily.length > 1) {
           const tomorrowDate = daily[1].date;
           const dayAfterDate = daily.length > 2 ? daily[2].date : null;
 
-          // Fetch daily weather data: weather code, max temp, apparent max temp, avg humidity
           const dailyWeatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weathercode,temperature_2m_max,apparent_temperature_max,relativehumidity_2m_mean&timezone=auto&forecast_days=3`;
           const dailyWeatherRes = await fetch(dailyWeatherUrl);
           if (dailyWeatherRes.ok) {
@@ -832,7 +878,6 @@ app.get('/api/solar-forecast', async (req, res) => {
             const feels = dailyWeatherData.daily.apparent_temperature_max;
             const humids = dailyWeatherData.daily.relativehumidity_2m_mean;
 
-            // Helper to build a weather entry for a given date
             function buildWeatherEntry(date) {
               const idx = dates.indexOf(date);
               if (idx === -1) return null;
@@ -864,7 +909,7 @@ app.get('/api/solar-forecast', async (req, res) => {
           temp,
           extra: (feelsLike != null ? `Feels ${feelsLike.toFixed(0)}°C` : '') +
                  (humidity != null ? ` · Humidity ${humidity}%` : ''),
-          forecast_weather: forecastWeather   // array of objects with date, icon_class, desc, temp, extra
+          forecast_weather: forecastWeather
         };
       } catch (e) {
         console.warn('Weather data fetch failed:', e.message);
@@ -1040,7 +1085,6 @@ app.post('/api/settings', async (req, res) => {
     if ('mqtt_broker_url' in updates || 'mqtt_username' in updates || 'mqtt_password' in updates || 'mqtt_enabled' in updates) {
       await restartMqtt();
     }
-    // Clear forecast cache only if a forecast-related setting changed
     const forecastKeys = [
       'forecast_enabled', 'solar_latitude', 'solar_longitude', 'solar_tilt',
       'solar_azimuth', 'solar_capacity_kwp', 'solcast_api_key', 'solcast_resource_id',
