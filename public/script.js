@@ -277,7 +277,7 @@ async function updateForecast() {
     document.getElementById('forecast-date').textContent =
       now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 
-    // Weather data – now uses day_name from server directly
+    // Weather data
     if (data.weather) {
       const w = data.weather;
       document.getElementById('weather-i').className = w.icon_class || 'fi fi-sr-sun';
@@ -287,7 +287,8 @@ async function updateForecast() {
       setWeatherIconColor(document.getElementById('weather-i'), w.desc);
 
       const forecastWeather = w.forecast_weather || [];
-      // First forecast day column
+
+      // First forecast day
       const fw1 = forecastWeather[0] || { day_name: '--', icon_class: 'fi fi-sr-sun', desc: 'Clear Sky', temp: null, extra: 'No data' };
       document.getElementById('fcast-heading-1').textContent = fw1.day_name || '--';
       document.getElementById('fcast-icon-1').className = fw1.icon_class;
@@ -295,7 +296,8 @@ async function updateForecast() {
       document.getElementById('fcast-desc-1').textContent = fw1.desc || '';
       document.getElementById('fcast-extra-1').textContent = fw1.extra || '';
       setWeatherIconColor(document.getElementById('fcast-icon-1'), fw1.desc);
-      // Second forecast day column
+
+      // Second forecast day
       const fw2 = forecastWeather[1] || { day_name: '--', icon_class: 'fi fi-sr-sun', desc: 'Clear Sky', temp: null, extra: 'No data' };
       document.getElementById('fcast-heading-2').textContent = fw2.day_name || '--';
       document.getElementById('fcast-icon-2').className = fw2.icon_class;
@@ -351,7 +353,6 @@ async function updateForecast() {
 
     sparklineChart.update();
 
-    // Apply gradient only after chart area is ready
     const chartArea = sparklineChart.chartArea;
     if (chartArea && sparklineChart.data.datasets[1].data.length > 0) {
       const ctx = sparklineChart.ctx;

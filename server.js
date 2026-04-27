@@ -1,624 +1,1185 @@
-let powerChart;
-let energyBarChart;
-let sparklineChart;
-const ctxPower = document.getElementById('powerChart').getContext('2d');
-const ctxEnergy = document.getElementById('energyBarChart').getContext('2d');
-const ctxSparkline = document.getElementById('pv-sparkline').getContext('2d');
+require('dotenv').config();
+const express = require('express');
+const fetch = require('node-fetch');
+const Database = require('better-sqlite3');
+const path = require('path');
+const basicAuth = require('express-basic-auth');
+const mqtt = require('mqtt');
+const multer = require('multer');
+const fs = require('fs');
 
-const visibilityPrefs = {
-  'Load': true,
-  'Solar PV': true,
-  'Battery Charge': false,
-  'Battery Discharge': false,
-  'Grid Import': false,
-  'Grid Export': false
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+const settingsPassword = process.env.SETTINGS_PASSWORD || 'admin';
+const authMiddleware = basicAuth({
+  users: { 'admin': settingsPassword },
+  challenge: true,
+  realm: 'Energy Dashboard Settings'
+});
+
+const upload = multer({
+  dest: '/tmp/',
+  fileFilter: (req, file, cb) => {
+    if (file.originalname.endsWith('.db')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only .db files are allowed'));
+    }
+  },
+  limits: { fileSize: 50 * 1024 * 1024 }
+});
+
+let db;
+const DB_PATH = './data/energy.db';
+
+let mqttClient = null;
+const mqttValues = {
+  consumption: 0, solar: 0, battery_charge: 0, battery_discharge: 0,
+  grid_import: 0, grid_export: 0, battery_soc: 0,
+  daily_consumption: 0, daily_solar: 0, daily_battery_charge: 0, daily_battery_discharge: 0,
+  daily_grid_import: 0, daily_grid_export: 0
 };
+const topicKeyMap = {};
 
-let currentSolarWatts = 0;
-let systemCapacityKwp = 2.1;
+// Weather code mapping (Flaticon icon classes)
+const weatherCodeMap = {
+  0: { icon: 'fi fi-sr-sun', desc: 'Clear Sky' },
+  1: { icon: 'fi fi-sr-sun', desc: 'Mainly Clear' },
+  2: { icon: 'fi fi-sr-cloud-sun', desc: 'Partly Cloudy' },
+  3: { icon: 'fi fi-sr-cloud', desc: 'Overcast' },
+  45: { icon: 'fi fi-sr-cloud', desc: 'Fog' },
+  48: { icon: 'fi fi-sr-cloud', desc: 'Depositing Rime Fog' },
+  51: { icon: 'fi fi-sr-cloud-rain', desc: 'Light Drizzle' },
+  53: { icon: 'fi fi-sr-cloud-rain', desc: 'Moderate Drizzle' },
+  55: { icon: 'fi fi-sr-cloud-rain', desc: 'Dense Drizzle' },
+  61: { icon: 'fi fi-sr-cloud-rain', desc: 'Slight Rain' },
+  63: { icon: 'fi fi-sr-cloud-rain', desc: 'Moderate Rain' },
+  65: { icon: 'fi fi-sr-cloud-rain', desc: 'Heavy Rain' },
+  80: { icon: 'fi fi-sr-cloud-rain', desc: 'Rain Showers' }
+};
+const DEFAULT_WEATHER = { icon: 'fi fi-sr-sun', desc: 'Clear Sky' };
 
-function formatCurrency(amount, currency) {
-  const rounded = Math.round(amount);
-  return currency + ' ' + rounded.toLocaleString(undefined, { maximumFractionDigits: 0 });
+function parseGridState(state) {
+  if (state === null || state === undefined) return 0;
+  if (typeof state === 'number') return state > 0 ? 1 : 0;
+  const str = String(state).toLowerCase().trim();
+  if (str === 'on' || str === 'true' || str === '1' || str === 'open' || str === 'unlocked') return 1;
+  return 0;
 }
 
-function formatHoursToHM(hours) {
-  const totalMinutes = Math.round(hours * 60);
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
-  return `${h.toString().padStart(2, '0')}h:${m.toString().padStart(2, '0')}m`;
+function initializeDatabase() {
+  const dataDir = path.dirname(DB_PATH);
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+
+  db = new Database(DB_PATH);
+  db.pragma('journal_mode = WAL');
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS history (
+      timestamp INTEGER PRIMARY KEY,
+      consumption REAL,
+      solar REAL,
+      battery_charge REAL,
+      battery_discharge REAL,
+      grid_import REAL,
+      grid_export REAL,
+      battery_soc REAL,
+      daily_consumption REAL,
+      daily_solar REAL,
+      daily_battery_charge REAL,
+      daily_battery_discharge REAL,
+      daily_grid_import REAL,
+      daily_grid_export REAL
+    );
+    CREATE INDEX IF NOT EXISTS idx_timestamp ON history(timestamp);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS grid_status (
+      timestamp INTEGER PRIMARY KEY,
+      state INTEGER
+    );
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS config (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
+  `);
+
+  const essentialKeys = [
+    'ha_url', 'ha_token', 'ha_enabled',
+    'mqtt_broker_url', 'mqtt_username', 'mqtt_password', 'mqtt_enabled',
+    'mqtt_topic_consumption', 'mqtt_topic_solar', 'mqtt_topic_battery_charge',
+    'mqtt_topic_battery_discharge', 'mqtt_topic_grid_import', 'mqtt_topic_grid_export',
+    'mqtt_topic_battery_soc',
+    'mqtt_topic_daily_consumption', 'mqtt_topic_daily_solar', 'mqtt_topic_daily_battery_charge',
+    'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export',
+    'ha_entity_consumption', 'ha_entity_solar', 'ha_entity_battery_charge', 'ha_entity_battery_discharge',
+    'ha_entity_grid_import', 'ha_entity_grid_export', 'ha_entity_daily_consumption', 'ha_entity_daily_solar',
+    'ha_entity_daily_battery_charge', 'ha_entity_daily_battery_discharge', 'ha_entity_daily_grid_import', 'ha_entity_daily_grid_export',
+    'ha_entity_battery_soc', 'grid_status_entity',
+    'savings_currency', 'savings_rate', 'dashboard_title', 'dashboard_logo',
+    'solar_latitude', 'solar_longitude', 'solar_tilt', 'solar_azimuth', 'solar_capacity_kwp', 'solcast_api_key',
+    'forecast_enabled', 'solar_loss_factor', 'solar_install_date', 'solcast_resource_id',
+    'all_time_pv_savings_override'
+  ];
+
+  const insertConfig = db.prepare('INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)');
+  for (const key of essentialKeys) {
+    insertConfig.run(key, '');
+  }
+
+  const defaults = {
+    ha_enabled: 'true',
+    mqtt_enabled: 'false',
+    forecast_enabled: 'false',
+    dashboard_title: '⚡ Energy Dashboard',
+    savings_currency: '€',
+    savings_rate: '0.30',
+    solar_loss_factor: '0.9',
+    solar_install_date: new Date().toISOString().split('T')[0]
+  };
+
+  const updateConfig = db.prepare('UPDATE config SET value = ? WHERE key = ? AND value = ?');
+  for (const [key, val] of Object.entries(defaults)) {
+    updateConfig.run(val, key, '');
+  }
+
+  console.log('Database initialized');
+  setupMqtt();
 }
 
-function getDayName(dateStr) {
-  const date = new Date(dateStr + 'T12:00:00');
-  return date.toLocaleDateString(undefined, { weekday: 'long' });
+initializeDatabase();
+
+function getConfig(key) {
+  const row = db.prepare('SELECT value FROM config WHERE key = ?').get(key);
+  return row ? row.value : '';
 }
 
-function initCharts() {
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-  const gridColor = isDark ? '#334155' : '#cbd5e1';
-  const textColor = isDark ? '#f8fafc' : '#0f172a';
+function setConfig(key, value) {
+  try {
+    const stmt = db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)');
+    stmt.run(key, String(value));
+  } catch (err) {
+    console.error(`[setConfig] ERROR for ${key}:`, err.message);
+    throw err;
+  }
+}
 
-  powerChart = new Chart(ctxPower, {
-    type: 'line', data: { datasets: [] },
-    options: {
-      responsive: true, maintainAspectRatio: false, interaction: { mode: 'index' },
-      elements: { line: { borderWidth: 1, tension: 0.4, fill: true }, point: { radius: 0, hoverRadius: 4 } },
-      scales: {
-        x: { type: 'time', time: { unit: 'hour' }, grid: { color: gridColor } },
-        y: { title: { display: true, text: 'Power (kW)', color: textColor }, grid: { color: gridColor } }
-      },
-      plugins: {
-        tooltip: { mode: 'index' },
-        legend: {
-          labels: { color: textColor },
-          onClick: (e, legendItem, legend) => {
-            const index = legendItem.datasetIndex;
-            const ci = legend.chart;
-            const meta = ci.getDatasetMeta(index);
-            meta.hidden = meta.hidden === null ? !ci.data.datasets[index].hidden : !meta.hidden;
-            ci.update();
-            const label = ci.data.datasets[index].label;
-            visibilityPrefs[label] = !meta.hidden;
+async function isSourceEnabled(source) {
+  const val = getConfig(source);
+  return val === 'true' || val === true;
+}
+
+async function setupMqtt() {
+  if (mqttClient) { mqttClient.end(); mqttClient = null; }
+  for (let k in topicKeyMap) delete topicKeyMap[k];
+  const enabled = await isSourceEnabled('mqtt_enabled');
+  if (!enabled) return;
+  const brokerUrl = getConfig('mqtt_broker_url');
+  if (!brokerUrl) return;
+  const options = {};
+  const username = getConfig('mqtt_username');
+  const password = getConfig('mqtt_password');
+  if (username) options.username = username;
+  if (password) options.password = password;
+  mqttClient = mqtt.connect(brokerUrl, options);
+  mqttClient.on('connect', async () => {
+    console.log('MQTT connected');
+    const topicKeys = [
+      'mqtt_topic_consumption', 'mqtt_topic_solar', 'mqtt_topic_battery_charge',
+      'mqtt_topic_battery_discharge', 'mqtt_topic_grid_import', 'mqtt_topic_grid_export',
+      'mqtt_topic_battery_soc',
+      'mqtt_topic_daily_consumption', 'mqtt_topic_daily_solar', 'mqtt_topic_daily_battery_charge',
+      'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_1000', 'mqtt_topic_daily_grid_export'
+    ];
+    const topics = [];
+    for (const k of topicKeys) {
+      const topic = getConfig(k);
+      if (topic) { topics.push(topic); topicKeyMap[topic] = k.replace('mqtt_topic_', ''); }
+    }
+    if (topics.length) mqttClient.subscribe(topics);
+  });
+  mqttClient.on('message', (topic, message) => {
+    const val = parseFloat(message.toString());
+    if (isNaN(val)) return;
+    const key = topicKeyMap[topic];
+    if (key) mqttValues[key] = val;
+  });
+  mqttClient.on('error', (err) => console.error('MQTT error:', err));
+}
+
+async function restartMqtt() { await setupMqtt(); }
+
+async function getHAState(entityId, haUrl = null, haToken = null) {
+  if (!haUrl) haUrl = getConfig('ha_url');
+  if (!haToken) haToken = getConfig('ha_token');
+  if (!haUrl || !haToken || !entityId) return 0;
+  const res = await fetch(`${haUrl}/api/states/${entityId}`, {
+    headers: { 'Authorization': `Bearer ${haToken}` }
+  });
+  if (!res.ok) throw new Error(`HA API error: ${res.status}`);
+  const data = await res.json();
+  return data.state;
+}
+
+async function pollAndCache() {
+  try {
+    const haEnabled = await isSourceEnabled('ha_enabled');
+    const mqttEnabled = await isSourceEnabled('mqtt_enabled');
+    async function getValue(mqttKey, haEntityKey) {
+      if (mqttEnabled && mqttValues[mqttKey] !== undefined) return mqttValues[mqttKey];
+      if (haEnabled) {
+        const entity = getConfig(haEntityKey);
+        if (entity) {
+          const raw = await getHAState(entity).catch(() => 0);
+          return parseFloat(raw) || 0;
+        }
+      }
+      return 0;
+    }
+    const consumption = await getValue('consumption', 'ha_entity_consumption');
+    const battCharge = await getValue('battery_charge', 'ha_entity_battery_charge');
+    const battDischarge = await getValue('battery_discharge', 'ha_entity_battery_discharge');
+    const gridImport = await getValue('grid_import', 'ha_entity_grid_import');
+    const gridExport = await getValue('grid_export', 'ha_entity_grid_export');
+    const batterySoc = await getValue('battery_soc', 'ha_entity_battery_soc');
+    const solarPower = await getValue('solar', 'ha_entity_solar');
+    const dailySolar = await getValue('daily_solar', 'ha_entity_daily_solar');
+    const dailyConsumption = await getValue('daily_consumption', 'ha_entity_daily_consumption');
+    const dailyBattCharge = await getValue('daily_battery_charge', 'ha_entity_daily_battery_charge');
+    const dailyBattDischarge = await getValue('daily_battery_discharge', 'ha_entity_daily_battery_discharge');
+    const dailyGridImport = await getValue('daily_grid_import', 'ha_entity_daily_grid_import');
+    const dailyGridExport = await getValue('daily_grid_export', 'ha_entity_daily_grid_export');
+
+    const now = Math.floor(Date.now() / 1000);
+    const insertHistory = db.prepare(`
+      INSERT OR REPLACE INTO history 
+      (timestamp, consumption, solar, battery_charge, battery_discharge, grid_import, grid_export, battery_soc,
+       daily_consumption, daily_solar, daily_battery_charge, daily_battery_discharge, daily_grid_import, daily_grid_export)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertHistory.run(now, consumption, solarPower, battCharge, battDischarge, gridImport, gridExport, batterySoc,
+      dailyConsumption, dailySolar, dailyBattCharge, dailyBattDischarge, dailyGridImport, dailyGridExport);
+
+    const gridEntity = getConfig('grid_status_entity');
+    if (gridEntity) {
+      try {
+        const rawState = await getHAState(gridEntity);
+        const isOn = parseGridState(rawState);
+        const lastRecord = db.prepare('SELECT state FROM grid_status ORDER BY timestamp DESC LIMIT 1').get();
+        if (!lastRecord || lastRecord.state !== isOn) {
+          db.prepare('INSERT INTO grid_status (timestamp, state) VALUES (?, ?)').run(now, isOn);
+          console.log(`Grid state changed to ${isOn ? 'ON' : 'OFF'} (raw: ${rawState})`);
+        }
+      } catch (e) { console.error('Grid status polling error:', e); }
+    }
+    console.log(`Cached at ${new Date().toISOString()}`);
+  } catch (err) { console.error('Polling error:', err); }
+}
+
+pollAndCache();
+setInterval(pollAndCache, 30000);
+
+// Clear forecast cache at midnight
+setInterval(() => {
+  const now = new Date();
+  if (now.getHours() === 0 && now.getMinutes() === 0) {
+    forecastCache = { data: null, timestamp: 0 };
+    console.log('Forecast cache cleared at midnight');
+  }
+}, 60000);
+
+// --- Public API ---
+app.get('/favicon.ico', (req, res) => res.status(204).end());
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json());
+
+app.get('/api/public-config', async (req, res) => {
+  try {
+    const keys = ['dashboard_title', 'dashboard_logo', 'savings_currency', 'savings_rate', 'solar_capacity_kwp'];
+    const config = {};
+    for (const key of keys) { config[key] = getConfig(key); }
+    config.dashboard_title = config.dashboard_title || '⚡ Energy Dashboard';
+    config.savings_currency = config.savings_currency || '€';
+    config.savings_rate = config.savings_rate || '0.30';
+    res.json(config);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/current', async (req, res) => {
+  try {
+    const latest = db.prepare('SELECT * FROM history ORDER BY timestamp DESC LIMIT 1').get();
+    const rateRow = db.prepare('SELECT value FROM config WHERE key = ?').get('savings_rate');
+    const rate = parseFloat(rateRow?.value) || 0.30;
+    const allTimeSolar = db.prepare(`SELECT SUM(daily_solar) as total FROM (SELECT MAX(daily_solar) as daily_solar FROM history GROUP BY date(timestamp, 'unixepoch'))`).get();
+    const allTimeSavings = (allTimeSolar?.total || 0) * rate;
+    if (latest) {
+      const curr = getConfig('savings_currency') || '€';
+      res.json({
+        consumption_kw: latest.consumption / 1000,
+        solar_kw: latest.solar / 1000,
+        battery_charge_kw: latest.battery_charge / 1000,
+        battery_discharge_kw: latest.battery_discharge / 1000,
+        grid_import_kw: latest.grid_import / 1000,
+        grid_export_kw: latest.grid_export / 1000,
+        battery_soc: latest.battery_soc,
+        daily_consumption_kwh: latest.daily_consumption,
+        daily_solar_kwh: latest.daily_solar,
+        daily_battery_charge_kwh: latest.daily_battery_charge,
+        daily_battery_discharge_kwh: latest.daily_battery_discharge,
+        daily_grid_import_kwh: latest.daily_grid_import,
+        daily_grid_export_kwh: latest.daily_grid_export,
+        savings_currency: curr,
+        savings_rate: rate,
+        today_savings: latest.daily_solar * rate,
+        all_time_savings: allTimeSavings,
+        timestamp: latest.timestamp * 1000
+      });
+    } else { res.json({ error: 'No data yet' }); }
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/history', async (req, res) => {
+  const days = parseInt(req.query.days) || 1;
+  const now = Math.floor(Date.now() / 1000);
+  const since = now - (days * 24 * 3600);
+  try {
+    const rows = db.prepare(`SELECT * FROM history WHERE timestamp >= ? ORDER BY timestamp ASC`).all(since);
+    res.json(rows.map(r => ({
+      ...r,
+      consumption_kw: r.consumption / 1000,
+      solar_kw: r.solar / 1000,
+      battery_charge_kw: r.battery_charge / 1000,
+      battery_discharge_kw: r.battery_discharge / 1000,
+      grid_import_kw: r.grid_import / 1000,
+      grid_export_kw: r.grid_export / 1000,
+      timestamp: r.timestamp * 1000
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/daily', async (req, res) => {
+  const days = parseInt(req.query.days) || 30;
+  const now = Math.floor(Date.now() / 1000);
+  const since = now - (days * 24 * 3600);
+  try {
+    const rows = db.prepare(`
+      SELECT date(timestamp, 'unixepoch') as day,
+        MAX(daily_consumption) as consumption_kwh,
+        MAX(daily_solar) as solar_kwh,
+        MAX(daily_battery_charge) as battery_charge_kwh,
+        MAX(daily_battery_discharge) as battery_discharge_kwh,
+        MAX(daily_grid_import) as grid_import_kwh,
+        MAX(daily_grid_export) as grid_export_kwh
+      FROM history WHERE timestamp >= ?
+      GROUP BY day ORDER BY day ASC
+    `).all(since);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/monthly', async (req, res) => {
+  try {
+    const now = new Date();
+    const months = [];
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({
+        key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+        display: `${monthNames[d.getMonth()]} ${d.getFullYear().toString().slice(2)}`
+      });
+    }
+    const rows = db.prepare(`
+      WITH daily_max AS (
+        SELECT 
+          date(timestamp, 'unixepoch') as day,
+          MAX(daily_consumption) as consumption,
+          MAX(daily_solar) as solar,
+          MAX(daily_battery_charge) as battery_charge,
+          MAX(daily_battery_discharge) as battery_discharge,
+          MAX(daily_grid_import) as grid_import,
+          MAX(daily_grid_export) as grid_export
+        FROM history
+        GROUP BY day
+      )
+      SELECT 
+        strftime('%Y-%m', day) as month,
+        SUM(consumption) as consumption_kwh,
+        SUM(solar) as solar_kwh,
+        SUM(battery_charge) as battery_charge_kwh,
+        SUM(battery_discharge) as battery_discharge_kwh,
+        SUM(grid_import) as grid_import_kwh,
+        SUM(grid_export) as grid_export_kwh
+      FROM daily_max
+      GROUP BY month
+      ORDER BY month DESC
+      LIMIT 12
+    `).all();
+    const dataMap = {};
+    rows.forEach(r => { dataMap[r.month] = r; });
+    const result = months.map(m => {
+      const data = dataMap[m.key] || {};
+      return {
+        month: m.display,
+        consumption_kwh: data.consumption_kwh || 0,
+        solar_kwh: data.solar_kwh || 0,
+        battery_charge_kwh: data.battery_charge_kwh || 0,
+        battery_discharge_kwh: data.battery_discharge_kwh || 0,
+        grid_import_kwh: data.grid_import_kwh || 0,
+        grid_export_kwh: data.grid_export_kwh || 0
+      };
+    });
+    res.json(result);
+  } catch (err) { console.error('Monthly query error:', err); res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/grid/status', async (req, res) => {
+  try {
+    const entity = getConfig('grid_status_entity');
+    if (!entity) return res.json({ configured: false });
+    const rawState = await getHAState(entity).catch(() => 0);
+    const current = parseGridState(rawState);
+    const lastOn = db.prepare("SELECT timestamp FROM grid_status WHERE state = 1 ORDER BY timestamp DESC LIMIT 1").get();
+    const lastOff = db.prepare("SELECT timestamp FROM grid_status WHERE state = 0 ORDER BY timestamp DESC LIMIT 1").get();
+    res.json({
+      configured: true,
+      current: current === 1,
+      lastOn: lastOn ? lastOn.timestamp * 1000 : null,
+      lastOff: lastOff ? lastOff.timestamp * 1000 : null
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+function getGridStateAt(timestamp) {
+  const row = db.prepare(
+    'SELECT state FROM grid_status WHERE timestamp < ? ORDER BY timestamp DESC LIMIT 1'
+  ).get(timestamp);
+  return row ? row.state : 0;
+}
+
+app.get('/api/grid/hours', async (req, res) => {
+  const period = req.query.period || 'day';
+  const now = new Date();
+  let start, end;
+  
+  if (period === 'day') {
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+    end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  } else if (period === 'week') {
+    const day = now.getDay();
+    const diff = (day === 0 ? 6 : day - 1);
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - diff, 0, 0, 0);
+    end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
+  } else if (period === 'month') {
+    start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  } else if (period === 'year') {
+    start = new Date(now.getFullYear(), 0, 1, 0, 0, 0);
+    end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+  } else {
+    return res.status(400).json({ error: 'Invalid period' });
+  }
+  
+  const startUnix = Math.floor(start.getTime() / 1000);
+  const endUnix = Math.floor(end.getTime() / 1000);
+  const currentUnix = Math.floor(now.getTime() / 1000);
+  const effectiveEndUnix = Math.min(endUnix, currentUnix);
+  
+  try {
+    const initialState = getGridStateAt(startUnix);
+    const rows = db.prepare(
+      `SELECT timestamp, state FROM grid_status WHERE timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC`
+    ).all(startUnix, effectiveEndUnix);
+    
+    let hours = 0;
+    let lastState = initialState;
+    let lastTime = startUnix;
+    
+    for (const row of rows) {
+      if (lastState === 1) {
+        hours += (row.timestamp - lastTime) / 3600;
+      }
+      lastState = row.state;
+      lastTime = row.timestamp;
+    }
+    
+    if (lastState === 1) {
+      hours += (effectiveEndUnix - lastTime) / 3600;
+    }
+    
+    res.json({ period, hours: Math.round(hours * 10) / 10 });
+  } catch (err) { console.error('[Grid Hours] Error:', err); res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/debug/timezone', async (req, res) => {
+  const now = new Date();
+  res.json({
+    localTime: now.toString(),
+    iso: now.toISOString(),
+    timezoneOffset: now.getTimezoneOffset(),
+    envTZ: process.env.TZ || 'not set',
+    dayStart: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).toString(),
+    dayEnd: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toString()
+  });
+});
+
+app.get('/api/savings', async (req, res) => {
+  try {
+    const rateRow = db.prepare('SELECT value FROM config WHERE key = ?').get('savings_rate');
+    const rate = parseFloat(rateRow?.value) || 0.30;
+    const currency = getConfig('savings_currency') || '€';
+
+    let todaySolar = 0;
+    try {
+      const haEnabled = await isSourceEnabled('ha_enabled');
+      const mqttEnabled = await isSourceEnabled('mqtt_enabled');
+      if (mqttEnabled && mqttValues.daily_solar !== undefined) {
+        todaySolar = mqttValues.daily_solar;
+      } else if (haEnabled) {
+        const haEntity = getConfig('ha_entity_daily_solar');
+        if (haEntity) {
+          const raw = await getHAState(haEntity).catch(() => 0);
+          todaySolar = parseFloat(raw) || 0;
+        }
+      }
+    } catch (e) { console.warn('Failed to fetch live daily solar, using history:', e.message); }
+
+    const todayDate = new Date().toLocaleDateString('en-CA');
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    const todayStartUnix = Math.floor(todayStart.getTime() / 1000);
+
+    const latestTodayRow = db.prepare(`
+      SELECT timestamp, daily_solar FROM history 
+      WHERE timestamp >= ? AND daily_solar IS NOT NULL
+      ORDER BY timestamp DESC LIMIT 1
+    `).get(todayStartUnix);
+
+    if (!latestTodayRow) {
+      todaySolar = 0;
+    } else {
+      const rowLocalDate = new Date(latestTodayRow.timestamp * 1000).toLocaleDateString('en-CA');
+      if (rowLocalDate !== todayDate) todaySolar = 0;
+      else if (todaySolar === 0) {
+        const rows = db.prepare(`
+          SELECT timestamp, daily_solar FROM history 
+          WHERE timestamp >= ? AND daily_solar IS NOT NULL
+          ORDER BY timestamp ASC
+        `).all(todayStartUnix);
+        let maxVal = 0;
+        rows.forEach(row => {
+          const rowDate = new Date(row.timestamp * 1000).toLocaleDateString('en-CA');
+          if (rowDate === todayDate && row.daily_solar > maxVal) maxVal = row.daily_solar;
+        });
+        todaySolar = maxVal;
+      }
+    }
+
+    const todaySavings = todaySolar * rate;
+
+    function getTotalSolarSince(startDate) {
+      const startUnix = Math.floor(startDate.getTime() / 1000);
+      const rows = db.prepare(`
+        SELECT timestamp, daily_solar FROM history 
+        WHERE timestamp >= ? AND daily_solar IS NOT NULL
+        ORDER BY timestamp ASC
+      `).all(startUnix);
+      const dailyMax = {};
+      rows.forEach(row => {
+        const date = new Date(row.timestamp * 1000).toLocaleDateString('en-CA');
+        const val = row.daily_solar;
+        if (!dailyMax[date] || val > dailyMax[date]) { dailyMax[date] = val; }
+      });
+      return Object.values(dailyMax).reduce((sum, val) => sum + val, 0);
+    }
+
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const diff = (dayOfWeek === 0 ? 6 : dayOfWeek - 1);
+    const weekStart = new Date(now); weekStart.setDate(now.getDate() - diff); weekStart.setHours(0,0,0,0);
+    const weekSolar = getTotalSolarSince(weekStart);
+    const weekSavings = weekSolar * rate;
+
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthSolar = getTotalSolarSince(monthStart);
+    const monthSavings = monthSolar * rate;
+
+    let allTimeSavings;
+    const overrideValStr = getConfig('all_time_pv_savings_override');
+    if (overrideValStr && !isNaN(parseFloat(overrideValStr))) {
+      allTimeSavings = parseFloat(overrideValStr);
+    } else {
+      const allTimeRows = db.prepare(`SELECT timestamp, daily_solar FROM history WHERE daily_solar IS NOT NULL ORDER BY timestamp ASC`).all();
+      const allDailyMax = {};
+      allTimeRows.forEach(row => {
+        const date = new Date(row.timestamp * 1000).toLocaleDateString('en-CA');
+        const val = row.daily_solar;
+        if (!allDailyMax[date] || val > allDailyMax[date]) { allDailyMax[date] = val; }
+      });
+      const allTimeSolar = Object.values(allDailyMax).reduce((sum, val) => sum + val, 0);
+      allTimeSavings = allTimeSolar * rate;
+    }
+
+    res.json({
+      currency,
+      today: todaySavings || 0,
+      week: weekSavings || 0,
+      month: monthSavings || 0,
+      all: allTimeSavings || 0
+    });
+  } catch (err) { console.error('Savings error:', err); res.status(500).json({ error: err.message }); }
+});
+
+// Helper: get Open-Meteo solar forecast data
+async function getOpenMeteoData(lat, lon, capacityKwp) {
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=4`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Open-Meteo API error: ${response.status}`);
+  const data = await response.json();
+  const conversionFactor = capacityKwp / 1000;
+  const hourly = data.hourly;
+  const forecasts = hourly.time.map((t, i) => ({
+    period_end: new Date(t).toISOString(),
+    pv_estimate: hourly.shortwave_radiation[i] * conversionFactor
+  }));
+  return { forecasts, source: 'open-meteo' };
+}
+
+// Solar Forecast endpoint (cached)
+let forecastCache = { data: null, timestamp: 0 };
+const FORECAST_CACHE_MS = 3 * 60 * 60 * 1000;
+
+app.get('/api/solar-forecast', async (req, res) => {
+  try {
+    const forecastEnabled = await isSourceEnabled('forecast_enabled');
+    if (!forecastEnabled) {
+      return res.json({ error: 'Forecast disabled' });
+    }
+
+    const now = Date.now();
+    if (forecastCache.data && (now - forecastCache.timestamp) < FORECAST_CACHE_MS) {
+      const cacheDate = forecastCache.data.daily[0]?.date;
+      const todayDate = new Date().toLocaleDateString('en-CA');
+      if (cacheDate !== todayDate) {
+        forecastCache = { data: null, timestamp: 0 };
+      } else {
+        return res.json(forecastCache.data);
+      }
+    }
+
+    const lat = parseFloat(getConfig('solar_latitude')) || null;
+    const lon = parseFloat(getConfig('solar_longitude')) || null;
+    const capacityKwp = parseFloat(getConfig('solar_capacity_kwp')) || 0;
+    const solcastKey = getConfig('solcast_api_key');
+    const resourceId = getConfig('solcast_resource_id');
+    const lossFactor = parseFloat(getConfig('solar_loss_factor')) || 0.9;
+    const installDate = getConfig('solar_install_date') || '2020-01-01';
+
+    if (capacityKwp <= 0) {
+      return res.json({ error: 'System capacity not configured' });
+    }
+
+    let forecastData = null;
+    let source = 'none';
+
+    // Solcast attempt (unchanged)
+    if (solcastKey) {
+      if (resourceId) {
+        try {
+          const url = `https://api.solcast.com.au/rooftop_sites/${resourceId}/forecasts?format=json&api_key=${solcastKey}`;
+          const response = await fetch(url);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.forecasts && Array.isArray(data.forecasts)) {
+              forecastData = data.forecasts.map(f => ({
+                period_end: f.period_end,
+                pv_estimate: f.pv_estimate
+              }));
+              source = 'solcast';
+            }
+          } else {
+            const errorText = await response.text();
+            console.warn('Solcast (resource) fetch failed:', response.status, errorText);
           }
+        } catch (e) { console.warn('Solcast (resource) error:', e.message); }
+      }
+      if (!forecastData && lat && lon) {
+        try {
+          const tilt = parseFloat(getConfig('solar_tilt')) || 30;
+          const azimuth = parseFloat(getConfig('solar_azimuth')) || 180;
+          const url = `https://api.solcast.com.au/world_pv_power/forecasts?latitude=${lat}&longitude=${lon}&capacity=${capacityKwp}&tilt=${tilt}&azimuth=${azimuth}&loss_factor=${lossFactor}&install_date=${installDate}&format=json&api_key=${solcastKey}`;
+          const response = await fetch(url);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.forecasts && Array.isArray(data.forecasts)) {
+              forecastData = data.forecasts.map(f => ({
+                period_end: f.period_end,
+                pv_estimate: f.pv_estimate
+              }));
+              source = 'solcast';
+            }
+          } else {
+            const errorText = await response.text();
+            console.warn('Solcast (lat/lon) fetch failed:', response.status, errorText);
+          }
+        } catch (e) { console.warn('Solcast (lat/lon) error:', e.message); }
+      }
+    }
+
+    // Fallback to Open-Meteo
+    if (!forecastData) {
+      if (!lat || !lon) {
+        return res.json({ error: 'Location (lat/lon) required for Open-Meteo fallback' });
+      }
+      try {
+        const openMeteo = await getOpenMeteoData(lat, lon, capacityKwp);
+        forecastData = openMeteo.forecasts;
+        source = openMeteo.source;
+      } catch (e) {
+        console.error('Open-Meteo fallback failed:', e.message);
+        return res.json({ error: 'All forecast sources unavailable. Try again later.' });
+      }
+    }
+
+    let actualTodayKwh = 0;
+    const todayDate = new Date().toLocaleDateString('en-CA');
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    const todayStartUnix = Math.floor(todayStart.getTime() / 1000);
+
+    try {
+      const haEnabled = await isSourceEnabled('ha_enabled');
+      const mqttEnabled = await isSourceEnabled('mqtt_enabled');
+      if (mqttEnabled && mqttValues.daily_solar !== undefined) {
+        actualTodayKwh = mqttValues.daily_solar;
+      } else if (haEnabled) {
+        const haEntity = getConfig('ha_entity_daily_solar');
+        if (haEntity) {
+          const raw = await getHAState(haEntity).catch(() => 0);
+          actualTodayKwh = parseFloat(raw) || 0;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch live daily solar, using history:', e.message);
+    }
+
+    if (actualTodayKwh === 0) {
+      const latestTodayRow = db.prepare(`
+        SELECT timestamp, daily_solar FROM history 
+        WHERE timestamp >= ? AND daily_solar IS NOT NULL
+        ORDER BY timestamp DESC LIMIT 1
+      `).get(todayStartUnix);
+      if (!latestTodayRow) {
+        actualTodayKwh = 0;
+      } else {
+        const rowLocalDate = new Date(latestTodayRow.timestamp * 1000).toLocaleDateString('en-CA');
+        if (rowLocalDate !== todayDate) {
+          actualTodayKwh = 0;
+        } else {
+          const todayRows = db.prepare(`
+            SELECT timestamp, daily_solar FROM history 
+            WHERE timestamp >= ? AND daily_solar IS NOT NULL
+            ORDER BY timestamp ASC
+          `).all(todayStartUnix);
+          let maxVal = 0;
+          todayRows.forEach(row => {
+            const rowDate = new Date(row.timestamp * 1000).toLocaleDateString('en-CA');
+            if (rowDate === todayDate && row.daily_solar > maxVal) maxVal = row.daily_solar;
+          });
+          actualTodayKwh = maxVal;
         }
       }
     }
-  });
 
-  energyBarChart = new Chart(ctxEnergy, {
-    type: 'bar', data: {
-      labels: [],
-      datasets: [
-        { label: 'Solar Generated', backgroundColor: '#d97706', data: [] },
-        { label: 'Grid Imported', backgroundColor: '#dc2626', data: [] },
-        { label: 'Energy Consumed', backgroundColor: '#7c3aed', data: [] }
-      ]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      scales: {
-        x: { grid: { color: gridColor } },
-        y: { title: { display: true, text: 'Energy (kWh)', color: textColor }, grid: { color: gridColor }, beginAtZero: true }
-      },
-      plugins: { legend: { labels: { color: textColor } }, tooltip: { mode: 'index' } }
+    const dailyMap = new Map();
+    forecastData.forEach(f => {
+      const date = f.period_end.split('T')[0];
+      const existing = dailyMap.get(date) || { date, total_kwh: 0, peak_kw: 0, source };
+      existing.total_kwh += f.pv_estimate;
+      existing.peak_kw = Math.max(existing.peak_kw, f.pv_estimate);
+      dailyMap.set(date, existing);
+    });
+
+    const daily = Array.from(dailyMap.values()).slice(0, 4);
+    for (const dayEntry of daily) {
+      if (dayEntry.date === todayDate) {
+        dayEntry.total_kwh = actualTodayKwh + dayEntry.total_kwh;
+        dayEntry.actual_so_far = actualTodayKwh;
+        break;
+      }
     }
-  });
 
-  sparklineChart = new Chart(ctxSparkline, {
-    type: 'line', data: { datasets: [] },
-    options: {
-      responsive: true, maintainAspectRatio: false, interaction: { intersect: false, mode: 'index' },
-      elements: { line: { borderWidth: 2, tension: 0.4 }, point: { radius: 0 } },
-      scales: {
-        x: { type: 'time', time: { unit: 'hour', displayFormats: { hour: 'HH' } }, grid: { display: false }, ticks: { color: textColor, maxRotation: 0 } },
-        y: { beginAtZero: true, grid: { color: gridColor }, ticks: { color: textColor, callback: (v) => v + ' kW' }, max: 1 }
-      },
-      plugins: {
-        tooltip: { enabled: false },
-        legend: { display: true, labels: { color: textColor, boxWidth: 20, padding: 10 } }
+    const hourly = forecastData.slice(0, 96);
+    const result = { daily, hourly, source };
+
+    // --- WEATHER FETCH (bullet-proof) ---
+    if (lat && lon) {
+      try {
+        // Current weather
+        const currentUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=relativehumidity_2m,apparent_temperature&timezone=auto&forecast_days=1`;
+        const currentRes = await fetch(currentUrl);
+        let temp = null, feelsLike = null, humidity = null;
+        let iconClass = DEFAULT_WEATHER.icon;
+        let weatherDesc = DEFAULT_WEATHER.desc;
+
+        if (currentRes.ok) {
+          const currentData = await currentRes.json();
+          const cw = currentData.current_weather;
+          temp = cw.temperature;
+          const code = cw.weathercode;
+          const mapping = weatherCodeMap[code] || DEFAULT_WEATHER;
+          iconClass = mapping.icon;
+          weatherDesc = mapping.desc;
+
+          const hourlyData = currentData.hourly;
+          const times = hourlyData.time.map(t => new Date(t));
+          for (let i = 0; i < times.length; i++) {
+            if (times[i].getHours() === new Date().getHours()) {
+              feelsLike = hourlyData.apparent_temperature[i];
+              humidity = hourlyData.relativehumidity_2m[i];
+              break;
+            }
+          }
+        }
+
+        // Daily weather for 3 full days (indices: 0=today, 1=tomorrow, 2=day after)
+        let forecastWeather = [];
+
+        const dailyWeatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weathercode,temperature_2m_max,apparent_temperature_max,relativehumidity_2m_mean&timezone=auto&forecast_days=3`;
+        const dailyWeatherRes = await fetch(dailyWeatherUrl);
+        console.log('Daily weather fetch status:', dailyWeatherRes.status);
+
+        if (dailyWeatherRes.ok) {
+          const dailyWeatherData = await dailyWeatherRes.json();
+          const dates = dailyWeatherData.daily.time;
+          const codes = dailyWeatherData.daily.weathercode;
+          const temps = dailyWeatherData.daily.temperature_2m_max;
+          const feels = dailyWeatherData.daily.apparent_temperature_max;
+          const humids = dailyWeatherData.daily.relativehumidity_2m_mean;
+
+          console.log('Daily weather dates:', dates);
+          console.log('Daily temps:', temps);
+
+          function getDayName(dateStr) {
+            const d = new Date(dateStr + 'T12:00:00');
+            return d.toLocaleDateString('en-US', { weekday: 'long' });
+          }
+
+          for (let i = 1; i <= 2; i++) {
+            if (i < dates.length) {
+              const mapping = weatherCodeMap[codes[i]] || DEFAULT_WEATHER;
+              forecastWeather.push({
+                date: dates[i],
+                day_name: getDayName(dates[i]),
+                icon_class: mapping.icon,
+                desc: mapping.desc,
+                temp: temps[i],
+                extra: (feels[i] != null ? `Feels ${feels[i].toFixed(0)}°C` : '') +
+                       (humids[i] != null ? ` · Humidity ${humids[i].toFixed(0)}%` : '')
+              });
+            }
+          }
+        }
+
+        console.log('Forecast weather array:', JSON.stringify(forecastWeather));
+
+        result.weather = {
+          icon_class: iconClass,
+          desc: weatherDesc,
+          temp,
+          extra: (feelsLike != null ? `Feels ${feelsLike.toFixed(0)}°C` : '') +
+                 (humidity != null ? ` · Humidity ${humidity}%` : ''),
+          forecast_weather: forecastWeather
+        };
+      } catch (e) {
+        console.warn('Weather data fetch failed:', e.message);
+        result.weather = {
+          icon_class: DEFAULT_WEATHER.icon,
+          desc: DEFAULT_WEATHER.desc,
+          temp: null,
+          extra: '',
+          forecast_weather: []
+        };
+      }
+    } else {
+      result.weather = {
+        icon_class: DEFAULT_WEATHER.icon,
+        desc: DEFAULT_WEATHER.desc,
+        temp: null,
+        extra: '',
+        forecast_weather: []
+      };
+    }
+
+    forecastCache = { data: result, timestamp: now };
+    res.json(result);
+  } catch (err) {
+    console.error('Solar forecast error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Test forecast endpoint (unchanged)
+app.get('/api/test-forecast', authMiddleware, async (req, res) => {
+  try {
+    const latStr = getConfig('solar_latitude');
+    const lonStr = getConfig('solar_longitude');
+    const capStr = getConfig('solar_capacity_kwp');
+    
+    if (!latStr || !lonStr || !capStr) {
+      return res.status(400).json({ error: 'Latitude, longitude, and capacity are required' });
+    }
+    
+    const lat = parseFloat(latStr);
+    const lon = parseFloat(lonStr);
+    const capacityKwp = parseFloat(capStr);
+    
+    if (isNaN(lat) || isNaN(lon)) {
+      return res.status(400).json({ error: 'Invalid latitude or longitude format' });
+    }
+    if (isNaN(capacityKwp) || capacityKwp <= 0) {
+      return res.status(400).json({ error: 'System capacity must be a positive number (kWp)' });
+    }
+
+    const solcastKey = getConfig('solcast_api_key');
+    const resourceId = getConfig('solcast_resource_id');
+    const tilt = parseFloat(getConfig('solar_tilt')) || 30;
+    const azimuth = parseFloat(getConfig('solar_azimuth')) || 180;
+    const lossFactor = parseFloat(getConfig('solar_loss_factor')) || 0.9;
+    const installDate = getConfig('solar_install_date') || '2020-01-01';
+
+    let source = 'none';
+    let dailyTotal = 0;
+    let peak = 0;
+
+    if (solcastKey) {
+      if (resourceId) {
+        try {
+          const url = `https://api.solcast.com.au/rooftop_sites/${resourceId}/forecasts?format=json&api_key=${solcastKey}`;
+          const response = await fetch(url);
+          if (response.ok) {
+            const data = await response.json();
+            const forecasts = data.forecasts || [];
+            const today = new Date().toISOString().split('T')[0];
+            forecasts.forEach(f => {
+              if (f.period_end.startsWith(today)) {
+                dailyTotal += f.pv_estimate;
+                peak = Math.max(peak, f.pv_estimate);
+              }
+            });
+            source = 'solcast';
+          }
+        } catch (e) { console.warn('Solcast (resource) test failed:', e.message); }
+      }
+      if (source === 'none') {
+        try {
+          const url = `https://api.solcast.com.au/world_pv_power/forecasts?latitude=${lat}&longitude=${lon}&capacity=${capacityKwp}&tilt=${tilt}&azimuth=${azimuth}&loss_factor=${lossFactor}&install_date=${installDate}&format=json&api_key=${solcastKey}`;
+          const response = await fetch(url);
+          if (response.ok) {
+            const data = await response.json();
+            const forecasts = data.forecasts || [];
+            const today = new Date().toISOString().split('T')[0];
+            forecasts.forEach(f => {
+              if (f.period_end.startsWith(today)) {
+                dailyTotal += f.pv_estimate;
+                peak = Math.max(peak, f.pv_estimate);
+              }
+            });
+            source = 'solcast';
+          }
+        } catch (e) { console.warn('Solcast (lat/lon) test failed:', e.message); }
+      }
+    }
+
+    if (source === 'none') {
+      try {
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=1`;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Open-Meteo API error: ${response.status}`);
+        const data = await response.json();
+        const conversionFactor = capacityKwp / 1000;
+        const hourly = data.hourly;
+        const today = new Date().toISOString().split('T')[0];
+        hourly.time.forEach((t, i) => {
+          if (t.startsWith(today)) {
+            const pv = hourly.shortwave_radiation[i] * conversionFactor;
+            dailyTotal += pv;
+            peak = Math.max(peak, pv);
+          }
+        });
+        source = 'open-meteo';
+      } catch (e) {
+        return res.status(500).json({ error: `Forecast service unavailable: ${e.message}` });
+      }
+    }
+
+    res.json({
+      success: true,
+      source,
+      today_estimate_kwh: dailyTotal.toFixed(2),
+      peak_kw: peak.toFixed(2)
+    });
+  } catch (err) { console.error('Test forecast error:', err); res.status(500).json({ error: err.message }); }
+});
+
+// --- Backup & Restore (protected) ---
+app.get('/api/backup', authMiddleware, (req, res) => {
+  try {
+    if (db) db.close();
+    res.download(DB_PATH, `energy-dashboard-backup-${Date.now()}.db`, (err) => {
+      initializeDatabase();
+      if (err) console.error('Backup download error:', err);
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/restore', authMiddleware, upload.single('dbfile'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const tempPath = req.file.path;
+  try {
+    const testDb = new Database(tempPath);
+    testDb.prepare('SELECT 1').get();
+    testDb.close();
+    
+    if (db) db.close();
+    if (mqttClient) { mqttClient.end(); mqttClient = null; }
+    
+    fs.copyFileSync(tempPath, DB_PATH);
+    initializeDatabase();
+    await setupMqtt();
+    fs.unlinkSync(tempPath);
+    
+    res.json({ success: true, message: 'Database restored successfully' });
+  } catch (err) {
+    try { fs.unlinkSync(tempPath); } catch (e) {}
+    try { initializeDatabase(); } catch (e) {}
+    res.status(500).json({ error: 'Invalid database file: ' + err.message });
+  }
+});
+
+// --- Settings API (protected) ---
+app.use('/api/settings', authMiddleware);
+
+app.get('/api/settings', async (req, res) => {
+  const rows = db.prepare('SELECT key, value FROM config').all();
+  const config = {};
+  rows.forEach(r => { config[r.key] = r.value; });
+  res.json(config);
+});
+
+app.post('/api/settings', async (req, res) => {
+  const updates = req.body;
+  try {
+    const stmt = db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)');
+    for (const [key, value] of Object.entries(updates)) {
+      stmt.run(key, String(value));
+    }
+    if ('mqtt_broker_url' in updates || 'mqtt_username' in updates || 'mqtt_password' in updates || 'mqtt_enabled' in updates) {
+      await restartMqtt();
+    }
+    const forecastKeys = [
+      'forecast_enabled', 'solar_latitude', 'solar_longitude', 'solar_tilt',
+      'solar_azimuth', 'solar_capacity_kwp', 'solcast_api_key', 'solcast_resource_id',
+      'solar_loss_factor', 'solar_install_date'
+    ];
+    if (Object.keys(updates).some(k => forecastKeys.includes(k))) {
+      forecastCache = { data: null, timestamp: 0 };
+      console.log('Forecast cache cleared – settings changed');
+    }
+    res.json({ success: true });
+  } catch (err) { console.error('[Settings] Save error:', err); res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/ha/entities', authMiddleware, async (req, res) => {
+  let haUrl = req.query.url;
+  let haToken = req.query.token;
+  if (!haUrl || !haToken) {
+    haUrl = getConfig('ha_url');
+    haToken = getConfig('ha_token');
+  }
+  if (!haUrl || !haToken) return res.status(400).json({ error: 'HA not configured' });
+  try {
+    const response = await fetch(`${haUrl}/api/states`, {
+      headers: { 'Authorization': `Bearer ${haToken}` }
+    });
+    if (!response.ok) throw new Error(`HA error ${response.status}`);
+    const data = await response.json();
+    const sensors = data.filter(e => e.entity_id.startsWith('sensor.') || e.entity_id.startsWith('binary_sensor.')).map(e => e.entity_id);
+    res.json(sensors);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/test-mqtt', authMiddleware, async (req, res) => {
+  let brokerUrl = req.query.broker;
+  if (!brokerUrl) brokerUrl = getConfig('mqtt_broker_url');
+  if (!brokerUrl) return res.status(400).json({ error: 'MQTT broker URL not configured' });
+  const options = {};
+  const username = req.query.username || getConfig('mqtt_username');
+  const password = req.query.password || getConfig('mqtt_password');
+  if (username) options.username = username;
+  if (password) options.password = password;
+  const testClient = mqtt.connect(brokerUrl, options);
+  let responded = false;
+  const timeout = setTimeout(() => {
+    if (!responded) { testClient.end(); res.status(500).json({ error: 'Connection timeout' }); }
+  }, 5000);
+  testClient.on('connect', () => {
+    clearTimeout(timeout);
+    testClient.end();
+    if (!responded) { responded = true; res.json({ success: true, message: 'Connected to MQTT broker' }); }
+  });
+  testClient.on('error', (err) => {
+    clearTimeout(timeout);
+    testClient.end();
+    if (!responded) { responded = true; res.status(500).json({ error: err.message }); }
+  });
+});
+
+app.get('/api/test-mqtt-topic', authMiddleware, async (req, res) => {
+  let brokerUrl = req.query.broker;
+  if (!brokerUrl) brokerUrl = getConfig('mqtt_broker_url');
+  if (!brokerUrl) return res.status(400).json({ error: 'MQTT broker URL not configured' });
+  const topic = req.query.topic;
+  if (!topic) return res.status(400).json({ error: 'Topic required' });
+  const options = {};
+  const username = req.query.username || getConfig('mqtt_username');
+  const password = req.query.password || getConfig('mqtt_password');
+  if (username) options.username = username;
+  if (password) options.password = password;
+  const testClient = mqtt.connect(brokerUrl, options);
+  let responded = false;
+  const timeout = setTimeout(() => {
+    if (!responded) { testClient.end(); res.status(500).json({ error: 'No message received within 5 seconds' }); }
+  }, 5000);
+  testClient.on('connect', () => { testClient.subscribe(topic); });
+  testClient.on('message', (recTopic, message) => {
+    if (recTopic === topic) {
+      clearTimeout(timeout);
+      testClient.end();
+      if (!responded) {
+        responded = true;
+        const val = parseFloat(message.toString());
+        if (!isNaN(val)) { res.json({ success: true, value: val }); }
+        else { res.json({ success: true, value: null, raw: message.toString() }); }
       }
     }
   });
-}
-
-function applyGradientFills(chart) {
-  const ctx = chart.ctx;
-  const datasets = chart.data.datasets;
-  const chartArea = chart.chartArea;
-  datasets.forEach((dataset, i) => {
-    const meta = chart.getDatasetMeta(i);
-    if (!meta.hidden && dataset.data.length > 0) {
-      const gradient = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
-      let color = dataset.borderColor;
-      if (typeof color === 'string') {
-        const hex = color.startsWith('#') ? color : 
-                   (color === 'var(--solar)' ? (document.documentElement.getAttribute('data-theme') === 'dark' ? '#fbbf24' : '#d97706') : 
-                    color === 'var(--battery)' ? (document.documentElement.getAttribute('data-theme') === 'dark' ? '#10b981' : '#059669') :
-                    color === 'var(--grid)' ? (document.documentElement.getAttribute('data-theme') === 'dark' ? '#ef4444' : '#dc2626') :
-                    color === 'var(--home)' ? (document.documentElement.getAttribute('data-theme') === 'dark' ? '#8b5cf6' : '#7c3aed') :
-                    color);
-        const r = parseInt(hex.slice(1,3), 16);
-        const g = parseInt(hex.slice(3,5), 16);
-        const b = parseInt(hex.slice(5,7), 16);
-        gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.05)`);
-        gradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.2)`);
-        gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.4)`);
-      } else {
-        gradient.addColorStop(0, 'rgba(100,100,100,0.05)');
-        gradient.addColorStop(0.5, 'rgba(100,100,100,0.2)');
-        gradient.addColorStop(1, 'rgba(100,100,100,0.4)');
-      }
-      dataset.backgroundColor = gradient;
-      dataset.fill = true;
-    }
-  });
-}
-
-async function updateCurrent() {
-  try {
-    const res = await fetch('/api/current');
-    const d = await res.json();
-    currentSolarWatts = Math.round(d.solar_kw * 1000);
-    const consumption = Math.round(d.consumption_kw * 1000);
-    const battCharge = Math.round(d.battery_charge_kw * 1000);
-    const battDischarge = Math.round(d.battery_discharge_kw * 1000);
-    const gridImport = Math.round(d.grid_import_kw * 1000);
-    const gridExport = Math.round(d.grid_export_kw * 1000);
-    const battSoc = d.battery_soc || 0;
-
-    document.getElementById('flow-solar').textContent = currentSolarWatts + ' W';
-    document.getElementById('flow-battery-soc').textContent = battSoc.toFixed(1) + '%';
-
-    const battNet = battCharge - battDischarge;
-    const battSign = battNet >= 0 ? '↑' : '↓';
-    const battColor = battNet >= 0 ? 'var(--battery)' : '#f59e0b';
-    document.getElementById('flow-battery-power').innerHTML = `<span style="color:${battColor}">${battSign} ${Math.abs(battNet)} W</span>`;
-
-    document.getElementById('flow-home').textContent = consumption + ' W';
-
-    const gridNet = gridImport - gridExport;
-    const gridDir = gridNet >= 0 ? 'Import' : 'Export';
-    const gridColor = gridNet >= 0 ? 'var(--grid)' : '#3b82f6';
-    document.getElementById('flow-grid').innerHTML = `<span style="color:${gridColor}">${Math.abs(gridNet)} W</span>`;
-    document.getElementById('flow-grid-direction').textContent = gridDir;
-
-    updateFlowArrows(currentSolarWatts, consumption, battCharge, battDischarge, gridImport, gridExport);
-
-    const solarIcon = document.getElementById('icon-solar');
-    const homeIcon = document.getElementById('icon-home');
-    const gridIcon = document.getElementById('icon-grid');
-    if (solarIcon) solarIcon.style.color = currentSolarWatts > 0 ? 'var(--solar)' : 'var(--text)';
-    if (homeIcon) homeIcon.style.color = consumption > 0 ? 'var(--home)' : 'var(--text)';
-    if (gridIcon) {
-      if (gridImport > gridExport) gridIcon.style.color = 'var(--grid)';
-      else if (gridExport > gridImport) gridIcon.style.color = '#3b82f6';
-      else gridIcon.style.color = 'var(--text)';
-    }
-
-    const batteryIcon = document.getElementById('icon-battery');
-    if (batteryIcon) {
-      let batteryClass = 'fi fi-sr-battery-empty';
-      if (battSoc >= 76)      batteryClass = 'fi fi-sr-battery-full';
-      else if (battSoc >= 51) batteryClass = 'fi fi-sr-battery-three-quarters';
-      else if (battSoc >= 26) batteryClass = 'fi fi-sr-battery-half';
-      else if (battSoc >= 1)  batteryClass = 'fi fi-sr-battery-quarter';
-      batteryIcon.className = batteryClass;
-      if (battCharge > battDischarge) batteryIcon.style.color = 'var(--battery)';
-      else if (battDischarge > battCharge) batteryIcon.style.color = '#f59e0b';
-      else batteryIcon.style.color = 'var(--text)';
-    }
-
-    const cfgRes = await fetch('/api/public-config');
-    const cfg = await cfgRes.json();
-    document.getElementById('daily-solar').textContent = d.daily_solar_kwh.toFixed(2) + ' kWh';
-    document.getElementById('daily-load').textContent = d.daily_consumption_kwh.toFixed(2) + ' kWh';
-    document.getElementById('daily-grid-import').textContent = d.daily_grid_import_kwh.toFixed(2) + ' kWh';
-    const sufficiency = d.daily_consumption_kwh > 0 ? (d.daily_solar_kwh / d.daily_consumption_kwh * 100).toFixed(1) : '0.0';
-    document.getElementById('self-sufficiency').textContent = sufficiency + '%';
-    updateNowGauge();
-  } catch (e) { console.error(e); }
-}
-
-function updateNowGauge() {
-  const gaugeFill = document.getElementById('gauge-bar-fill');
-  const gaugePercent = document.getElementById('gauge-percent');
-  if (!gaugeFill || !gaugePercent) return;
-  const capacityWatts = systemCapacityKwp * 1000;
-  const percent = capacityWatts > 0 ? Math.min(100, (currentSolarWatts / capacityWatts) * 100) : 0;
-  gaugeFill.style.width = percent + '%';
-  gaugePercent.textContent = percent.toFixed(0) + '%';
-}
-
-async function updateSavings() {
-  try {
-    const res = await fetch('/api/savings');
-    const d = await res.json();
-    const curr = d.currency || '€';
-    const safeFormat = (val) => formatCurrency(val || 0, curr);
-    document.getElementById('savings-today').textContent = safeFormat(d.today);
-    document.getElementById('savings-week').textContent = safeFormat(d.week);
-    document.getElementById('savings-month').textContent = safeFormat(d.month);
-    document.getElementById('savings-all').textContent = safeFormat(d.all);
-  } catch (e) {
-    console.error('Savings fetch error:', e);
-    document.getElementById('savings-today').textContent = '--';
-    document.getElementById('savings-week').textContent = '--';
-    document.getElementById('savings-month').textContent = '--';
-    document.getElementById('savings-all').textContent = '--';
-  }
-}
-
-function setWeatherIconColor(iconEl, desc) {
-  const descLower = (desc || '').toLowerCase();
-  if (descLower.includes('clear') || descLower.includes('sunny')) iconEl.style.color = '#f59e0b';
-  else if (descLower.includes('partly cloudy')) iconEl.style.color = '#eab308';
-  else if (descLower.includes('cloudy') || descLower.includes('overcast')) iconEl.style.color = '#9ca3af';
-  else if (descLower.includes('rain') || descLower.includes('drizzle')) iconEl.style.color = '#3b82f6';
-  else if (descLower.includes('fog')) iconEl.style.color = '#94a3b8';
-  else iconEl.style.color = 'var(--text)';
-}
-
-async function updateForecast() {
-  const banner = document.getElementById('forecast-banner');
-  try {
-    const res = await fetch('/api/solar-forecast');
-    const data = await res.json();
-    if (data.error || !data.daily || data.daily.length === 0) {
-      banner.style.display = 'none';
-      return;
-    }
-    banner.style.display = 'block';
-
-    const now = new Date();
-    const todayDate = now.toLocaleDateString('en-CA');
-
-    let todayIdx = data.daily.findIndex(d => d.date === todayDate);
-    if (todayIdx === -1) todayIdx = 0;
-    const today = data.daily[todayIdx];
-    const tomorrow = data.daily[todayIdx + 1] || null;
-    const nextDay = data.daily[todayIdx + 2] || null;
-
-    document.getElementById('pv-today-value').textContent = (today.total_kwh || 0).toFixed(1) + ' kWh';
-    if (tomorrow) {
-      document.getElementById('pred-day1-label').textContent = getDayName(tomorrow.date);
-      document.getElementById('pv-tomorrow').textContent = tomorrow.total_kwh.toFixed(1) + ' kWh';
-    } else {
-      document.getElementById('pred-day1-label').textContent = '--';
-      document.getElementById('pv-tomorrow').textContent = '-- kWh';
-    }
-    if (nextDay) {
-      document.getElementById('pred-day2-label').textContent = getDayName(nextDay.date);
-      document.getElementById('pv-nextday').textContent = nextDay.total_kwh.toFixed(1) + ' kWh';
-    } else {
-      document.getElementById('pred-day2-label').textContent = '--';
-      document.getElementById('pv-nextday').textContent = '-- kWh';
-    }
-    document.getElementById('forecast-date').textContent =
-      now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-
-    // Weather data
-    if (data.weather) {
-      const w = data.weather;
-      document.getElementById('weather-i').className = w.icon_class || 'fi fi-sr-sun';
-      document.getElementById('weather-temp').textContent = w.temp != null ? w.temp.toFixed(0) + '°C' : '--°';
-      document.getElementById('weather-desc').textContent = w.desc || '';
-      document.getElementById('weather-extra').textContent = w.extra || '';
-      setWeatherIconColor(document.getElementById('weather-i'), w.desc);
-
-      const forecastWeather = w.forecast_weather || [];
-
-      // First forecast day
-      const fw1 = forecastWeather[0] || { day_name: '--', icon_class: 'fi fi-sr-sun', desc: 'Clear Sky', temp: null, extra: 'No data' };
-      document.getElementById('fcast-heading-1').textContent = fw1.day_name || '--';
-      document.getElementById('fcast-icon-1').className = fw1.icon_class;
-      document.getElementById('fcast-temp-1').textContent = fw1.temp != null ? fw1.temp.toFixed(0) + '°C' : '--°';
-      document.getElementById('fcast-desc-1').textContent = fw1.desc || '';
-      document.getElementById('fcast-extra-1').textContent = fw1.extra || '';
-      setWeatherIconColor(document.getElementById('fcast-icon-1'), fw1.desc);
-
-      // Second forecast day
-      const fw2 = forecastWeather[1] || { day_name: '--', icon_class: 'fi fi-sr-sun', desc: 'Clear Sky', temp: null, extra: 'No data' };
-      document.getElementById('fcast-heading-2').textContent = fw2.day_name || '--';
-      document.getElementById('fcast-icon-2').className = fw2.icon_class;
-      document.getElementById('fcast-temp-2').textContent = fw2.temp != null ? fw2.temp.toFixed(0) + '°C' : '--°';
-      document.getElementById('fcast-desc-2').textContent = fw2.desc || '';
-      document.getElementById('fcast-extra-2').textContent = fw2.extra || '';
-      setWeatherIconColor(document.getElementById('fcast-icon-2'), fw2.desc);
-    }
-
-    // Sparkline 7‑19
-    const historyRes = await fetch('/api/history?days=1');
-    const historyData = await historyRes.json();
-    const actualPoints = historyData
-      .filter(d => { const date = new Date(d.timestamp); return date.toLocaleDateString('en-CA') === todayDate && date.getHours() >= 7 && date.getHours() <= 19; })
-      .map(d => ({ x: d.timestamp, y: d.solar_kw }));
-
-    const intervals = [];
-    for (let h = 7; h <= 19; h += 0.5) {
-      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), Math.floor(h), (h % 1) * 60, 0);
-      intervals.push(start.getTime());
-    }
-
-    const actualByInterval = {};
-    actualPoints.forEach(p => {
-      const d = new Date(p.x);
-      const bucketMinute = Math.floor(d.getMinutes() / 30) * 30;
-      const bucketTime = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), bucketMinute, 0).getTime();
-      if (!actualByInterval[bucketTime]) actualByInterval[bucketTime] = [];
-      actualByInterval[bucketTime].push(p.y);
-    });
-
-    const actualData = intervals.map(ts => {
-      const values = actualByInterval[ts] || [];
-      if (values.length === 0) return null;
-      return { x: ts, y: values.reduce((a,b) => a+b, 0) / values.length };
-    }).filter(p => p !== null && p.x <= now.getTime());
-
-    const forecastHourly = data.hourly
-      .filter(h => {
-        const d = new Date(h.period_end);
-        return d.toISOString().startsWith(todayDate) && d.getHours() >= 7 && d.getHours() <= 19;
-      })
-      .map(h => ({ x: new Date(h.period_end).getTime(), y: h.pv_estimate }));
-
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    const actualColor = '#3b82f6';
-    const forecastColor = isDark ? '#fbbf24' : '#d97706';
-
-    sparklineChart.data.datasets = [
-      { label: 'Actual', data: actualData, borderColor: actualColor, backgroundColor: 'transparent', borderWidth: 2, tension: 0.4, pointRadius: 0, fill: false, borderDash: [] },
-      { label: 'Forecast', data: forecastHourly, borderColor: forecastColor, backgroundColor: 'transparent', borderWidth: 2, tension: 0.4, pointRadius: 0, fill: true, borderDash: [5,5] }
-    ];
-
-    sparklineChart.update();
-
-    const chartArea = sparklineChart.chartArea;
-    if (chartArea && sparklineChart.data.datasets[1].data.length > 0) {
-      const ctx = sparklineChart.ctx;
-      const gradient = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
-      const hex = forecastColor;
-      const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
-      gradient.addColorStop(0, `rgba(${r},${g},${b},0.1)`);
-      gradient.addColorStop(0.5, `rgba(${r},${g},${b},0.3)`);
-      gradient.addColorStop(1, `rgba(${r},${g},${b},0.5)`);
-      sparklineChart.data.datasets[1].backgroundColor = gradient;
-    }
-
-    sparklineChart.options.scales.x.min = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 7,0,0).getTime();
-    sparklineChart.options.scales.x.max = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 19,0,0).getTime();
-    sparklineChart.options.scales.y.max = systemCapacityKwp || undefined;
-    sparklineChart.options.scales.x.ticks.color = isDark ? '#f8fafc' : '#0f172a';
-    sparklineChart.options.scales.y.ticks.color = isDark ? '#f8fafc' : '#0f172a';
-    sparklineChart.options.plugins.legend.labels.color = isDark ? '#f8fafc' : '#0f172a';
-    sparklineChart.update();
-
-    updateNowGauge();
-
-    try {
-      const cfgRes = await fetch('/api/public-config');
-      const cfg = await cfgRes.json();
-      systemCapacityKwp = parseFloat(cfg.solar_capacity_kwp) || 2.1;
-    } catch(e) {}
-  } catch (e) {
-    console.error('Forecast error:', e);
-    banner.style.display = 'none';
-  }
-}
-
-function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImport, gridExport) {
-  const solarArrow = document.querySelector('.flow-arrow.solar-home');
-  const battArrow = document.querySelector('.flow-arrow.battery');
-  const gridArrow = document.querySelector('.flow-arrow.grid');
-  const gridToBatt = document.getElementById('grid-to-battery');
-
-  if (solar > 0) { solarArrow.style.color = 'var(--solar)'; solarArrow.classList.add('flowing'); solarArrow.textContent = '→'; }
-  else { solarArrow.style.color = 'var(--text-secondary)'; solarArrow.classList.remove('flowing'); solarArrow.textContent = '→'; }
-
-  const isCharging = battCharge > battDischarge;
-  const isDischarging = battDischarge > battCharge;
-  const isGridChargingBattery = gridImport > 0 && isCharging;
-  const isSolarChargingBattery = solar > 0 && isCharging && !isGridChargingBattery;
-
-  if (isDischarging) { battArrow.style.color = '#f59e0b'; battArrow.textContent = '→'; }
-  else if (isCharging) {
-    if (isGridChargingBattery) { battArrow.style.color = 'var(--grid)'; battArrow.textContent = '←'; }
-    else { battArrow.style.color = isSolarChargingBattery ? 'var(--solar)' : 'var(--battery)'; battArrow.textContent = '→'; }
-  } else { battArrow.style.color = 'var(--text-secondary)'; battArrow.textContent = '⇄'; }
-
-  if (gridImport > gridExport) { gridArrow.style.color = 'var(--grid)'; gridArrow.textContent = '←'; }
-  else if (gridExport > gridImport) { gridArrow.style.color = '#3b82f6'; gridArrow.textContent = '→'; }
-  else { gridArrow.style.color = 'var(--text-secondary)'; gridArrow.textContent = '⇄'; }
-
-  if (isGridChargingBattery) gridToBatt.style.display = 'block';
-  else gridToBatt.style.display = 'none';
-}
-
-async function updateGridStatus() {
-  try {
-    const res = await fetch('/api/grid/status');
-    const d = await res.json();
-    if (!d.configured) {
-      document.getElementById('grid-state').textContent = 'Not configured';
-      return;
-    }
-    document.getElementById('grid-state').textContent = d.current ? '⚡ ON' : '⚫ OFF';
-    document.getElementById('grid-state').style.color = d.current ? 'var(--battery)' : 'var(--grid)';
-    document.getElementById('grid-last-on').textContent = d.lastOn ? new Date(d.lastOn).toLocaleString() : 'Never';
-    document.getElementById('grid-last-off').textContent = d.lastOff ? new Date(d.lastOff).toLocaleString() : 'Never';
-
-    const periods = ['day', 'week', 'month', 'year'];
-    for (const p of periods) {
-      const hRes = await fetch(`/api/grid/hours?period=${p}`);
-      const hData = await hRes.json();
-      document.getElementById(`grid-hours-${p}`).textContent = formatHoursToHM(hData.hours);
-    }
-  } catch (e) { console.error('Grid error:', e); }
-}
-
-async function updateChart(days = 1) {
-  try {
-    const res = await fetch(`/api/history?days=${days}`);
-    const data = await res.json();
-    if (!data.length) return;
-
-    let timeUnit = 'hour';
-    if (days >= 7) timeUnit = 'day';
-    if (days >= 30) timeUnit = 'week';
-    powerChart.options.scales.x.time.unit = timeUnit;
-
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    const newDatasets = [
-      { label: 'Load', data: [], borderColor: isDark ? '#8b5cf6' : '#7c3aed', tension: 0.4, borderWidth: 1, fill: true },
-      { label: 'Solar PV', data: [], borderColor: isDark ? '#fbbf24' : '#d97706', tension: 0.4, borderWidth: 1, fill: true },
-      { label: 'Battery Charge', data: [], borderColor: isDark ? '#10b981' : '#059669', tension: 0.4, borderWidth: 1, fill: true },
-      { label: 'Battery Discharge', data: [], borderColor: '#f59e0b', tension: 0.4, borderWidth: 1, fill: true },
-      { label: 'Grid Import', data: [], borderColor: isDark ? '#ef4444' : '#dc2626', tension: 0.4, borderWidth: 1, fill: true },
-      { label: 'Grid Export', data: [], borderColor: '#3b82f6', tension: 0.4, borderWidth: 1, fill: true }
-    ];
-    newDatasets.forEach(ds => { ds.hidden = (visibilityPrefs[ds.label] === false); });
-    data.forEach(d => {
-      newDatasets[0].data.push({ x: d.timestamp, y: d.consumption_kw });
-      newDatasets[1].data.push({ x: d.timestamp, y: d.solar_kw });
-      newDatasets[2].data.push({ x: d.timestamp, y: d.battery_charge_kw });
-      newDatasets[3].data.push({ x: d.timestamp, y: d.battery_discharge_kw });
-      newDatasets[4].data.push({ x: d.timestamp, y: d.grid_import_kw });
-      newDatasets[5].data.push({ x: d.timestamp, y: d.grid_export_kw });
-    });
-    powerChart.data.datasets = newDatasets;
-    powerChart.update();
-    applyGradientFills(powerChart);
-  } catch (e) { console.error(e); }
-}
-
-async function updateEnergyBarChart() {
-  try {
-    const res = await fetch('/api/daily?days=7');
-    const data = await res.json();
-    if (!data.length) return;
-    const labels = data.map(d => {
-      const date = new Date(d.day + 'T00:00:00');
-      return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    });
-    energyBarChart.data.labels = labels;
-    energyBarChart.data.datasets[0].data = data.map(d => d.solar_kwh);
-    energyBarChart.data.datasets[1].data = data.map(d => d.grid_import_kwh);
-    energyBarChart.data.datasets[2].data = data.map(d => d.consumption_kwh);
-    energyBarChart.update();
-  } catch (e) { console.error('Energy bar chart error:', e); }
-}
-
-async function updateMonthlyTable() {
-  try {
-    const res = await fetch('/api/monthly');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const tbody = document.getElementById('monthly-table-body');
-    tbody.innerHTML = '';
-    data.reverse().forEach(row => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${row.month}</td><td>${row.consumption_kwh.toFixed(1)} kWh</td><td>${row.solar_kwh.toFixed(1)} kWh</td><td>${row.battery_charge_kwh.toFixed(1)} kWh</td><td>${row.battery_discharge_kwh.toFixed(1)} kWh</td><td>${row.grid_import_kwh.toFixed(1)} kWh</td><td>${row.grid_export_kwh.toFixed(1)} kWh</td>`;
-      tbody.appendChild(tr);
-    });
-  } catch (e) {
-    console.error('Monthly table error:', e);
-    document.getElementById('monthly-table-body').innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--grid);">Error loading data</td></tr>';
-  }
-}
-
-async function updateDailyTable() {
-  try {
-    const res = await fetch('/api/daily?days=30');
-    const data = await res.json();
-    const tbody = document.getElementById('daily-table-body');
-    tbody.innerHTML = '';
-    data.reverse().forEach(row => {
-      const date = new Date(row.day + 'T00:00:00');
-      const formattedDate = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${formattedDate}</td><td>${row.consumption_kwh.toFixed(1)} kWh</td><td>${row.solar_kwh.toFixed(1)} kWh</td><td>${row.battery_charge_kwh.toFixed(1)} kWh</td><td>${row.battery_discharge_kwh.toFixed(1)} kWh</td><td>${row.grid_import_kwh.toFixed(1)} kWh</td><td>${row.grid_export_kwh.toFixed(1)} kWh</td>`;
-      tbody.appendChild(tr);
-    });
-  } catch (e) { console.error('Daily table error:', e); }
-}
-
-async function loadBranding() {
-  try {
-    const res = await fetch('/api/public-config');
-    const cfg = await res.json();
-    if (cfg.dashboard_title) { document.getElementById('dashboard-title').textContent = cfg.dashboard_title; document.title = cfg.dashboard_title; }
-    if (cfg.dashboard_logo) { document.getElementById('logo-img').src = cfg.dashboard_logo; document.getElementById('logo-img').style.display = 'inline'; }
-    if (cfg.solar_capacity_kwp) systemCapacityKwp = parseFloat(cfg.solar_capacity_kwp) || 2.1;
-  } catch (e) {}
-}
-
-function initTheme() {
-  const savedTheme = localStorage.getItem('theme');
-  const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const themeToggle = document.getElementById('theme-toggle');
-  if (savedTheme === 'dark' || (!savedTheme && systemPrefersDark)) {
-    document.documentElement.setAttribute('data-theme', 'dark');
-    themeToggle.innerHTML = '<span class="theme-icon">☀️</span>';
-  } else {
-    document.documentElement.setAttribute('data-theme', 'light');
-    themeToggle.innerHTML = '<span class="theme-icon">🌙</span>';
-  }
-}
-
-function toggleTheme() {
-  const currentTheme = document.documentElement.getAttribute('data-theme');
-  const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', newTheme);
-  localStorage.setItem('theme', newTheme);
-  document.getElementById('theme-toggle').innerHTML = newTheme === 'dark' ? '<span class="theme-icon">☀️</span>' : '<span class="theme-icon">🌙</span>';
-  updateChartColors();
-  if (powerChart) applyGradientFills(powerChart);
-  updateForecast();
-}
-
-function updateChartColors() {
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-  const gridColor = isDark ? '#334155' : '#cbd5e1';
-  const textColor = isDark ? '#f8fafc' : '#0f172a';
-  if (powerChart) {
-    powerChart.options.scales.x.grid.color = gridColor;
-    powerChart.options.scales.y.grid.color = gridColor;
-    powerChart.options.plugins.legend.labels.color = textColor;
-    powerChart.data.datasets.forEach((ds, i) => {
-      if (i === 0) ds.borderColor = isDark ? '#8b5cf6' : '#7c3aed';
-      else if (i === 1) ds.borderColor = isDark ? '#fbbf24' : '#d97706';
-      else if (i === 2) ds.borderColor = isDark ? '#10b981' : '#059669';
-      else if (i === 3) ds.borderColor = '#f59e0b';
-      else if (i === 4) ds.borderColor = isDark ? '#ef4444' : '#dc2626';
-      else if (i === 5) ds.borderColor = '#3b82f6';
-    });
-    powerChart.update();
-    applyGradientFills(powerChart);
-  }
-  if (energyBarChart) {
-    energyBarChart.options.scales.x.grid.color = gridColor;
-    energyBarChart.options.scales.y.grid.color = gridColor;
-    energyBarChart.options.plugins.legend.labels.color = textColor;
-    energyBarChart.update();
-  }
-}
-
-document.getElementById('toggle-daily-details').addEventListener('click', () => {
-  document.getElementById('daily-breakdown-content').classList.toggle('collapsed');
-  document.getElementById('toggle-daily-details').classList.toggle('collapsed');
-});
-document.getElementById('toggle-monthly-details').addEventListener('click', () => {
-  document.getElementById('monthly-breakdown-content').classList.toggle('collapsed');
-  document.getElementById('toggle-monthly-details').classList.toggle('collapsed');
-});
-document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
-document.querySelectorAll('.chart-controls button').forEach(btn => {
-  btn.addEventListener('click', (e) => {
-    document.querySelector('.chart-controls .active')?.classList.remove('active');
-    e.target.classList.add('active');
-    updateChart(1);
+  testClient.on('error', (err) => {
+    clearTimeout(timeout);
+    testClient.end();
+    if (!responded) { responded = true; res.status(500).json({ error: err.message }); }
   });
 });
 
-initTheme();
-initCharts();
-loadBranding().then(() => {
-  updateCurrent();
-  updateSavings();
-  updateForecast();
-  updateGridStatus();
-  updateChart(1);
-  updateEnergyBarChart();
-  updateDailyTable();
-  updateMonthlyTable();
+app.get('/settings', authMiddleware, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'settings.html'));
 });
-setInterval(() => {
-  updateCurrent();
-  updateSavings();
-  updateForecast();
-  updateGridStatus();
-  updateChart(1);
-  updateEnergyBarChart();
-  updateDailyTable();
-  updateMonthlyTable();
-}, 30000);
+
+app.listen(PORT, () => console.log(`Energy dashboard running on port ${PORT}`));
