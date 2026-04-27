@@ -148,7 +148,7 @@ async function updateCurrent() {
     const battSoc = d.battery_soc || 0;
 
     document.getElementById('flow-solar').textContent = currentSolarWatts + ' W';
-    document.getElementById('flow-battery-soc').textContent = battSoc.toFixed(1) + '%';
+    document.getElementById('flow-battery-soc').textContent = Math.round(battSoc) + '%';
 
     const battNet = battCharge - battDischarge;
     const battSign = battNet >= 0 ? '↑' : '↓';
