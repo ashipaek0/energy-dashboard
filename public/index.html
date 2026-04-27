@@ -28,8 +28,9 @@
 
     <!-- Flow Card (Flaticon icons + NOW gauge under Solar) -->
     <div class="flow-card">
+      <!-- 🌞 Solar Panel Icon instead of sun -->
       <div class="flow-item solar">
-        <div class="flow-icon"><i id="icon-solar" class="fi fi-sr-sun"></i></div>
+        <div class="flow-icon"><i id="icon-solar" class="fi fi-sr-solar-panel"></i></div>
         <div class="flow-label">Solar</div>
         <div class="flow-value" id="flow-solar">0 W</div>
         <div class="solar-now-gauge" id="solar-now-gauge">
@@ -89,7 +90,7 @@
 
         <!-- Weather section: current weather + two forecast columns side by side -->
         <div class="weather-section">
-          <div class="weather-column">
+          <div class="weather-column" id="forecast-weather-current">
             <span class="weather-heading">Current Weather</span>
             <div class="weather-icon-big" id="weather-icon">
               <i class="fi fi-sr-sun" id="weather-i"></i>
@@ -101,8 +102,8 @@
             </div>
           </div>
 
-          <!-- Forecast weather columns (will be populated by JS) -->
-          <div class="weather-column" id="forecast-weather-1">
+          <!-- Forecast weather columns (hidden by default, shown when data available) -->
+          <div class="weather-column" id="forecast-weather-1" style="display:none;">
             <span class="weather-heading" id="fcast-heading-1">--</span>
             <div class="weather-icon-big">
               <i class="fi fi-sr-sun" id="fcast-icon-1"></i>
@@ -114,7 +115,7 @@
             </div>
           </div>
 
-          <div class="weather-column" id="forecast-weather-2">
+          <div class="weather-column" id="forecast-weather-2" style="display:none;">
             <span class="weather-heading" id="fcast-heading-2">--</span>
             <div class="weather-icon-big">
               <i class="fi fi-sr-sun" id="fcast-icon-2"></i>
