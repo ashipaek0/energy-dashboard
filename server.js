@@ -286,7 +286,7 @@ async function pollAndCache() {
 pollAndCache();
 setInterval(pollAndCache, 30000);
 
-// Midnight cache clear
+// Clear forecast cache at midnight
 setInterval(() => {
   const now = new Date();
   if (now.getHours() === 0 && now.getMinutes() === 0) {
@@ -818,7 +818,7 @@ app.get('/api/solar-forecast', async (req, res) => {
     const hourly = forecastData.slice(0, 96);
     const result = { daily, hourly, source };
 
-    // Fetch weather data (current + 2‑day forecast)
+    // Fetch weather data (current + forecast for next 2 days)
     if (lat && lon) {
       try {
         // Current weather
@@ -857,6 +857,12 @@ app.get('/api/solar-forecast', async (req, res) => {
         const tomorrowDateStr = tomorrowD.toISOString().split('T')[0];
         const dayAfterDateStr = dayAfterD.toISOString().split('T')[0];
 
+        // Pre‑compute day names
+        function getDayName(dateStr) {
+          const date = new Date(dateStr + 'T12:00:00');
+          return date.toLocaleDateString('en-US', { weekday: 'long' });
+        }
+
         // Fetch daily weather for exactly those two days
         const dailyWeatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weathercode,temperature_2m_max,apparent_temperature_max,relativehumidity_2m_mean&timezone=auto&start_date=${tomorrowDateStr}&end_date=${dayAfterDateStr}`;
         const dailyWeatherRes = await fetch(dailyWeatherUrl);
@@ -876,6 +882,7 @@ app.get('/api/solar-forecast', async (req, res) => {
             const mapping = weatherCodeMap[codes[idx]] || DEFAULT_WEATHER;
             return {
               date,
+              day_name: getDayName(date),
               icon_class: mapping.icon,
               desc: mapping.desc,
               temp: temps[idx],
@@ -890,16 +897,28 @@ app.get('/api/solar-forecast', async (req, res) => {
           if (daEntry) forecastWeather.push(daEntry);
         }
 
-        // Always fill with default entries if needed, using the correct dates
-        while (forecastWeather.length < 2) {
-          const date = forecastWeather.length === 0 ? tomorrowDateStr : dayAfterDateStr;
-          forecastWeather.push({
-            date,
-            icon_class: DEFAULT_WEATHER.icon,
-            desc: DEFAULT_WEATHER.desc,
-            temp: null,
-            extra: 'No data'
-          });
+        // Always guarantee at least two entries with correct day names
+        if (forecastWeather.length < 2) {
+          if (forecastWeather.length === 0) {
+            forecastWeather.push({
+              date: tomorrowDateStr,
+              day_name: getDayName(tomorrowDateStr),
+              icon_class: DEFAULT_WEATHER.icon,
+              desc: DEFAULT_WEATHER.desc,
+              temp: null,
+              extra: 'No data'
+            });
+          }
+          if (forecastWeather.length === 1) {
+            forecastWeather.push({
+              date: dayAfterDateStr,
+              day_name: getDayName(dayAfterDateStr),
+              icon_class: DEFAULT_WEATHER.icon,
+              desc: DEFAULT_WEATHER.desc,
+              temp: null,
+              extra: 'No data'
+            });
+          }
         }
 
         result.weather = {
@@ -917,10 +936,7 @@ app.get('/api/solar-forecast', async (req, res) => {
           desc: DEFAULT_WEATHER.desc,
           temp: null,
           extra: '',
-          forecast_weather: [
-            { date: '', icon_class: DEFAULT_WEATHER.icon, desc: DEFAULT_WEATHER.desc, temp: null, extra: 'No data' },
-            { date: '', icon_class: DEFAULT_WEATHER.icon, desc: DEFAULT_WEATHER.desc, temp: null, extra: 'No data' }
-          ]
+          forecast_weather: []
         };
       }
     } else {
