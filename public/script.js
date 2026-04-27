@@ -1,6 +1,6 @@
 let powerChart;
 let energyBarChart;
-let sparklineChart;         // sparkline for forecast
+let sparklineChart;
 const ctxPower = document.getElementById('powerChart').getContext('2d');
 const ctxEnergy = document.getElementById('energyBarChart').getContext('2d');
 const ctxSparkline = document.getElementById('pv-sparkline').getContext('2d');
@@ -15,7 +15,7 @@ const visibilityPrefs = {
 };
 
 let currentSolarWatts = 0;
-let systemCapacityKwp = 2.1;   // updated from settings
+let systemCapacityKwp = 2.1;
 
 function formatCurrency(amount, currency) {
   const rounded = Math.round(amount);
@@ -165,7 +165,6 @@ async function updateCurrent() {
 
     updateFlowArrows(currentSolarWatts, consumption, battCharge, battDischarge, gridImport, gridExport);
 
-    // Dynamic icon colours for solar, home, grid
     const solarIcon = document.getElementById('icon-solar');
     const homeIcon = document.getElementById('icon-home');
     const gridIcon = document.getElementById('icon-grid');
@@ -177,7 +176,6 @@ async function updateCurrent() {
       else gridIcon.style.color = 'var(--text)';
     }
 
-    // Battery icon SOC and colour
     const batteryIcon = document.getElementById('icon-battery');
     if (batteryIcon) {
       let batteryClass = 'fi fi-sr-battery-empty';
@@ -241,36 +239,6 @@ function setWeatherIconColor(iconEl, desc) {
   else iconEl.style.color = 'var(--text)';
 }
 
-function populateForecastWeather(index, weatherEntry, dayName) {
-  const container = document.getElementById(`forecast-weather-${index}`);
-  if (!container) return;
-
-  const heading = document.getElementById(`fcast-heading-${index}`);
-  const icon = document.getElementById(`fcast-icon-${index}`);
-  const temp = document.getElementById(`fcast-temp-${index}`);
-  const desc = document.getElementById(`fcast-desc-${index}`);
-  const extra = document.getElementById(`fcast-extra-${index}`);
-
-  // Always show the column (never hide it)
-  container.style.display = '';
-
-  heading.textContent = dayName || '--';
-  if (weatherEntry) {
-    icon.className = weatherEntry.icon_class || 'fi fi-sr-sun';
-    temp.textContent = weatherEntry.temp != null ? weatherEntry.temp.toFixed(0) + '°C' : '--°';
-    desc.textContent = weatherEntry.desc || '';
-    extra.textContent = weatherEntry.extra || '';
-    setWeatherIconColor(icon, weatherEntry.desc);
-  } else {
-    // Fallback: default icon, placeholder text
-    icon.className = 'fi fi-sr-sun';
-    temp.textContent = '--°';
-    desc.textContent = 'No data';
-    extra.textContent = '';
-    icon.style.color = 'var(--text-secondary)';
-  }
-}
-
 async function updateForecast() {
   const banner = document.getElementById('forecast-banner');
   try {
@@ -292,7 +260,6 @@ async function updateForecast() {
     const nextDay = data.daily[todayIdx + 2] || null;
 
     document.getElementById('pv-today-value').textContent = (today.total_kwh || 0).toFixed(1) + ' kWh';
-    
     if (tomorrow) {
       document.getElementById('pred-day1-label').textContent = getDayName(tomorrow.date);
       document.getElementById('pv-tomorrow').textContent = tomorrow.total_kwh.toFixed(1) + ' kWh';
@@ -307,64 +274,55 @@ async function updateForecast() {
       document.getElementById('pred-day2-label').textContent = '--';
       document.getElementById('pv-nextday').textContent = '-- kWh';
     }
-
     document.getElementById('forecast-date').textContent =
       now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 
-    // Weather data
+    // Weather data – now uses day_name from server directly
     if (data.weather) {
       const w = data.weather;
-      // Current weather
       document.getElementById('weather-i').className = w.icon_class || 'fi fi-sr-sun';
       document.getElementById('weather-temp').textContent = w.temp != null ? w.temp.toFixed(0) + '°C' : '--°';
       document.getElementById('weather-desc').textContent = w.desc || '';
       document.getElementById('weather-extra').textContent = w.extra || '';
       setWeatherIconColor(document.getElementById('weather-i'), w.desc);
 
-      // Forecast weather columns – always populate with day names from solar data
       const forecastWeather = w.forecast_weather || [];
-
-      // First forecast day
-      let fw1 = forecastWeather.length > 0 ? forecastWeather[0] : null;
-      // If no entry but we have a tomorrow date, create a default one
-      if (!fw1 && tomorrow) {
-        fw1 = { icon_class: 'fi fi-sr-sun', desc: 'No data', temp: null, extra: '' };
-      }
-      populateForecastWeather(1, fw1, tomorrow ? getDayName(tomorrow.date) : '--');
-
-      // Second forecast day
-      let fw2 = forecastWeather.length > 1 ? forecastWeather[1] : null;
-      if (!fw2 && nextDay) {
-        fw2 = { icon_class: 'fi fi-sr-sun', desc: 'No data', temp: null, extra: '' };
-      }
-      populateForecastWeather(2, fw2, nextDay ? getDayName(nextDay.date) : '--');
+      // First forecast day column
+      const fw1 = forecastWeather[0] || { day_name: '--', icon_class: 'fi fi-sr-sun', desc: DEFAULT_WEATHER.desc, temp: null, extra: '' };
+      document.getElementById('fcast-heading-1').textContent = fw1.day_name || '--';
+      document.getElementById('fcast-icon-1').className = fw1.icon_class;
+      document.getElementById('fcast-temp-1').textContent = fw1.temp != null ? fw1.temp.toFixed(0) + '°C' : '--°';
+      document.getElementById('fcast-desc-1').textContent = fw1.desc || '';
+      document.getElementById('fcast-extra-1').textContent = fw1.extra || '';
+      setWeatherIconColor(document.getElementById('fcast-icon-1'), fw1.desc);
+      // Second forecast day column
+      const fw2 = forecastWeather[1] || { day_name: '--', icon_class: 'fi fi-sr-sun', desc: DEFAULT_WEATHER.desc, temp: null, extra: '' };
+      document.getElementById('fcast-heading-2').textContent = fw2.day_name || '--';
+      document.getElementById('fcast-icon-2').className = fw2.icon_class;
+      document.getElementById('fcast-temp-2').textContent = fw2.temp != null ? fw2.temp.toFixed(0) + '°C' : '--°';
+      document.getElementById('fcast-desc-2').textContent = fw2.desc || '';
+      document.getElementById('fcast-extra-2').textContent = fw2.extra || '';
+      setWeatherIconColor(document.getElementById('fcast-icon-2'), fw2.desc);
     }
 
-    // Sparkline – 7 AM to 7 PM
+    // Sparkline 7‑19
     const historyRes = await fetch('/api/history?days=1');
     const historyData = await historyRes.json();
     const actualPoints = historyData
-      .filter(d => {
-        const date = new Date(d.timestamp);
-        return date.toLocaleDateString('en-CA') === todayDate && date.getHours() >= 7 && date.getHours() <= 19;
-      })
+      .filter(d => { const date = new Date(d.timestamp); return date.toLocaleDateString('en-CA') === todayDate && date.getHours() >= 7 && date.getHours() <= 19; })
       .map(d => ({ x: d.timestamp, y: d.solar_kw }));
 
     const intervals = [];
-    const intervalLabels = [];
     for (let h = 7; h <= 19; h += 0.5) {
       const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), Math.floor(h), (h % 1) * 60, 0);
       intervals.push(start.getTime());
-      intervalLabels.push(start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }));
     }
 
     const actualByInterval = {};
     actualPoints.forEach(p => {
       const d = new Date(p.x);
-      const hour = d.getHours();
-      const minute = d.getMinutes();
-      const bucketMinute = Math.floor(minute / 30) * 30;
-      const bucketTime = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, bucketMinute, 0).getTime();
+      const bucketMinute = Math.floor(d.getMinutes() / 30) * 30;
+      const bucketTime = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), bucketMinute, 0).getTime();
       if (!actualByInterval[bucketTime]) actualByInterval[bucketTime] = [];
       actualByInterval[bucketTime].push(p.y);
     });
@@ -382,31 +340,6 @@ async function updateForecast() {
       })
       .map(h => ({ x: new Date(h.period_end).getTime(), y: h.pv_estimate }));
 
-    const forecastByInterval = {};
-    forecastHourly.forEach(p => {
-      const d = new Date(p.x);
-      const hour = d.getHours();
-      const minute = d.getMinutes();
-      const bucketMinute = Math.floor(minute / 30) * 30;
-      const bucketTime = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, bucketMinute, 0).getTime();
-      forecastByInterval[bucketTime] = p.y;
-    });
-
-    // Mobile table
-    const tbody = document.getElementById('pv-hourly-body');
-    if (tbody) {
-      tbody.innerHTML = '';
-      intervals.forEach((ts, i) => {
-        const timeLabel = intervalLabels[i];
-        const actualVal = actualData.find(a => a.x === ts);
-        const forecastVal = forecastByInterval[ts] !== undefined ? forecastByInterval[ts] : 0;
-        const actualKw = actualVal ? actualVal.y.toFixed(1) : '-';
-        const row = document.createElement('tr');
-        row.innerHTML = `<td>${timeLabel}</td><td>${actualKw}</td><td>${forecastVal.toFixed(1)}</td>`;
-        tbody.appendChild(row);
-      });
-    }
-
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     const actualColor = '#3b82f6';
     const forecastColor = isDark ? '#fbbf24' : '#d97706';
@@ -416,9 +349,12 @@ async function updateForecast() {
       { label: 'Forecast', data: forecastHourly, borderColor: forecastColor, backgroundColor: 'transparent', borderWidth: 2, tension: 0.4, pointRadius: 0, fill: true, borderDash: [5,5] }
     ];
 
-    const ctx = sparklineChart.ctx;
+    sparklineChart.update();
+
+    // Apply gradient only after chart area is ready
     const chartArea = sparklineChart.chartArea;
     if (chartArea && sparklineChart.data.datasets[1].data.length > 0) {
+      const ctx = sparklineChart.ctx;
       const gradient = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
       const hex = forecastColor;
       const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
