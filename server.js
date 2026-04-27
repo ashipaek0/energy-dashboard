@@ -638,13 +638,13 @@ app.get('/api/savings', async (req, res) => {
   } catch (err) { console.error('Savings error:', err); res.status(500).json({ error: err.message }); }
 });
 
-// Helper: get Open-Meteo solar forecast data
-async function getOpenMeteoData(lat, lon, capacityKwp) {
+// Helper: get Open-Meteo solar forecast data (now applies loss factor)
+async function getOpenMeteoData(lat, lon, capacityKwp, lossFactor) {
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=4`;
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Open-Meteo API error: ${response.status}`);
   const data = await response.json();
-  const conversionFactor = capacityKwp / 1000;
+  const conversionFactor = (capacityKwp / 1000) * (lossFactor || 0.9);   // apply loss factor
   const hourly = data.hourly;
   const forecasts = hourly.time.map((t, i) => ({
     period_end: new Date(t).toISOString(),
@@ -690,7 +690,7 @@ app.get('/api/solar-forecast', async (req, res) => {
     let forecastData = null;
     let source = 'none';
 
-    // Solcast attempt (unchanged)
+    // Attempt Solcast if key is provided
     if (solcastKey) {
       if (resourceId) {
         try {
@@ -734,13 +734,12 @@ app.get('/api/solar-forecast', async (req, res) => {
       }
     }
 
-    // Fallback to Open-Meteo
     if (!forecastData) {
       if (!lat || !lon) {
         return res.json({ error: 'Location (lat/lon) required for Open-Meteo fallback' });
       }
       try {
-        const openMeteo = await getOpenMeteoData(lat, lon, capacityKwp);
+        const openMeteo = await getOpenMeteoData(lat, lon, capacityKwp, lossFactor);
         forecastData = openMeteo.forecasts;
         source = openMeteo.source;
       } catch (e) {
@@ -808,9 +807,10 @@ app.get('/api/solar-forecast', async (req, res) => {
     });
 
     const daily = Array.from(dailyMap.values()).slice(0, 4);
+    
+    // Attach actual_so_far but do NOT add it to total_kwh (pure forecast)
     for (const dayEntry of daily) {
       if (dayEntry.date === todayDate) {
-        dayEntry.total_kwh = actualTodayKwh + dayEntry.total_kwh;
         dayEntry.actual_so_far = actualTodayKwh;
         break;
       }
@@ -819,7 +819,7 @@ app.get('/api/solar-forecast', async (req, res) => {
     const hourly = forecastData.slice(0, 96);
     const result = { daily, hourly, source };
 
-    // --- WEATHER FETCH (bullet-proof) ---
+    // Fetch weather data (current + 2‑day forecast)
     if (lat && lon) {
       try {
         // Current weather
@@ -849,12 +849,10 @@ app.get('/api/solar-forecast', async (req, res) => {
           }
         }
 
-        // Daily weather for 3 full days (indices: 0=today, 1=tomorrow, 2=day after)
+        // Daily weather for 3 full days (indices: 1 = tomorrow, 2 = day after)
         let forecastWeather = [];
-
         const dailyWeatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weathercode,temperature_2m_max,apparent_temperature_max,relativehumidity_2m_mean&timezone=auto&forecast_days=3`;
         const dailyWeatherRes = await fetch(dailyWeatherUrl);
-        console.log('Daily weather fetch status:', dailyWeatherRes.status);
 
         if (dailyWeatherRes.ok) {
           const dailyWeatherData = await dailyWeatherRes.json();
@@ -863,9 +861,6 @@ app.get('/api/solar-forecast', async (req, res) => {
           const temps = dailyWeatherData.daily.temperature_2m_max;
           const feels = dailyWeatherData.daily.apparent_temperature_max;
           const humids = dailyWeatherData.daily.relativehumidity_2m_mean;
-
-          console.log('Daily weather dates:', dates);
-          console.log('Daily temps:', temps);
 
           function getDayName(dateStr) {
             const d = new Date(dateStr + 'T12:00:00');
@@ -887,8 +882,6 @@ app.get('/api/solar-forecast', async (req, res) => {
             }
           }
         }
-
-        console.log('Forecast weather array:', JSON.stringify(forecastWeather));
 
         result.weather = {
           icon_class: iconClass,
@@ -926,7 +919,6 @@ app.get('/api/solar-forecast', async (req, res) => {
   }
 });
 
-// Test forecast endpoint (unchanged)
 app.get('/api/test-forecast', authMiddleware, async (req, res) => {
   try {
     const latStr = getConfig('solar_latitude');
@@ -1004,7 +996,7 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`Open-Meteo API error: ${response.status}`);
         const data = await response.json();
-        const conversionFactor = capacityKwp / 1000;
+        const conversionFactor = (capacityKwp / 1000) * lossFactor;
         const hourly = data.hourly;
         const today = new Date().toISOString().split('T')[0];
         hourly.time.forEach((t, i) => {
