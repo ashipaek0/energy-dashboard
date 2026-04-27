@@ -287,16 +287,29 @@ async function updateForecast() {
       setWeatherIconColor(document.getElementById('weather-i'), w.desc);
 
       const forecastWeather = w.forecast_weather || [];
-      // First forecast day column
-      const fw1 = forecastWeather[0] || { day_name: '--', icon_class: 'fi fi-sr-sun', desc: DEFAULT_WEATHER.desc, temp: null, extra: '' };
+      // First forecast day column – fallback uses literal strings, no reference error
+      const fw1 = forecastWeather[0] || {
+        day_name: '--',
+        icon_class: 'fi fi-sr-sun',
+        desc: 'Clear Sky',
+        temp: null,
+        extra: 'No data'
+      };
       document.getElementById('fcast-heading-1').textContent = fw1.day_name || '--';
       document.getElementById('fcast-icon-1').className = fw1.icon_class;
       document.getElementById('fcast-temp-1').textContent = fw1.temp != null ? fw1.temp.toFixed(0) + '°C' : '--°';
       document.getElementById('fcast-desc-1').textContent = fw1.desc || '';
       document.getElementById('fcast-extra-1').textContent = fw1.extra || '';
       setWeatherIconColor(document.getElementById('fcast-icon-1'), fw1.desc);
-      // Second forecast day column
-      const fw2 = forecastWeather[1] || { day_name: '--', icon_class: 'fi fi-sr-sun', desc: DEFAULT_WEATHER.desc, temp: null, extra: '' };
+
+      // Second forecast day column – same literal fallback
+      const fw2 = forecastWeather[1] || {
+        day_name: '--',
+        icon_class: 'fi fi-sr-sun',
+        desc: 'Clear Sky',
+        temp: null,
+        extra: 'No data'
+      };
       document.getElementById('fcast-heading-2').textContent = fw2.day_name || '--';
       document.getElementById('fcast-icon-2').className = fw2.icon_class;
       document.getElementById('fcast-temp-2').textContent = fw2.temp != null ? fw2.temp.toFixed(0) + '°C' : '--°';
@@ -351,7 +364,6 @@ async function updateForecast() {
 
     sparklineChart.update();
 
-    // Apply gradient only after chart area is ready
     const chartArea = sparklineChart.chartArea;
     if (chartArea && sparklineChart.data.datasets[1].data.length > 0) {
       const ctx = sparklineChart.ctx;
