@@ -288,7 +288,7 @@ async function updateForecast() {
     document.getElementById('forecast-date').textContent =
       now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 
-    // Weather data
+    // Weather data (unchanged)
     if (data.weather) {
       const w = data.weather;
       document.getElementById('weather-i').className = w.icon_class || 'fi fi-sr-sun';
@@ -327,7 +327,7 @@ async function updateForecast() {
       }
     }
 
-    // Sparkline
+    // Sparkline (unchanged)
     try {
       const historyRes = await fetch('/api/history?days=1');
       const historyData = await historyRes.json();
@@ -451,7 +451,7 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
   else gridToBatt.style.display = 'none';
 }
 
-// ── GRID STATUS ──
+// ── GRID STATUS (updates stats inside the merged card) ──
 async function updateGridStatus() {
   try {
     const res = await fetch('/api/grid/status');
@@ -472,7 +472,7 @@ async function updateGridStatus() {
   } catch (e) { console.error('Grid error:', e); }
 }
 
-// ── TIMELINE WITH ON/OFF TEXT INSIDE ──
+// ── TIMELINE (uses merged structure, no date creation) ──
 async function updateGridTimeline() {
   try {
     const res = await fetch('/api/grid/timeline?period=day');
@@ -485,24 +485,24 @@ async function updateGridTimeline() {
 
 function renderTimelineBar(segments) {
   const container = document.getElementById('grid-timeline');
-  container.innerHTML = '';
+  container.innerHTML = '';  // clear only the timeline bar/labels part
 
   if (!segments.length) return;
 
   const totalDuration = segments[segments.length - 1].end - segments[0].start;
   if (totalDuration <= 0) return;
 
-  // Date label (top)
-  const dateDiv = document.createElement('div');
-  dateDiv.className = 'timeline-date';
-  const today = new Date();
-  dateDiv.textContent = today.toLocaleDateString(undefined, {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
-  });
-  container.appendChild(dateDiv);
+  // Update the static date element at the top of the grid card
+  const dateEl = document.getElementById('grid-date');
+  if (dateEl) {
+    const today = new Date();
+    dateEl.textContent = today.toLocaleDateString(undefined, {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  }
 
   // Bar container (relative)
   const barWrap = document.createElement('div');
