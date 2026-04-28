@@ -84,13 +84,8 @@ function initCharts() {
     type: 'line',
     data: { datasets: [] },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: 'index' },
-      elements: {
-        line: { borderWidth: 1, tension: 0.4, fill: true },
-        point: { radius: 0, hoverRadius: 4 }
-      },
+      responsive: true, maintainAspectRatio: false, interaction: { mode: 'index' },
+      elements: { line: { borderWidth: 1, tension: 0.4, fill: true }, point: { radius: 0, hoverRadius: 4 } },
       scales: {
         x: { type: 'time', time: { unit: 'hour' }, grid: { color: gridColor } },
         y: { title: { display: true, text: 'Power (kW)', color: textColor }, grid: { color: gridColor } }
@@ -124,16 +119,12 @@ function initCharts() {
       ]
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
+      responsive: true, maintainAspectRatio: false,
       scales: {
         x: { grid: { color: gridColor } },
         y: { title: { display: true, text: 'Energy (kWh)', color: textColor }, grid: { color: gridColor }, beginAtZero: true }
       },
-      plugins: {
-        legend: { labels: { color: textColor } },
-        tooltip: { mode: 'index' }
-      }
+      plugins: { legend: { labels: { color: textColor } }, tooltip: { mode: 'index' } }
     }
   });
 
@@ -141,26 +132,11 @@ function initCharts() {
     type: 'line',
     data: { datasets: [] },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { intersect: false, mode: 'index' },
-      elements: {
-        line: { borderWidth: 2, tension: 0.4 },
-        point: { radius: 0 }
-      },
+      responsive: true, maintainAspectRatio: false, interaction: { intersect: false, mode: 'index' },
+      elements: { line: { borderWidth: 2, tension: 0.4 }, point: { radius: 0 } },
       scales: {
-        x: {
-          type: 'time',
-          time: { unit: 'hour', displayFormats: { hour: 'HH' } },
-          grid: { display: false },
-          ticks: { color: textColor, maxRotation: 0 }
-        },
-        y: {
-          beginAtZero: true,
-          grid: { color: gridColor },
-          ticks: { color: textColor, callback: (v) => v + ' kW' },
-          max: 1
-        }
+        x: { type: 'time', time: { unit: 'hour', displayFormats: { hour: 'HH' } }, grid: { display: false }, ticks: { color: textColor, maxRotation: 0 } },
+        y: { beginAtZero: true, grid: { color: gridColor }, ticks: { color: textColor, callback: (v) => v + ' kW' }, max: 1 }
       },
       plugins: {
         tooltip: { enabled: false },
@@ -497,6 +473,38 @@ async function updateGridStatus() {
   } catch (e) { console.error('Grid error:', e); }
 }
 
+async function updateGridTimeline() {
+  try {
+    const res = await fetch('/api/grid/timeline');
+    const data = await res.json();
+    if (!data.configured || !data.changes || data.changes.length === 0) return;
+
+    const container = document.getElementById('grid-timeline');
+    container.innerHTML = '';
+
+    const recent = data.changes.slice(-3);
+
+    recent.forEach((change) => {
+      const block = document.createElement('div');
+      block.className = 'timeline-block' + (change.state === 1 ? '' : ' off');
+
+      const label = document.createElement('span');
+      label.className = 'state-label';
+      label.textContent = change.state === 1 ? 'ON' : 'OFF';
+
+      const time = document.createElement('span');
+      time.className = 'time-label';
+      time.textContent = change.timestamp
+        ? new Date(change.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : 'now';
+
+      block.appendChild(label);
+      block.appendChild(time);
+      container.appendChild(block);
+    });
+  } catch (e) { console.error('Grid timeline error:', e); }
+}
+
 async function updateChart(days = 1) {
   try {
     const res = await fetch(`/api/history?days=${days}`);
@@ -668,6 +676,7 @@ loadBranding().then(() => {
   updateSavings();
   updateForecast();
   updateGridStatus();
+  updateGridTimeline();
   updateChart(1);
   updateEnergyBarChart();
   updateDailyTable();
@@ -678,6 +687,7 @@ setInterval(() => {
   updateSavings();
   updateForecast();
   updateGridStatus();
+  updateGridTimeline();
   updateChart(1);
   updateEnergyBarChart();
   updateDailyTable();
