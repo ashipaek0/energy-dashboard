@@ -288,7 +288,7 @@ async function updateForecast() {
     document.getElementById('forecast-date').textContent =
       now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 
-    // Weather data (unchanged)
+    // Weather data
     if (data.weather) {
       const w = data.weather;
       document.getElementById('weather-i').className = w.icon_class || 'fi fi-sr-sun';
@@ -327,7 +327,7 @@ async function updateForecast() {
       }
     }
 
-    // Sparkline (unchanged)
+    // Sparkline
     try {
       const historyRes = await fetch('/api/history?days=1');
       const historyData = await historyRes.json();
@@ -451,7 +451,7 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
   else gridToBatt.style.display = 'none';
 }
 
-// ── GRID STATUS: fixed (no more crash) ──
+// ── GRID STATUS ──
 async function updateGridStatus() {
   try {
     const res = await fetch('/api/grid/status');
@@ -472,7 +472,7 @@ async function updateGridStatus() {
   } catch (e) { console.error('Grid error:', e); }
 }
 
-// ── NEW CONTINUOUS TIMELINE ──
+// ── TIMELINE WITH ON/OFF TEXT INSIDE ──
 async function updateGridTimeline() {
   try {
     const res = await fetch('/api/grid/timeline?period=day');
@@ -509,7 +509,7 @@ function renderTimelineBar(segments) {
   barWrap.className = 'timeline-bar-wrap';
   container.appendChild(barWrap);
 
-  // Add segments (colored spans)
+  // Add segments with text
   segments.forEach(seg => {
     const span = document.createElement('span');
     const leftPct = ((seg.start - segments[0].start) / totalDuration) * 100;
@@ -517,6 +517,8 @@ function renderTimelineBar(segments) {
     span.style.left = leftPct + '%';
     span.style.width = widthPct + '%';
     span.className = seg.state === 1 ? 'timeline-on' : 'timeline-off';
+    // Add ON/OFF text inside
+    span.textContent = seg.state === 1 ? 'ON' : 'OFF';
     barWrap.appendChild(span);
   });
 
@@ -525,7 +527,6 @@ function renderTimelineBar(segments) {
   labelContainer.className = 'timeline-labels';
   container.appendChild(labelContainer);
 
-  // Show labels at each segment boundary (start and transitions)
   const boundaryTimes = [
     { time: segments[0].start, label: formatTimeLabel(segments[0].start) }
   ];
@@ -533,7 +534,6 @@ function renderTimelineBar(segments) {
     boundaryTimes.push({ time: seg.end, label: formatTimeLabel(seg.end) });
   });
 
-  // Add labels at boundaries
   boundaryTimes.forEach((b, idx) => {
     const labelWrap = document.createElement('div');
     labelWrap.className = 'timeline-label-wrap';
@@ -545,7 +545,6 @@ function renderTimelineBar(segments) {
     timeSpan.textContent = b.label;
     labelWrap.appendChild(timeSpan);
 
-    // Only add a small date below the first label or if the day changes (simplified: always show)
     if (idx === 0) {
       const dateSmall = document.createElement('span');
       dateSmall.className = 'timeline-date-small';
@@ -561,7 +560,7 @@ function formatTimeLabel(timestamp) {
   return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-// ── Charts & Tables unchanged ──
+// ── Charts & Tables ──
 async function updateChart(days = 1) {
   try {
     const res = await fetch(`/api/history?days=${days}`);
