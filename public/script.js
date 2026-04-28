@@ -106,12 +106,14 @@ function applyGradientFills(chart) {
   const ctx = chart.ctx;
   const datasets = chart.data.datasets;
   const chartArea = chart.chartArea;
+
   datasets.forEach((dataset, i) => {
     const meta = chart.getDatasetMeta(i);
-    if (!meta.hidden && dataset.data.length > 0) {
+    if (!meta.hidden && chartArea && dataset.data.length > 0) {
       const gradient = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
       let color = dataset.borderColor;
       if (typeof color === 'string') {
+        // Convert CSS variable or named color to rgba
         const hex = color.startsWith('#') ? color : 
                    (color === 'var(--solar)' ? (document.documentElement.getAttribute('data-theme') === 'dark' ? '#fbbf24' : '#d97706') : 
                     color === 'var(--battery)' ? (document.documentElement.getAttribute('data-theme') === 'dark' ? '#10b981' : '#059669') :
@@ -121,13 +123,13 @@ function applyGradientFills(chart) {
         const r = parseInt(hex.slice(1,3), 16);
         const g = parseInt(hex.slice(3,5), 16);
         const b = parseInt(hex.slice(5,7), 16);
-        gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.05)`);
-        gradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.2)`);
-        gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.4)`);
+        gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.15)`);
+        gradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.45)`);
+        gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.7)`);
       } else {
-        gradient.addColorStop(0, 'rgba(100,100,100,0.05)');
-        gradient.addColorStop(0.5, 'rgba(100,100,100,0.2)');
-        gradient.addColorStop(1, 'rgba(100,100,100,0.4)');
+        gradient.addColorStop(0, 'rgba(100,100,100,0.15)');
+        gradient.addColorStop(0.5, 'rgba(100,100,100,0.45)');
+        gradient.addColorStop(1, 'rgba(100,100,100,0.7)');
       }
       dataset.backgroundColor = gradient;
       dataset.fill = true;
@@ -280,7 +282,6 @@ async function updateForecast() {
     // Weather data
     if (data.weather) {
       const w = data.weather;
-      // Current weather (always show)
       document.getElementById('weather-i').className = w.icon_class || 'fi fi-sr-sun';
       document.getElementById('weather-temp').textContent = w.temp != null ? w.temp.toFixed(0) + '°C' : '--°';
       document.getElementById('weather-desc').textContent = w.desc || '';
@@ -288,10 +289,8 @@ async function updateForecast() {
       setWeatherIconColor(document.getElementById('weather-i'), w.desc);
 
       const forecastWeather = w.forecast_weather || [];
-      
-      // First forecast day
-      const fw1 = forecastWeather[0];
       const col1 = document.getElementById('forecast-weather-1');
+      const fw1 = forecastWeather[0];
       if (fw1 && fw1.temp != null) {
         document.getElementById('fcast-heading-1').textContent = fw1.day_name || '--';
         document.getElementById('fcast-icon-1').className = fw1.icon_class;
@@ -304,9 +303,8 @@ async function updateForecast() {
         col1.style.display = 'none';
       }
 
-      // Second forecast day
-      const fw2 = forecastWeather[1];
       const col2 = document.getElementById('forecast-weather-2');
+      const fw2 = forecastWeather[1];
       if (fw2 && fw2.temp != null) {
         document.getElementById('fcast-heading-2').textContent = fw2.day_name || '--';
         document.getElementById('fcast-icon-2').className = fw2.icon_class;
@@ -320,71 +318,88 @@ async function updateForecast() {
       }
     }
 
-    // Sparkline 7‑19
-    const historyRes = await fetch('/api/history?days=1');
-    const historyData = await historyRes.json();
-    const actualPoints = historyData
-      .filter(d => { const date = new Date(d.timestamp); return date.toLocaleDateString('en-CA') === todayDate && date.getHours() >= 7 && date.getHours() <= 19; })
-      .map(d => ({ x: d.timestamp, y: d.solar_kw }));
+    // ── Sparkline (robust, with forecast from 7 AM) ──────────────────
+    try {
+      const historyRes = await fetch('/api/history?days=1');
+      const historyData = await historyRes.json();
 
-    const intervals = [];
-    for (let h = 7; h <= 19; h += 0.5) {
-      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), Math.floor(h), (h % 1) * 60, 0);
-      intervals.push(start.getTime());
+      const actualPoints = historyData
+        .filter(d => {
+          const date = new Date(d.timestamp);
+          return date.toLocaleDateString('en-CA') === todayDate && date.getHours() >= 7 && date.getHours() <= 19;
+        })
+        .map(d => ({ x: d.timestamp, y: d.solar_kw }));
+
+      const intervals = [];
+      for (let h = 7; h <= 19; h += 0.5) {
+        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), Math.floor(h), (h % 1) * 60, 0);
+        intervals.push(start.getTime());
+      }
+
+      const actualByInterval = {};
+      actualPoints.forEach(p => {
+        const d = new Date(p.x);
+        const bucketMinute = Math.floor(d.getMinutes() / 30) * 30;
+        const bucketTime = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), bucketMinute, 0).getTime();
+        if (!actualByInterval[bucketTime]) actualByInterval[bucketTime] = [];
+        actualByInterval[bucketTime].push(p.y);
+      });
+
+      const actualData = intervals.map(ts => {
+        const values = actualByInterval[ts] || [];
+        if (values.length === 0) return null;
+        return { x: ts, y: values.reduce((a,b) => a+b, 0) / values.length };
+      }).filter(p => p !== null && p.x <= now.getTime());
+
+      let forecastHourly = (data.hourly || [])
+        .filter(h => {
+          const d = new Date(h.period_end);
+          return d.toISOString().startsWith(todayDate) && d.getHours() >= 7 && d.getHours() <= 19;
+        })
+        .map(h => ({ x: new Date(h.period_end).getTime(), y: h.pv_estimate }));
+
+      // Ensure the dotted line starts at 7 AM by prepending a zero point if needed
+      const sevenAM = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 7,0,0).getTime();
+      if (forecastHourly.length === 0 || forecastHourly[0].x > sevenAM) {
+        forecastHourly.unshift({ x: sevenAM, y: 0 });
+      }
+
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const actualColor = '#3b82f6';
+      const forecastColor = isDark ? '#fbbf24' : '#d97706';
+
+      sparklineChart.data.datasets = [
+        { label: 'Actual', data: actualData.length > 0 ? actualData : [], borderColor: actualColor, backgroundColor: 'transparent', borderWidth: 2, tension: 0.4, pointRadius: 0, fill: false, borderDash: [] },
+        { label: 'Forecast', data: forecastHourly, borderColor: forecastColor, backgroundColor: 'transparent', borderWidth: 2, tension: 0.4, pointRadius: 0, fill: true, borderDash: [5,5] }
+      ];
+
+      sparklineChart.update();
+
+      const chartArea = sparklineChart.chartArea;
+      if (chartArea && sparklineChart.data.datasets[1].data.length > 0) {
+        const ctx = sparklineChart.ctx;
+        const gradient = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
+        const hex = forecastColor;
+        const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+        gradient.addColorStop(0, `rgba(${r},${g},${b},0.1)`);
+        gradient.addColorStop(0.5, `rgba(${r},${g},${b},0.3)`);
+        gradient.addColorStop(1, `rgba(${r},${g},${b},0.5)`);
+        sparklineChart.data.datasets[1].backgroundColor = gradient;
+        sparklineChart.update();
+      }
+
+      sparklineChart.options.scales.x.min = sevenAM;
+      sparklineChart.options.scales.x.max = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 19,0,0).getTime();
+      sparklineChart.options.scales.y.max = systemCapacityKwp || undefined;
+      sparklineChart.options.scales.x.ticks.color = isDark ? '#f8fafc' : '#0f172a';
+      sparklineChart.options.scales.y.ticks.color = isDark ? '#f8fafc' : '#0f172a';
+      sparklineChart.options.plugins.legend.labels.color = isDark ? '#f8fafc' : '#0f172a';
+      sparklineChart.update();
+    } catch (sparkErr) {
+      console.error('Sparkline error (non‑fatal):', sparkErr);
+      sparklineChart.data.datasets = [];
+      sparklineChart.update();
     }
-
-    const actualByInterval = {};
-    actualPoints.forEach(p => {
-      const d = new Date(p.x);
-      const bucketMinute = Math.floor(d.getMinutes() / 30) * 30;
-      const bucketTime = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), bucketMinute, 0).getTime();
-      if (!actualByInterval[bucketTime]) actualByInterval[bucketTime] = [];
-      actualByInterval[bucketTime].push(p.y);
-    });
-
-    const actualData = intervals.map(ts => {
-      const values = actualByInterval[ts] || [];
-      if (values.length === 0) return null;
-      return { x: ts, y: values.reduce((a,b) => a+b, 0) / values.length };
-    }).filter(p => p !== null && p.x <= now.getTime());
-
-    const forecastHourly = data.hourly
-      .filter(h => {
-        const d = new Date(h.period_end);
-        return d.toISOString().startsWith(todayDate) && d.getHours() >= 7 && d.getHours() <= 19;
-      })
-      .map(h => ({ x: new Date(h.period_end).getTime(), y: h.pv_estimate }));
-
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    const actualColor = '#3b82f6';
-    const forecastColor = isDark ? '#fbbf24' : '#d97706';
-
-    sparklineChart.data.datasets = [
-      { label: 'Actual', data: actualData, borderColor: actualColor, backgroundColor: 'transparent', borderWidth: 2, tension: 0.4, pointRadius: 0, fill: false, borderDash: [] },
-      { label: 'Forecast', data: forecastHourly, borderColor: forecastColor, backgroundColor: 'transparent', borderWidth: 2, tension: 0.4, pointRadius: 0, fill: true, borderDash: [5,5] }
-    ];
-
-    sparklineChart.update();
-
-    const chartArea = sparklineChart.chartArea;
-    if (chartArea && sparklineChart.data.datasets[1].data.length > 0) {
-      const ctx = sparklineChart.ctx;
-      const gradient = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
-      const hex = forecastColor;
-      const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
-      gradient.addColorStop(0, `rgba(${r},${g},${b},0.1)`);
-      gradient.addColorStop(0.5, `rgba(${r},${g},${b},0.3)`);
-      gradient.addColorStop(1, `rgba(${r},${g},${b},0.5)`);
-      sparklineChart.data.datasets[1].backgroundColor = gradient;
-    }
-
-    sparklineChart.options.scales.x.min = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 7,0,0).getTime();
-    sparklineChart.options.scales.x.max = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 19,0,0).getTime();
-    sparklineChart.options.scales.y.max = systemCapacityKwp || undefined;
-    sparklineChart.options.scales.x.ticks.color = isDark ? '#f8fafc' : '#0f172a';
-    sparklineChart.options.scales.y.ticks.color = isDark ? '#f8fafc' : '#0f172a';
-    sparklineChart.options.plugins.legend.labels.color = isDark ? '#f8fafc' : '#0f172a';
-    sparklineChart.update();
 
     updateNowGauge();
 
