@@ -26,9 +26,8 @@
       </div>
     </header>
 
-    <!-- Flow Card (Flaticon icons + NOW gauge under Solar) -->
+    <!-- Flow Card (Flaticon icons) -->
     <div class="flow-card">
-      <!-- 🌞 Solar Panel Icon instead of sun -->
       <div class="flow-item solar">
         <div class="flow-icon"><i id="icon-solar" class="fi fi-sr-solar-panel"></i></div>
         <div class="flow-label">Solar</div>
@@ -54,8 +53,9 @@
         <div class="flow-value" id="flow-home">0 W</div>
       </div>
       <div class="flow-arrow grid">⇄</div>
+      <!-- ✅ Grid tower icon -->
       <div class="flow-item grid">
-        <div class="flow-icon"><i id="icon-grid" class="fi fi-sr-tower"></i></div>
+        <div class="flow-icon"><i id="icon-grid" class="fi fi-sr-electricity"></i></div>
         <div class="flow-label">Grid</div>
         <div class="flow-value" id="flow-grid">0 W</div>
         <div class="flow-sub" id="flow-grid-direction">Import</div>
@@ -128,7 +128,7 @@
           </div>
         </div>
 
-        <!-- Sparkline (now flexes to fill the remaining space) -->
+        <!-- Sparkline -->
         <div class="pv-sparkline-container">
           <canvas id="pv-sparkline" width="300" height="160"></canvas>
         </div>
@@ -223,7 +223,7 @@
       <canvas id="powerChart"></canvas>
     </div>
 
-    <!-- Daily Energy Bar Chart (title simplified) -->
+    <!-- Daily Energy Bar Chart -->
     <div class="chart-container">
       <div class="chart-header">
         <h3>Daily Energy</h3>
