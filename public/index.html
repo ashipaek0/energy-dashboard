@@ -26,7 +26,7 @@
       </div>
     </header>
 
-    <!-- Flow Card (Flaticon icons + inline SVG grid tower) -->
+    <!-- Flow Card -->
     <div class="flow-card">
       <div class="flow-item solar">
         <div class="flow-icon"><i id="icon-solar" class="fi fi-sr-solar-panel"></i></div>
@@ -53,7 +53,6 @@
         <div class="flow-value" id="flow-home">0 W</div>
       </div>
       <div class="flow-arrow grid">⇄</div>
-      <!-- Grid – inline SVG transmission tower -->
       <div class="flow-item grid">
         <div class="flow-icon">
           <svg id="icon-grid" viewBox="0 0 512 512" width="1em" height="1em" fill="currentColor">
@@ -69,7 +68,7 @@
       <span id="grid-to-battery-arrow">↑</span> Grid charging battery <span id="grid-to-battery-arrow">↑</span>
     </div>
 
-    <!-- Solar Forecast – redesigned row -->
+    <!-- Solar Forecast -->
     <div class="pv-today-banner" id="forecast-banner" style="display:none;">
       <div class="pv-top-bar">
         <h3>Solar Forecast</h3>
@@ -92,7 +91,6 @@
           </div>
         </div>
 
-        <!-- Weather section: current weather + two forecast columns side by side -->
         <div class="weather-section">
           <div class="weather-column" id="forecast-weather-current">
             <span class="weather-heading">Current Weather</span>
@@ -106,7 +104,6 @@
             </div>
           </div>
 
-          <!-- Forecast weather columns (hidden by default, shown when data available) -->
           <div class="weather-column" id="forecast-weather-1" style="display:none;">
             <span class="weather-heading" id="fcast-heading-1">--</span>
             <div class="weather-icon-big">
@@ -132,7 +129,6 @@
           </div>
         </div>
 
-        <!-- Sparkline -->
         <div class="pv-sparkline-container">
           <canvas id="pv-sparkline" width="300" height="160"></canvas>
         </div>
@@ -212,10 +208,10 @@
       </div>
     </div>
 
-    <!-- Grid State Timeline (replaces old Last On/Off) -->
-    <div class="grid-timeline" id="grid-timeline" style="margin-bottom:1rem;"></div>
+    <!-- Grid State Timeline (new continuous bar) -->
+    <div id="grid-timeline" style="margin-bottom:1rem;"></div>
 
-    <!-- Power Overview Chart (only 24h option) -->
+    <!-- Power Overview Chart -->
     <div class="chart-container">
       <div class="chart-header">
         <h3>Power Overview</h3>

@@ -225,36 +225,72 @@ h1, h2, h3, h4,
 .energy-table td:first-child { text-align: left; font-weight: 500; color: var(--text-secondary); }
 .energy-table tbody tr:hover { background: var(--bg); }
 
-/* Grid State Timeline */
-.grid-timeline {
-  display: flex;
-  justify-content: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-  padding: 0.5rem 0;
+/* ───── NEW TIMELINE STYLES (ON = red) ───── */
+#grid-timeline {
+  margin-bottom: 2rem;
+  padding: 1rem 1.5rem;
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  position: relative;
 }
-.timeline-block {
+
+.timeline-date {
+  font-size: var(--fs-small);
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 0.8rem;
+}
+
+.timeline-bar-wrap {
+  position: relative;
+  height: 18px;
+  background: var(--border);
+  border-radius: 9px;
+  margin-bottom: 0.8rem;
+  overflow: hidden;
+}
+
+.timeline-on {
+  background: var(--grid);   /* RED colour for ON */
+}
+.timeline-off {
+  background: #9ca3af;        /* grey for OFF */
+}
+.timeline-on, .timeline-off {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 1px;
+  transition: width 0.5s, left 0.5s;
+}
+
+.timeline-labels {
+  position: relative;
+  height: 2.8rem;   /* room for time + date */
+}
+
+.timeline-label-wrap {
+  position: absolute;
+  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: 80px;
-  padding: 0.5rem 0.8rem;
-  border-radius: 8px;
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: white;
-  background: var(--grid);               /* ON – grid red */
+  gap: 0.15rem;
+  white-space: nowrap;
 }
-.timeline-block.off {
-  background: #9ca3af;                    /* OFF – grey */
-}
-.timeline-block .state-label {
-  font-weight: 700;
-  margin-bottom: 0.2rem;
-}
-.timeline-block .time-label {
-  opacity: 0.9;
+
+.timeline-time {
   font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.timeline-date-small {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
 }
 
 /* Mobile */
