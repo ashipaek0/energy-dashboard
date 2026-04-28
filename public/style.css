@@ -15,10 +15,10 @@
   /* Unified border radius */
   --radius: 1rem;
 
-  /* Font size scale (only three sizes for all text) */
-  --fs-small: 0.85rem;    /* labels, secondary text, table content */
-  --fs-medium: 1.1rem;    /* sub‑headings, gauge text */
-  --fs-large: 1.5rem;     /* main values, headings */
+  /* Font size scale */
+  --fs-small: 0.85rem;
+  --fs-medium: 1.1rem;
+  --fs-large: 1.5rem;
 }
 
 [data-theme="dark"] {
@@ -129,7 +129,7 @@ h1, h2, h3, h4,
 .pv-day-label { font-size: var(--fs-small); color: var(--text-secondary); }
 .pv-day-value { font-size: var(--fs-large); font-weight: 600; color: var(--text); }
 
-/* Weather section – three columns side by side */
+/* Weather section */
 .weather-section {
   display: flex;
   gap: 1.5rem;
@@ -225,7 +225,7 @@ h1, h2, h3, h4,
 .energy-table td:first-child { text-align: left; font-weight: 500; color: var(--text-secondary); }
 .energy-table tbody tr:hover { background: var(--bg); }
 
-/* ───── NEW TIMELINE STYLES (ON = red) ───── */
+/* ───────── NEW TIMELINE STYLES ───────── */
 #grid-timeline {
   margin-bottom: 2rem;
   padding: 1rem 1.5rem;
@@ -243,32 +243,55 @@ h1, h2, h3, h4,
   margin-bottom: 0.8rem;
 }
 
+/* Taller bar – 36px */
 .timeline-bar-wrap {
   position: relative;
-  height: 18px;
+  height: 36px;               /* 2x original */
   background: var(--border);
-  border-radius: 9px;
+  border-radius: 18px;       /* half of height */
   margin-bottom: 0.8rem;
   overflow: hidden;
 }
 
+/* ON segment – red with white text */
 .timeline-on {
-  background: var(--grid);   /* RED colour for ON */
+  background: var(--grid);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
+
+/* OFF segment – grey with white text (or you can use dark text) */
 .timeline-off {
-  background: #9ca3af;        /* grey for OFF */
+  background: #9ca3af;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
+
 .timeline-on, .timeline-off {
   position: absolute;
   top: 0;
   height: 100%;
   border-radius: 1px;
   transition: width 0.5s, left 0.5s;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .timeline-labels {
   position: relative;
-  height: 2.8rem;   /* room for time + date */
+  height: 3.8rem;   /* increased to avoid overlap with taller bar */
 }
 
 .timeline-label-wrap {
