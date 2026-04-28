@@ -34,6 +34,47 @@ function getDayName(dateStr) {
   return date.toLocaleDateString(undefined, { weekday: 'long' });
 }
 
+function resolveColor(color) {
+  if (color.startsWith('#')) return color;
+  if (color.startsWith('var(--')) {
+    const varName = color.slice(4, -1);
+    const style = getComputedStyle(document.documentElement);
+    const raw = style.getPropertyValue('--' + varName).trim();
+    if (raw.startsWith('#')) return raw;
+  }
+  return '#cccccc';
+}
+
+function applyGradientFills(chart) {
+  if (!chart || !chart.ctx) return;
+  requestAnimationFrame(() => {
+    const ctx = chart.ctx;
+    const datasets = chart.data.datasets;
+    const chartArea = chart.chartArea;
+    if (!chartArea) {
+      setTimeout(() => applyGradientFills(chart), 50);
+      return;
+    }
+    datasets.forEach((dataset, i) => {
+      const meta = chart.getDatasetMeta(i);
+      if (!meta.hidden && dataset.data.length > 0) {
+        const gradient = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
+        let color = dataset.borderColor || '#ccc';
+        const hex = resolveColor(color);
+        const r = parseInt(hex.slice(1,3), 16);
+        const g = parseInt(hex.slice(3,5), 16);
+        const b = parseInt(hex.slice(5,7), 16);
+        gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.2)`);
+        gradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.5)`);
+        gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.8)`);
+        dataset.backgroundColor = gradient;
+        dataset.fill = true;
+      }
+    });
+    chart.update();
+  });
+}
+
 function initCharts() {
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
   const gridColor = isDark ? '#334155' : '#cbd5e1';
@@ -125,40 +166,6 @@ function initCharts() {
         tooltip: { enabled: false },
         legend: { display: true, labels: { color: textColor, boxWidth: 20, padding: 10 } }
       }
-    }
-  });
-}
-
-function applyGradientFills(chart) {
-  const ctx = chart.ctx;
-  const datasets = chart.data.datasets;
-  const chartArea = chart.chartArea;
-
-  datasets.forEach((dataset, i) => {
-    const meta = chart.getDatasetMeta(i);
-    if (!meta.hidden && chartArea && dataset.data.length > 0) {
-      const gradient = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
-      let color = dataset.borderColor;
-      if (typeof color === 'string') {
-        const hex = color.startsWith('#') ? color : 
-                   (color === 'var(--solar)' ? (document.documentElement.getAttribute('data-theme') === 'dark' ? '#fbbf24' : '#d97706') : 
-                    color === 'var(--battery)' ? (document.documentElement.getAttribute('data-theme') === 'dark' ? '#10b981' : '#059669') :
-                    color === 'var(--grid)' ? (document.documentElement.getAttribute('data-theme') === 'dark' ? '#ef4444' : '#dc2626') :
-                    color === 'var(--home)' ? (document.documentElement.getAttribute('data-theme') === 'dark' ? '#8b5cf6' : '#7c3aed') :
-                    color);
-        const r = parseInt(hex.slice(1,3), 16);
-        const g = parseInt(hex.slice(3,5), 16);
-        const b = parseInt(hex.slice(5,7), 16);
-        gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.15)`);
-        gradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.45)`);
-        gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.7)`);
-      } else {
-        gradient.addColorStop(0, 'rgba(100,100,100,0.15)');
-        gradient.addColorStop(0.5, 'rgba(100,100,100,0.45)');
-        gradient.addColorStop(1, 'rgba(100,100,100,0.7)');
-      }
-      dataset.backgroundColor = gradient;
-      dataset.fill = true;
     }
   });
 }
@@ -344,7 +351,7 @@ async function updateForecast() {
       }
     }
 
-    // ── Sparkline (always shows forecast line from 7 AM) ──────────────────
+    // ── Sparkline ──────────────────────────────────────────────
     try {
       const historyRes = await fetch('/api/history?days=1');
       const historyData = await historyRes.json();
@@ -377,7 +384,6 @@ async function updateForecast() {
         return { x: ts, y: values.reduce((a,b) => a+b, 0) / values.length };
       }).filter(p => p !== null && p.x <= now.getTime());
 
-      // Use local date to filter forecast hours correctly
       let forecastHourly = (data.hourly || [])
         .filter(h => {
           const d = new Date(h.period_end);
@@ -385,12 +391,10 @@ async function updateForecast() {
         })
         .map(h => ({ x: new Date(h.period_end).getTime(), y: h.pv_estimate }));
 
-      // Always start at 7 AM – prepend a zero point if not already present
       const sevenAM = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 7,0,0).getTime();
       if (forecastHourly.length === 0 || forecastHourly[0].x > sevenAM) {
         forecastHourly.unshift({ x: sevenAM, y: 0 });
       }
-      // sort by x just in case
       forecastHourly.sort((a,b) => a.x - b.x);
 
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
@@ -425,7 +429,7 @@ async function updateForecast() {
       sparklineChart.options.plugins.legend.labels.color = isDark ? '#f8fafc' : '#0f172a';
       sparklineChart.update();
     } catch (sparkErr) {
-      console.error('Sparkline error (non‑fatal):', sparkErr);
+      console.error('Sparkline error:', sparkErr);
       sparklineChart.data.datasets = [];
       sparklineChart.update();
     }
