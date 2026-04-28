@@ -40,10 +40,16 @@ function initCharts() {
   const textColor = isDark ? '#f8fafc' : '#0f172a';
 
   powerChart = new Chart(ctxPower, {
-    type: 'line', data: { datasets: [] },
+    type: 'line',
+    data: { datasets: [] },
     options: {
-      responsive: true, maintainAspectRatio: false, interaction: { mode: 'index' },
-      elements: { line: { borderWidth: 1, tension: 0.4, fill: true }, point: { radius: 0, hoverRadius: 4 } },
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index' },
+      elements: {
+        line: { borderWidth: 1, tension: 0.4, fill: true },
+        point: { radius: 0, hoverRadius: 4 }
+      },
       scales: {
         x: { type: 'time', time: { unit: 'hour' }, grid: { color: gridColor } },
         y: { title: { display: true, text: 'Power (kW)', color: textColor }, grid: { color: gridColor } }
@@ -67,7 +73,8 @@ function initCharts() {
   });
 
   energyBarChart = new Chart(ctxEnergy, {
-    type: 'bar', data: {
+    type: 'bar',
+    data: {
       labels: [],
       datasets: [
         { label: 'Solar Generated', backgroundColor: '#d97706', data: [] },
@@ -76,23 +83,43 @@ function initCharts() {
       ]
     },
     options: {
-      responsive: true, maintainAspectRatio: false,
+      responsive: true,
+      maintainAspectRatio: false,
       scales: {
         x: { grid: { color: gridColor } },
         y: { title: { display: true, text: 'Energy (kWh)', color: textColor }, grid: { color: gridColor }, beginAtZero: true }
       },
-      plugins: { legend: { labels: { color: textColor } }, tooltip: { mode: 'index' } }
+      plugins: {
+        legend: { labels: { color: textColor } },
+        tooltip: { mode: 'index' }
+      }
     }
   });
 
   sparklineChart = new Chart(ctxSparkline, {
-    type: 'line', data: { datasets: [] },
+    type: 'line',
+    data: { datasets: [] },
     options: {
-      responsive: true, maintainAspectRatio: false, interaction: { intersect: false, mode: 'index' },
-      elements: { line: { borderWidth: 2, tension: 0.4 }, point: { radius: 0 } },
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { intersect: false, mode: 'index' },
+      elements: {
+        line: { borderWidth: 2, tension: 0.4 },
+        point: { radius: 0 }
+      },
       scales: {
-        x: { type: 'time', time: { unit: 'hour', displayFormats: { hour: 'HH' } }, grid: { display: false }, ticks: { color: textColor, maxRotation: 0 } },
-        y: { beginAtZero: true, grid: { color: gridColor }, ticks: { color: textColor, callback: (v) => v + ' kW' }, max: 1 }
+        x: {
+          type: 'time',
+          time: { unit: 'hour', displayFormats: { hour: 'HH' } },
+          grid: { display: false },
+          ticks: { color: textColor, maxRotation: 0 }
+        },
+        y: {
+          beginAtZero: true,
+          grid: { color: gridColor },
+          ticks: { color: textColor, callback: (v) => v + ' kW' },
+          max: 1
+        }
       },
       plugins: {
         tooltip: { enabled: false },
@@ -113,7 +140,6 @@ function applyGradientFills(chart) {
       const gradient = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
       let color = dataset.borderColor;
       if (typeof color === 'string') {
-        // Convert CSS variable or named color to rgba
         const hex = color.startsWith('#') ? color : 
                    (color === 'var(--solar)' ? (document.documentElement.getAttribute('data-theme') === 'dark' ? '#fbbf24' : '#d97706') : 
                     color === 'var(--battery)' ? (document.documentElement.getAttribute('data-theme') === 'dark' ? '#10b981' : '#059669') :
@@ -318,7 +344,7 @@ async function updateForecast() {
       }
     }
 
-    // ── Sparkline (robust, with forecast from 7 AM) ──────────────────
+    // ── Sparkline (always shows forecast line from 7 AM) ──────────────────
     try {
       const historyRes = await fetch('/api/history?days=1');
       const historyData = await historyRes.json();
@@ -351,25 +377,28 @@ async function updateForecast() {
         return { x: ts, y: values.reduce((a,b) => a+b, 0) / values.length };
       }).filter(p => p !== null && p.x <= now.getTime());
 
+      // Use local date to filter forecast hours correctly
       let forecastHourly = (data.hourly || [])
         .filter(h => {
           const d = new Date(h.period_end);
-          return d.toISOString().startsWith(todayDate) && d.getHours() >= 7 && d.getHours() <= 19;
+          return d.toLocaleDateString('en-CA') === todayDate && d.getHours() >= 7 && d.getHours() <= 19;
         })
         .map(h => ({ x: new Date(h.period_end).getTime(), y: h.pv_estimate }));
 
-      // Ensure the dotted line starts at 7 AM by prepending a zero point if needed
+      // Always start at 7 AM – prepend a zero point if not already present
       const sevenAM = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 7,0,0).getTime();
       if (forecastHourly.length === 0 || forecastHourly[0].x > sevenAM) {
         forecastHourly.unshift({ x: sevenAM, y: 0 });
       }
+      // sort by x just in case
+      forecastHourly.sort((a,b) => a.x - b.x);
 
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
       const actualColor = '#3b82f6';
       const forecastColor = isDark ? '#fbbf24' : '#d97706';
 
       sparklineChart.data.datasets = [
-        { label: 'Actual', data: actualData.length > 0 ? actualData : [], borderColor: actualColor, backgroundColor: 'transparent', borderWidth: 2, tension: 0.4, pointRadius: 0, fill: false, borderDash: [] },
+        { label: 'Actual', data: actualData, borderColor: actualColor, backgroundColor: 'transparent', borderWidth: 2, tension: 0.4, pointRadius: 0, fill: false, borderDash: [] },
         { label: 'Forecast', data: forecastHourly, borderColor: forecastColor, backgroundColor: 'transparent', borderWidth: 2, tension: 0.4, pointRadius: 0, fill: true, borderDash: [5,5] }
       ];
 
