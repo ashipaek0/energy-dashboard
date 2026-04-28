@@ -8,10 +8,8 @@ const ctxSparkline = document.getElementById('pv-sparkline').getContext('2d');
 const visibilityPrefs = {
   'Load': true,
   'Solar PV': true,
-  'Battery Charge': false,
-  'Battery Discharge': false,
-  'Grid Import': false,
-  'Grid Export': false
+  'Battery Charge': true,
+  'Grid Import': true
 };
 
 let currentSolarWatts = 0;
@@ -101,7 +99,9 @@ function initCharts() {
             meta.hidden = meta.hidden === null ? !ci.data.datasets[index].hidden : !meta.hidden;
             ci.update();
             const label = ci.data.datasets[index].label;
-            visibilityPrefs[label] = !meta.hidden;
+            if (label in visibilityPrefs) {
+              visibilityPrefs[label] = !meta.hidden;
+            }
           }
         }
       }
@@ -521,18 +521,14 @@ async function updateChart(days = 1) {
       { label: 'Load', data: [], borderColor: isDark ? '#8b5cf6' : '#7c3aed', tension: 0.4, borderWidth: 1, fill: true },
       { label: 'Solar PV', data: [], borderColor: isDark ? '#fbbf24' : '#d97706', tension: 0.4, borderWidth: 1, fill: true },
       { label: 'Battery Charge', data: [], borderColor: isDark ? '#10b981' : '#059669', tension: 0.4, borderWidth: 1, fill: true },
-      { label: 'Battery Discharge', data: [], borderColor: '#f59e0b', tension: 0.4, borderWidth: 1, fill: true },
-      { label: 'Grid Import', data: [], borderColor: isDark ? '#ef4444' : '#dc2626', tension: 0.4, borderWidth: 1, fill: true },
-      { label: 'Grid Export', data: [], borderColor: '#3b82f6', tension: 0.4, borderWidth: 1, fill: true }
+      { label: 'Grid Import', data: [], borderColor: isDark ? '#ef4444' : '#dc2626', tension: 0.4, borderWidth: 1, fill: true }
     ];
-    newDatasets.forEach(ds => { ds.hidden = (visibilityPrefs[ds.label] === false); });
+    newDatasets.forEach(ds => { ds.hidden = !visibilityPrefs[ds.label]; });
     data.forEach(d => {
       newDatasets[0].data.push({ x: d.timestamp, y: d.consumption_kw });
       newDatasets[1].data.push({ x: d.timestamp, y: d.solar_kw });
       newDatasets[2].data.push({ x: d.timestamp, y: d.battery_charge_kw });
-      newDatasets[3].data.push({ x: d.timestamp, y: d.battery_discharge_kw });
-      newDatasets[4].data.push({ x: d.timestamp, y: d.grid_import_kw });
-      newDatasets[5].data.push({ x: d.timestamp, y: d.grid_export_kw });
+      newDatasets[3].data.push({ x: d.timestamp, y: d.grid_import_kw });
     });
     powerChart.data.datasets = newDatasets;
     powerChart.update();
@@ -637,9 +633,7 @@ function updateChartColors() {
       if (i === 0) ds.borderColor = isDark ? '#8b5cf6' : '#7c3aed';
       else if (i === 1) ds.borderColor = isDark ? '#fbbf24' : '#d97706';
       else if (i === 2) ds.borderColor = isDark ? '#10b981' : '#059669';
-      else if (i === 3) ds.borderColor = '#f59e0b';
-      else if (i === 4) ds.borderColor = isDark ? '#ef4444' : '#dc2626';
-      else if (i === 5) ds.borderColor = '#3b82f6';
+      else if (i === 3) ds.borderColor = isDark ? '#ef4444' : '#dc2626';
     });
     powerChart.update();
     applyGradientFills(powerChart);
