@@ -26,7 +26,7 @@
       </div>
     </header>
 
-    <!-- Flow Card (Flaticon icons) -->
+    <!-- Flow Card (Flaticon icons + inline SVG grid tower) -->
     <div class="flow-card">
       <div class="flow-item solar">
         <div class="flow-icon"><i id="icon-solar" class="fi fi-sr-solar-panel"></i></div>
@@ -53,9 +53,13 @@
         <div class="flow-value" id="flow-home">0 W</div>
       </div>
       <div class="flow-arrow grid">⇄</div>
-      <!-- Grid electricity tower icon -->
+      <!-- Grid – inline SVG transmission tower -->
       <div class="flow-item grid">
-        <div class="flow-icon"><i id="icon-grid" class="fi fi-sr-electricity"></i></div>
+        <div class="flow-icon">
+          <svg id="icon-grid" viewBox="0 0 512 512" width="1em" height="1em" fill="currentColor">
+            <path d="M426.5 480h-341l34.3-113.3h272.4L426.5 480zM144.8 334.7l34.3-113.4h153.8l34.3 113.4H144.8zM256 92.2l76.3 99.1h-152.6L256 92.2zM32 32h448v40H32z"/>
+          </svg>
+        </div>
         <div class="flow-label">Grid</div>
         <div class="flow-value" id="flow-grid">0 W</div>
         <div class="flow-sub" id="flow-grid-direction">Import</div>
@@ -88,7 +92,7 @@
           </div>
         </div>
 
-        <!-- Weather section: current weather + two forecast columns side by side -->
+        <!-- Weather section -->
         <div class="weather-section">
           <div class="weather-column" id="forecast-weather-current">
             <span class="weather-heading">Current Weather</span>
@@ -102,7 +106,6 @@
             </div>
           </div>
 
-          <!-- Forecast weather columns (hidden by default, shown when data available) -->
           <div class="weather-column" id="forecast-weather-1" style="display:none;">
             <span class="weather-heading" id="fcast-heading-1">--</span>
             <div class="weather-icon-big">
