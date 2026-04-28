@@ -92,7 +92,7 @@
           </div>
         </div>
 
-        <!-- Weather section -->
+        <!-- Weather section: current weather + two forecast columns side by side -->
         <div class="weather-section">
           <div class="weather-column" id="forecast-weather-current">
             <span class="weather-heading">Current Weather</span>
@@ -106,6 +106,7 @@
             </div>
           </div>
 
+          <!-- Forecast weather columns (hidden by default, shown when data available) -->
           <div class="weather-column" id="forecast-weather-1" style="display:none;">
             <span class="weather-heading" id="fcast-heading-1">--</span>
             <div class="weather-icon-big">
@@ -210,10 +211,9 @@
         <div class="stat-value" id="grid-hours-year">--</div>
       </div>
     </div>
-    <div class="stats-footer" style="margin-bottom:1rem;">
-      <span>Grid Last On: <span id="grid-last-on">--</span></span>
-      <span>Grid Last Off: <span id="grid-last-off">--</span></span>
-    </div>
+
+    <!-- Grid State Timeline (replaces old Last On/Off) -->
+    <div class="grid-timeline" id="grid-timeline" style="margin-bottom:1rem;"></div>
 
     <!-- Power Overview Chart (only 24h option) -->
     <div class="chart-container">
