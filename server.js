@@ -196,7 +196,7 @@ async function setupMqtt() {
       'mqtt_topic_battery_discharge', 'mqtt_topic_grid_import', 'mqtt_topic_grid_export',
       'mqtt_topic_battery_soc',
       'mqtt_topic_daily_consumption', 'mqtt_topic_daily_solar', 'mqtt_topic_daily_battery_charge',
-      'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_1000', 'mqtt_topic_daily_grid_export'
+      'mqtt_topic_daily_battery_discharge', 'mqtt_topic_daily_grid_import', 'mqtt_topic_daily_grid_export'
     ];
     const topics = [];
     for (const k of topicKeys) {
@@ -520,22 +520,82 @@ app.get('/api/grid/hours', async (req, res) => {
   } catch (err) { console.error('[Grid Hours] Error:', err); res.status(500).json({ error: err.message }); }
 });
 
+// --- NEW TIMELINE ROUTE (full day segments) ---
 app.get('/api/grid/timeline', async (req, res) => {
   try {
     const entity = getConfig('grid_status_entity');
-    if (!entity) return res.json({ configured: false, changes: [] });
+    if (!entity) return res.json({ configured: false, segments: [] });
 
+    const period = req.query.period;
+    if (!period) {
+      // Keep backward compatibility
+      const rows = db.prepare(
+        'SELECT timestamp, state FROM grid_status ORDER BY timestamp DESC LIMIT 4'
+      ).all();
+      const changes = rows.reverse().map(r => ({
+        timestamp: r.timestamp * 1000,
+        state: r.state
+      }));
+      return res.json({ configured: true, changes });
+    }
+
+    // Full timeline for a period
+    const now = new Date();
+    let start, end;
+    if (period === 'day') {
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+      end   = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    } else if (period === 'week') {
+      const day = now.getDay();
+      const diff = (day === 0 ? 6 : day - 1);
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - diff, 0, 0, 0);
+      end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      end.setHours(23, 59, 59, 999);
+    } else if (period === 'month') {
+      start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+      end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    } else if (period === 'year') {
+      start = new Date(now.getFullYear(), 0, 1, 0, 0, 0);
+      end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+    } else {
+      return res.status(400).json({ error: 'Invalid period' });
+    }
+
+    const startUnix = Math.floor(start.getTime() / 1000);
+    const endUnix = Math.floor(end.getTime() / 1000);
+    const currentUnix = Math.floor(now.getTime() / 1000);
+    const effectiveEnd = Math.min(endUnix, currentUnix);
+
+    const initialState = getGridStateAt(startUnix);
     const rows = db.prepare(
-      'SELECT timestamp, state FROM grid_status ORDER BY timestamp DESC LIMIT 4'
-    ).all();
+      'SELECT timestamp, state FROM grid_status WHERE timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC'
+    ).all(startUnix, effectiveEnd);
 
-    // We want at most 3 entries, most recent first in the response
-    const changes = rows.reverse().map(r => ({
-      timestamp: r.timestamp * 1000,
-      state: r.state   // 1 = ON, 0 = OFF
+    // Build segments
+    const segments = [];
+    let lastState = initialState;
+    let lastTime = startUnix;
+    for (const row of rows) {
+      if (row.timestamp > lastTime) {
+        segments.push({ start: lastTime, end: row.timestamp, state: lastState });
+        lastState = row.state;
+        lastTime = row.timestamp;
+      } else {
+        lastState = row.state;
+      }
+    }
+    if (lastTime < effectiveEnd) {
+      segments.push({ start: lastTime, end: effectiveEnd, state: lastState });
+    }
+
+    const result = segments.map(s => ({
+      start: s.start * 1000,
+      end: s.end * 1000,
+      state: s.state
     }));
 
-    res.json({ configured: true, changes });
+    res.json({ configured: true, period, segments: result });
   } catch (err) {
     console.error('Grid timeline error:', err);
     res.status(500).json({ error: err.message });
@@ -660,7 +720,7 @@ app.get('/api/savings', async (req, res) => {
   } catch (err) { console.error('Savings error:', err); res.status(500).json({ error: err.message }); }
 });
 
-// Helper: get Open-Meteo solar forecast data (now applies loss factor)
+// Helper: get Open-Meteo solar forecast data
 async function getOpenMeteoData(lat, lon, capacityKwp, lossFactor) {
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&timezone=auto&forecast_days=4`;
   const response = await fetch(url);
@@ -712,7 +772,7 @@ app.get('/api/solar-forecast', async (req, res) => {
     let forecastData = null;
     let source = 'none';
 
-    // Attempt Solcast if key is provided (unchanged)
+    // Attempt Solcast if key is provided
     if (solcastKey) {
       if (resourceId) {
         try {
@@ -843,7 +903,6 @@ app.get('/api/solar-forecast', async (req, res) => {
     // Weather data (current + 2‑day forecast)
     if (lat && lon) {
       try {
-        // Current weather
         const currentUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=relativehumidity_2m,apparent_temperature&timezone=auto&forecast_days=1`;
         const currentRes = await fetch(currentUrl);
         let temp = null, feelsLike = null, humidity = null;

@@ -288,7 +288,7 @@ async function updateForecast() {
     document.getElementById('forecast-date').textContent =
       now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 
-    // Weather data
+    // Weather data (unchanged)
     if (data.weather) {
       const w = data.weather;
       document.getElementById('weather-i').className = w.icon_class || 'fi fi-sr-sun';
@@ -327,7 +327,7 @@ async function updateForecast() {
       }
     }
 
-    // ── Sparkline ──────────────────────────────────────────────
+    // Sparkline (unchanged)
     try {
       const historyRes = await fetch('/api/history?days=1');
       const historyData = await historyRes.json();
@@ -451,6 +451,7 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
   else gridToBatt.style.display = 'none';
 }
 
+// ── GRID STATUS: fixed (no more crash) ──
 async function updateGridStatus() {
   try {
     const res = await fetch('/api/grid/status');
@@ -461,8 +462,6 @@ async function updateGridStatus() {
     }
     document.getElementById('grid-state').textContent = d.current ? '⚡ ON' : '⚫ OFF';
     document.getElementById('grid-state').style.color = d.current ? 'var(--battery)' : 'var(--grid)';
-    document.getElementById('grid-last-on').textContent = d.lastOn ? new Date(d.lastOn).toLocaleString() : 'Never';
-    document.getElementById('grid-last-off').textContent = d.lastOff ? new Date(d.lastOff).toLocaleString() : 'Never';
 
     const periods = ['day', 'week', 'month', 'year'];
     for (const p of periods) {
@@ -473,38 +472,96 @@ async function updateGridStatus() {
   } catch (e) { console.error('Grid error:', e); }
 }
 
+// ── NEW CONTINUOUS TIMELINE ──
 async function updateGridTimeline() {
   try {
-    const res = await fetch('/api/grid/timeline');
+    const res = await fetch('/api/grid/timeline?period=day');
     const data = await res.json();
-    if (!data.configured || !data.changes || data.changes.length === 0) return;
+    if (!data.configured || !data.segments || data.segments.length === 0) return;
 
-    const container = document.getElementById('grid-timeline');
-    container.innerHTML = '';
-
-    const recent = data.changes.slice(-3);
-
-    recent.forEach((change) => {
-      const block = document.createElement('div');
-      block.className = 'timeline-block' + (change.state === 1 ? '' : ' off');
-
-      const label = document.createElement('span');
-      label.className = 'state-label';
-      label.textContent = change.state === 1 ? 'ON' : 'OFF';
-
-      const time = document.createElement('span');
-      time.className = 'time-label';
-      time.textContent = change.timestamp
-        ? new Date(change.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        : 'now';
-
-      block.appendChild(label);
-      block.appendChild(time);
-      container.appendChild(block);
-    });
+    renderTimelineBar(data.segments);
   } catch (e) { console.error('Grid timeline error:', e); }
 }
 
+function renderTimelineBar(segments) {
+  const container = document.getElementById('grid-timeline');
+  container.innerHTML = '';
+
+  if (!segments.length) return;
+
+  const totalDuration = segments[segments.length - 1].end - segments[0].start;
+  if (totalDuration <= 0) return;
+
+  // Date label (top)
+  const dateDiv = document.createElement('div');
+  dateDiv.className = 'timeline-date';
+  const today = new Date();
+  dateDiv.textContent = today.toLocaleDateString(undefined, {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+  container.appendChild(dateDiv);
+
+  // Bar container (relative)
+  const barWrap = document.createElement('div');
+  barWrap.className = 'timeline-bar-wrap';
+  container.appendChild(barWrap);
+
+  // Add segments (colored spans)
+  segments.forEach(seg => {
+    const span = document.createElement('span');
+    const leftPct = ((seg.start - segments[0].start) / totalDuration) * 100;
+    const widthPct = ((seg.end - seg.start) / totalDuration) * 100;
+    span.style.left = leftPct + '%';
+    span.style.width = widthPct + '%';
+    span.className = seg.state === 1 ? 'timeline-on' : 'timeline-off';
+    barWrap.appendChild(span);
+  });
+
+  // Time labels (absolutely positioned)
+  const labelContainer = document.createElement('div');
+  labelContainer.className = 'timeline-labels';
+  container.appendChild(labelContainer);
+
+  // Show labels at each segment boundary (start and transitions)
+  const boundaryTimes = [
+    { time: segments[0].start, label: formatTimeLabel(segments[0].start) }
+  ];
+  segments.forEach(seg => {
+    boundaryTimes.push({ time: seg.end, label: formatTimeLabel(seg.end) });
+  });
+
+  // Add labels at boundaries
+  boundaryTimes.forEach((b, idx) => {
+    const labelWrap = document.createElement('div');
+    labelWrap.className = 'timeline-label-wrap';
+    const leftPct = ((b.time - segments[0].start) / totalDuration) * 100;
+    labelWrap.style.left = leftPct + '%';
+
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'timeline-time';
+    timeSpan.textContent = b.label;
+    labelWrap.appendChild(timeSpan);
+
+    // Only add a small date below the first label or if the day changes (simplified: always show)
+    if (idx === 0) {
+      const dateSmall = document.createElement('span');
+      dateSmall.className = 'timeline-date-small';
+      dateSmall.textContent = new Date(b.time).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+      labelWrap.appendChild(dateSmall);
+    }
+
+    labelContainer.appendChild(labelWrap);
+  });
+}
+
+function formatTimeLabel(timestamp) {
+  return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+// ── Charts & Tables unchanged ──
 async function updateChart(days = 1) {
   try {
     const res = await fetch(`/api/history?days=${days}`);
