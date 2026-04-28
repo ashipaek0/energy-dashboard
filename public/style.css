@@ -62,7 +62,6 @@ header {
   align-items: center;
   margin-bottom: 1.5rem;
 }
-
 .header-left { display: flex; align-items: center; }
 .header-right { display: flex; align-items: center; gap: 1rem; }
 #logo-img { height: 40px; margin-right: 1rem; border-radius: 8px; }
@@ -100,6 +99,7 @@ h1, h2, h3, h4,
 .flow-item { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 150px; min-width: 130px; text-align: center; }
 .flow-icon { font-size: 3.5rem; margin-bottom: 0.5rem; line-height: 1; }
 .flow-icon i { font-size: inherit; color: var(--text); display: block; }
+.flow-icon svg { width: 1em; height: 1em; color: var(--text); }
 #icon-battery { transform: rotate(270deg); }
 .flow-label { font-size: var(--fs-small); opacity: 0.8; color: var(--text-secondary); margin-bottom: 0.25rem; }
 .flow-value { font-size: var(--fs-large); font-weight: 600; color: var(--text); margin-bottom: 0.1rem; }
@@ -225,10 +225,36 @@ h1, h2, h3, h4,
 .energy-table td:first-child { text-align: left; font-weight: 500; color: var(--text-secondary); }
 .energy-table tbody tr:hover { background: var(--bg); }
 
-.stats-footer {
-  display: flex; justify-content: space-around; background: var(--card-bg); padding: 1rem;
-  border-radius: var(--radius); flex-wrap: wrap; gap: 1rem; box-shadow: var(--shadow);
-  border: 1px solid var(--border); color: var(--text);
+/* Grid State Timeline */
+.grid-timeline {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0;
+}
+.timeline-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 80px;
+  padding: 0.5rem 0.8rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: white;
+  background: var(--grid);               /* ON – grid red */
+}
+.timeline-block.off {
+  background: #9ca3af;                    /* OFF – grey */
+}
+.timeline-block .state-label {
+  font-weight: 700;
+  margin-bottom: 0.2rem;
+}
+.timeline-block .time-label {
+  opacity: 0.9;
+  font-size: 0.8rem;
 }
 
 /* Mobile */
