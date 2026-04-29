@@ -506,10 +506,9 @@ function renderTimelineBar(segments, windowStart, windowEnd) {
 
     const el = document.createElement('div');
     el.className = 'tl-segment' + (seg.state === 1 ? ' on' : ' off');
-    el.style.flexGrow = duration;   // proportional
+    el.style.flexGrow = duration;
     el.style.flexBasis = '0px';
 
-    // Show "ON"/"OFF" only if wide enough (>4% of bar)
     if (pct >= 4) {
       el.textContent = seg.state === 1 ? 'ON' : 'OFF';
     }
@@ -523,7 +522,6 @@ function renderTimelineBar(segments, windowStart, windowEnd) {
   labelRow.className = 'tl-labels';
 
   const tickInterval = 4 * 60 * 60 * 1000;
-  // Start at the next whole hour boundary
   const firstTick = Math.ceil(windowStart / 3600000) * 3600000;
   for (let t = firstTick; t <= windowEnd; t += tickInterval) {
     const pct = ((t - windowStart) / totalMs) * 100;
@@ -540,7 +538,6 @@ function renderTimelineBar(segments, windowStart, windowEnd) {
     timeSpan.textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     tick.appendChild(timeSpan);
 
-    // Show date at midnight
     if (hours === 0) {
       const dateSpan = document.createElement('span');
       dateSpan.className = 'tl-date';
