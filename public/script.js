@@ -288,7 +288,7 @@ async function updateForecast() {
     document.getElementById('forecast-date').textContent =
       now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 
-    // Weather data (unchanged)
+    // Weather
     if (data.weather) {
       const w = data.weather;
       document.getElementById('weather-i').className = w.icon_class || 'fi fi-sr-sun';
@@ -327,7 +327,7 @@ async function updateForecast() {
       }
     }
 
-    // Sparkline (unchanged)
+    // Sparkline
     try {
       const historyRes = await fetch('/api/history?days=1');
       const historyData = await historyRes.json();
@@ -451,7 +451,7 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
   else gridToBatt.style.display = 'none';
 }
 
-// ── GRID STATUS (updates stats inside the merged card) ──
+// ── GRID STATUS ──
 async function updateGridStatus() {
   try {
     const res = await fetch('/api/grid/status');
@@ -472,92 +472,85 @@ async function updateGridStatus() {
   } catch (e) { console.error('Grid error:', e); }
 }
 
-// ── TIMELINE (uses merged structure, no date creation) ──
+// ── ROLLING 24h TIMELINE BAR ──
 async function updateGridTimeline() {
   try {
-    const res = await fetch('/api/grid/timeline?period=day');
+    const res = await fetch('/api/grid/timeline?period=24h');
     const data = await res.json();
     if (!data.configured || !data.segments || data.segments.length === 0) return;
 
-    renderTimelineBar(data.segments);
+    renderTimelineBar(data.segments, data.windowStart, data.windowEnd);
   } catch (e) { console.error('Grid timeline error:', e); }
 }
 
-function renderTimelineBar(segments) {
+function renderTimelineBar(segments, windowStart, windowEnd) {
   const container = document.getElementById('grid-timeline');
-  container.innerHTML = '';  // clear only the timeline bar/labels part
+  container.innerHTML = '';
 
   if (!segments.length) return;
 
-  const totalDuration = segments[segments.length - 1].end - segments[0].start;
-  if (totalDuration <= 0) return;
+  const totalMs = windowEnd - windowStart;
+  if (totalMs <= 0) return;
 
-  // Update the static date element at the top of the grid card
-  const dateEl = document.getElementById('grid-date');
-  if (dateEl) {
-    const today = new Date();
-    dateEl.textContent = today.toLocaleDateString(undefined, {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
-  }
+  // ── Flex bar ──
+  const bar = document.createElement('div');
+  bar.className = 'tl-bar';
 
-  // Bar container (relative)
-  const barWrap = document.createElement('div');
-  barWrap.className = 'timeline-bar-wrap';
-  container.appendChild(barWrap);
-
-  // Add segments with text
   segments.forEach(seg => {
-    const span = document.createElement('span');
-    const leftPct = ((seg.start - segments[0].start) / totalDuration) * 100;
-    const widthPct = ((seg.end - seg.start) / totalDuration) * 100;
-    span.style.left = leftPct + '%';
-    span.style.width = widthPct + '%';
-    span.className = seg.state === 1 ? 'timeline-on' : 'timeline-off';
-    // Add ON/OFF text inside
-    span.textContent = seg.state === 1 ? 'ON' : 'OFF';
-    barWrap.appendChild(span);
+    const segStart = Math.max(seg.start, windowStart);
+    const segEnd = Math.min(seg.end, windowEnd);
+    if (segEnd <= segStart) return;
+
+    const duration = segEnd - segStart;
+    const pct = (duration / totalMs) * 100;
+
+    const el = document.createElement('div');
+    el.className = 'tl-segment' + (seg.state === 1 ? ' on' : ' off');
+    el.style.flexGrow = duration;   // proportional
+    el.style.flexBasis = '0px';
+
+    // Show "ON"/"OFF" only if wide enough (>4% of bar)
+    if (pct >= 4) {
+      el.textContent = seg.state === 1 ? 'ON' : 'OFF';
+    }
+    bar.appendChild(el);
   });
 
-  // Time labels (absolutely positioned)
-  const labelContainer = document.createElement('div');
-  labelContainer.className = 'timeline-labels';
-  container.appendChild(labelContainer);
+  container.appendChild(bar);
 
-  const boundaryTimes = [
-    { time: segments[0].start, label: formatTimeLabel(segments[0].start) }
-  ];
-  segments.forEach(seg => {
-    boundaryTimes.push({ time: seg.end, label: formatTimeLabel(seg.end) });
-  });
+  // ── Time axis ticks every 4h ──
+  const labelRow = document.createElement('div');
+  labelRow.className = 'tl-labels';
 
-  boundaryTimes.forEach((b, idx) => {
-    const labelWrap = document.createElement('div');
-    labelWrap.className = 'timeline-label-wrap';
-    const leftPct = ((b.time - segments[0].start) / totalDuration) * 100;
-    labelWrap.style.left = leftPct + '%';
+  const tickInterval = 4 * 60 * 60 * 1000;
+  // Start at the next whole hour boundary
+  const firstTick = Math.ceil(windowStart / 3600000) * 3600000;
+  for (let t = firstTick; t <= windowEnd; t += tickInterval) {
+    const pct = ((t - windowStart) / totalMs) * 100;
+
+    const tick = document.createElement('div');
+    tick.className = 'tl-tick';
+    tick.style.left = pct + '%';
+
+    const d = new Date(t);
+    const hours = d.getHours();
 
     const timeSpan = document.createElement('span');
-    timeSpan.className = 'timeline-time';
-    timeSpan.textContent = b.label;
-    labelWrap.appendChild(timeSpan);
+    timeSpan.className = 'tl-time';
+    timeSpan.textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    tick.appendChild(timeSpan);
 
-    if (idx === 0) {
-      const dateSmall = document.createElement('span');
-      dateSmall.className = 'timeline-date-small';
-      dateSmall.textContent = new Date(b.time).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-      labelWrap.appendChild(dateSmall);
+    // Show date at midnight
+    if (hours === 0) {
+      const dateSpan = document.createElement('span');
+      dateSpan.className = 'tl-date';
+      dateSpan.textContent = d.toLocaleDateString([], { day: 'numeric', month: 'short' });
+      tick.appendChild(dateSpan);
     }
 
-    labelContainer.appendChild(labelWrap);
-  });
-}
-
-function formatTimeLabel(timestamp) {
-  return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    labelRow.appendChild(tick);
+  }
+  container.appendChild(labelRow);
 }
 
 // ── Charts & Tables ──
