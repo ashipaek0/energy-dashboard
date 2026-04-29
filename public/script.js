@@ -472,7 +472,7 @@ async function updateGridStatus() {
   } catch (e) { console.error('Grid error:', e); }
 }
 
-// ── ROLLING 24h TIMELINE BAR ──
+// ── ROLLING 24h TIMELINE BAR WITH HOVER TOOLTIPS ──
 async function updateGridTimeline() {
   try {
     const res = await fetch('/api/grid/timeline?period=24h');
@@ -509,9 +509,19 @@ function renderTimelineBar(segments, windowStart, windowEnd) {
     el.style.flexGrow = duration;
     el.style.flexBasis = '0px';
 
+    // Show "ON"/"OFF" text if wide enough
     if (pct >= 4) {
       el.textContent = seg.state === 1 ? 'ON' : 'OFF';
     }
+
+    // ─── HOVER TOOLTIP ───
+    const stateLabel = seg.state === 1 ? 'ON' : 'OFF';
+    const startDate = new Date(seg.start).toLocaleString();  // full date + time
+    const endDate   = segEnd < windowEnd 
+                      ? new Date(segEnd).toLocaleString() 
+                      : 'Now';
+    el.title = `${stateLabel} since ${startDate} until ${endDate}`;
+
     bar.appendChild(el);
   });
 
