@@ -215,7 +215,6 @@ h1, h2, h3, h4,
   margin-bottom: 0.8rem;
 }
 
-/* Inside grid-card, stat cards become flat */
 .grid-card .stat-card {
   background: transparent;
   box-shadow: none;
@@ -223,7 +222,6 @@ h1, h2, h3, h4,
   padding: 0.8rem 0.5rem;
 }
 
-/* The stats row inside the grid card uses a flex layout instead of grid */
 .grid-stats {
   display: flex;
   flex-wrap: wrap;
