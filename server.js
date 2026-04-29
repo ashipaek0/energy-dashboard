@@ -295,6 +295,36 @@ setInterval(() => {
   }
 }, 60000);
 
+// ─── HELPER: Integrate solar power from history to get today's energy ───
+function computeTodaySolar() {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+  const startUnix = Math.floor(todayStart.getTime() / 1000);
+  const endUnix = Math.floor(now.getTime() / 1000);
+
+  const rows = db.prepare(
+    'SELECT timestamp, solar FROM history WHERE timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC'
+  ).all(startUnix, endUnix);
+
+  if (rows.length < 2) return 0;   // need at least two points for trapezoidal integration
+
+  let totalKwh = 0;
+  for (let i = 0; i < rows.length - 1; i++) {
+    const dtHours = (rows[i + 1].timestamp - rows[i].timestamp) / 3600;
+    const avgKw = (rows[i].solar + rows[i + 1].solar) / 2000;   // solar is in W, convert to kW average
+    totalKwh += avgKw * dtHours;
+  }
+
+  // Account for the period between the last data point and now
+  const last = rows[rows.length - 1];
+  const dtLastHours = (endUnix - last.timestamp) / 3600;
+  if (dtLastHours > 0) {
+    totalKwh += (last.solar / 1000) * dtLastHours;
+  }
+
+  return totalKwh;
+}
+
 // --- Public API ---
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -317,10 +347,13 @@ app.get('/api/current', async (req, res) => {
     const latest = db.prepare('SELECT * FROM history ORDER BY timestamp DESC LIMIT 1').get();
     const rateRow = db.prepare('SELECT value FROM config WHERE key = ?').get('savings_rate');
     const rate = parseFloat(rateRow?.value) || 0.30;
+    // All‑time solar still uses daily_solar max per day for consistency
     const allTimeSolar = db.prepare(`SELECT SUM(daily_solar) as total FROM (SELECT MAX(daily_solar) as daily_solar FROM history GROUP BY date(timestamp, 'unixepoch'))`).get();
     const allTimeSavings = (allTimeSolar?.total || 0) * rate;
     if (latest) {
       const curr = getConfig('savings_currency') || '€';
+      // TODAY’S SOLAR FROM POWER INTEGRATION
+      const dailySolarKwh = computeTodaySolar();
       res.json({
         consumption_kw: latest.consumption / 1000,
         solar_kw: latest.solar / 1000,
@@ -330,14 +363,14 @@ app.get('/api/current', async (req, res) => {
         grid_export_kw: latest.grid_export / 1000,
         battery_soc: latest.battery_soc,
         daily_consumption_kwh: latest.daily_consumption,
-        daily_solar_kwh: latest.daily_solar,
+        daily_solar_kwh: dailySolarKwh,
         daily_battery_charge_kwh: latest.daily_battery_charge,
         daily_battery_discharge_kwh: latest.daily_battery_discharge,
         daily_grid_import_kwh: latest.daily_grid_import,
         daily_grid_export_kwh: latest.daily_grid_export,
         savings_currency: curr,
         savings_rate: rate,
-        today_savings: latest.daily_solar * rate,
+        today_savings: dailySolarKwh * rate,
         all_time_savings: allTimeSavings,
         timestamp: latest.timestamp * 1000
       });
@@ -520,7 +553,7 @@ app.get('/api/grid/hours', async (req, res) => {
   } catch (err) { console.error('[Grid Hours] Error:', err); res.status(500).json({ error: err.message }); }
 });
 
-// --- NEW TIMELINE ROUTE (full day segments) ---
+// ─── FULL DAY TIMELINE ENDPOINT ───
 app.get('/api/grid/timeline', async (req, res) => {
   try {
     const entity = getConfig('grid_status_entity');
@@ -572,7 +605,6 @@ app.get('/api/grid/timeline', async (req, res) => {
       'SELECT timestamp, state FROM grid_status WHERE timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC'
     ).all(startUnix, effectiveEnd);
 
-    // Build segments
     const segments = [];
     let lastState = initialState;
     let lastTime = startUnix;
@@ -614,59 +646,18 @@ app.get('/api/debug/timezone', async (req, res) => {
   });
 });
 
+// ─── UPDATED SAVINGS ROUTE ───
 app.get('/api/savings', async (req, res) => {
   try {
     const rateRow = db.prepare('SELECT value FROM config WHERE key = ?').get('savings_rate');
     const rate = parseFloat(rateRow?.value) || 0.30;
     const currency = getConfig('savings_currency') || '€';
 
-    let todaySolar = 0;
-    try {
-      const haEnabled = await isSourceEnabled('ha_enabled');
-      const mqttEnabled = await isSourceEnabled('mqtt_enabled');
-      if (mqttEnabled && mqttValues.daily_solar !== undefined) {
-        todaySolar = mqttValues.daily_solar;
-      } else if (haEnabled) {
-        const haEntity = getConfig('ha_entity_daily_solar');
-        if (haEntity) {
-          const raw = await getHAState(haEntity).catch(() => 0);
-          todaySolar = parseFloat(raw) || 0;
-        }
-      }
-    } catch (e) { console.warn('Failed to fetch live daily solar, using history:', e.message); }
-
-    const todayDate = new Date().toLocaleDateString('en-CA');
-    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
-    const todayStartUnix = Math.floor(todayStart.getTime() / 1000);
-
-    const latestTodayRow = db.prepare(`
-      SELECT timestamp, daily_solar FROM history 
-      WHERE timestamp >= ? AND daily_solar IS NOT NULL
-      ORDER BY timestamp DESC LIMIT 1
-    `).get(todayStartUnix);
-
-    if (!latestTodayRow) {
-      todaySolar = 0;
-    } else {
-      const rowLocalDate = new Date(latestTodayRow.timestamp * 1000).toLocaleDateString('en-CA');
-      if (rowLocalDate !== todayDate) todaySolar = 0;
-      else if (todaySolar === 0) {
-        const rows = db.prepare(`
-          SELECT timestamp, daily_solar FROM history 
-          WHERE timestamp >= ? AND daily_solar IS NOT NULL
-          ORDER BY timestamp ASC
-        `).all(todayStartUnix);
-        let maxVal = 0;
-        rows.forEach(row => {
-          const rowDate = new Date(row.timestamp * 1000).toLocaleDateString('en-CA');
-          if (rowDate === todayDate && row.daily_solar > maxVal) maxVal = row.daily_solar;
-        });
-        todaySolar = maxVal;
-      }
-    }
-
+    // TODAY’S SOLAR FROM POWER INTEGRATION
+    const todaySolar = computeTodaySolar();
     const todaySavings = todaySolar * rate;
 
+    // Helper for historical periods (uses daily_solar from history, which is fine for completed days)
     function getTotalSolarSince(startDate) {
       const startUnix = Math.floor(startDate.getTime() / 1000);
       const rows = db.prepare(`
@@ -830,54 +821,8 @@ app.get('/api/solar-forecast', async (req, res) => {
       }
     }
 
-    let actualTodayKwh = 0;
-    const todayDate = new Date().toLocaleDateString('en-CA');
-    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
-    const todayStartUnix = Math.floor(todayStart.getTime() / 1000);
-
-    try {
-      const haEnabled = await isSourceEnabled('ha_enabled');
-      const mqttEnabled = await isSourceEnabled('mqtt_enabled');
-      if (mqttEnabled && mqttValues.daily_solar !== undefined) {
-        actualTodayKwh = mqttValues.daily_solar;
-      } else if (haEnabled) {
-        const haEntity = getConfig('ha_entity_daily_solar');
-        if (haEntity) {
-          const raw = await getHAState(haEntity).catch(() => 0);
-          actualTodayKwh = parseFloat(raw) || 0;
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to fetch live daily solar, using history:', e.message);
-    }
-
-    if (actualTodayKwh === 0) {
-      const latestTodayRow = db.prepare(`
-        SELECT timestamp, daily_solar FROM history 
-        WHERE timestamp >= ? AND daily_solar IS NOT NULL
-        ORDER BY timestamp DESC LIMIT 1
-      `).get(todayStartUnix);
-      if (!latestTodayRow) {
-        actualTodayKwh = 0;
-      } else {
-        const rowLocalDate = new Date(latestTodayRow.timestamp * 1000).toLocaleDateString('en-CA');
-        if (rowLocalDate !== todayDate) {
-          actualTodayKwh = 0;
-        } else {
-          const todayRows = db.prepare(`
-            SELECT timestamp, daily_solar FROM history 
-            WHERE timestamp >= ? AND daily_solar IS NOT NULL
-            ORDER BY timestamp ASC
-          `).all(todayStartUnix);
-          let maxVal = 0;
-          todayRows.forEach(row => {
-            const rowDate = new Date(row.timestamp * 1000).toLocaleDateString('en-CA');
-            if (rowDate === todayDate && row.daily_solar > maxVal) maxVal = row.daily_solar;
-          });
-          actualTodayKwh = maxVal;
-        }
-      }
-    }
+    // actual today solar from integration (for the forecast banner)
+    let actualTodayKwh = computeTodaySolar();
 
     const dailyMap = new Map();
     forecastData.forEach(f => {
@@ -890,6 +835,7 @@ app.get('/api/solar-forecast', async (req, res) => {
 
     const daily = Array.from(dailyMap.values()).slice(0, 4);
     
+    const todayDate = new Date().toLocaleDateString('en-CA');
     for (const dayEntry of daily) {
       if (dayEntry.date === todayDate) {
         dayEntry.actual_so_far = actualTodayKwh;
