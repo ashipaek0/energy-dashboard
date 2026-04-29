@@ -139,7 +139,7 @@ h1, h2, h3, h4,
 .pv-sparkline-container { flex: 1 1 auto; height: 180px; }
 .pv-sparkline-container canvas { width: 100% !important; height: 100% !important; }
 
-/* Stats Grid (used for both standalone and inside grid-card) */
+/* Stats Grid */
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -215,7 +215,7 @@ h1, h2, h3, h4,
   margin-bottom: 0.8rem;
 }
 
-/* Inside grid-card, stat cards become flat (no background/shadow/border) */
+/* Inside grid-card, stat cards become flat */
 .grid-card .stat-card {
   background: transparent;
   box-shadow: none;
@@ -236,82 +236,60 @@ h1, h2, h3, h4,
   min-width: 100px;
 }
 
-/* Timeline inside the grid card */
+/* ───────── NEW TIMELINE BAR ───────── */
 #grid-timeline {
-  /* No extra wrapper, just position relative for bar and labels */
   position: relative;
 }
 
-/* Re‑declare timeline styles (same as before, now scoped to grid-card) */
-.grid-card .timeline-bar-wrap {
-  position: relative;
+.tl-bar {
+  display: flex;
   height: 36px;
   background: var(--border);
   border-radius: 18px;
-  margin-bottom: 0.8rem;
   overflow: hidden;
+  margin-bottom: 0.8rem;
 }
 
-.grid-card .timeline-on {
-  background: var(--grid);
-  color: #fff;
+.tl-segment {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.65rem;
+  font-size: 0.7rem;
   font-weight: 700;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-}
-
-.grid-card .timeline-off {
-  background: #9ca3af;
   color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: 0.5px;
   text-transform: uppercase;
-}
-
-.grid-card .timeline-on,
-.grid-card .timeline-off {
-  position: absolute;
-  top: 0;
-  height: 100%;
-  border-radius: 1px;
-  transition: width 0.5s, left 0.5s;
   white-space: nowrap;
   overflow: hidden;
 }
 
-.grid-card .timeline-labels {
+.tl-segment.on  { background: var(--grid); }
+.tl-segment.off { background: #9B9B9B; }
+
+.tl-labels {
   position: relative;
-  height: 3.8rem;   /* room for time + date */
+  height: 3rem;
 }
 
-.grid-card .timeline-label-wrap {
+.tl-tick {
   position: absolute;
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.15rem;
   white-space: nowrap;
 }
 
-.grid-card .timeline-time {
-  font-size: 0.8rem;
+.tl-time {
+  font-size: 0.75rem;
   font-weight: 600;
   color: var(--text);
   line-height: 1.2;
 }
 
-.grid-card .timeline-date-small {
-  font-size: 0.7rem;
+.tl-date {
+  font-size: 0.65rem;
   color: var(--text-secondary);
+  line-height: 1.2;
 }
 
 /* Mobile */
