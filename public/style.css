@@ -239,6 +239,20 @@ h1, h2, h3, h4,
   position: relative;
 }
 
+.tl-tooltip {
+  position: absolute;
+  background: var(--card-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  z-index: 10;
+  pointer-events: none;
+  box-shadow: var(--shadow);
+}
+
 .tl-bar {
   display: flex;
   height: 36px;
