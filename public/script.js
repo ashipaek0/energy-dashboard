@@ -451,6 +451,20 @@ function updateFlowArrows(solar, consumption, battCharge, battDischarge, gridImp
   else gridToBatt.style.display = 'none';
 }
 
+// ── GRID DATE UPDATE ──
+function updateGridDate() {
+  const dateEl = document.getElementById('grid-date');
+  if (dateEl) {
+    const today = new Date();
+    dateEl.textContent = today.toLocaleDateString(undefined, {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  }
+}
+
 // ── GRID STATUS ──
 async function updateGridStatus() {
   try {
@@ -469,16 +483,20 @@ async function updateGridStatus() {
       const hData = await hRes.json();
       document.getElementById(`grid-hours-${p}`).textContent = formatHoursToHM(hData.hours);
     }
+
+    // Keep date current every refresh
+    updateGridDate();
   } catch (e) { console.error('Grid error:', e); }
 }
 
-// ── ROLLING 24h TIMELINE BAR WITH HOVER TOOLTIPS ──
+// ── ROLLING 24h TIMELINE BAR WITH CUSTOM TOOLTIP ──
 async function updateGridTimeline() {
   try {
     const res = await fetch('/api/grid/timeline?period=24h');
     const data = await res.json();
     if (!data.configured || !data.segments || data.segments.length === 0) return;
 
+    updateGridDate();   // also update date when timeline rebuilt
     renderTimelineBar(data.segments, data.windowStart, data.windowEnd);
   } catch (e) { console.error('Grid timeline error:', e); }
 }
@@ -488,9 +506,14 @@ function renderTimelineBar(segments, windowStart, windowEnd) {
   container.innerHTML = '';
 
   if (!segments.length) return;
-
   const totalMs = windowEnd - windowStart;
   if (totalMs <= 0) return;
+
+  // ── Tooltip element (shared) ──
+  const tooltip = document.createElement('div');
+  tooltip.className = 'tl-tooltip';
+  tooltip.style.display = 'none';
+  container.appendChild(tooltip);
 
   // ── Flex bar ──
   const bar = document.createElement('div');
@@ -509,18 +532,35 @@ function renderTimelineBar(segments, windowStart, windowEnd) {
     el.style.flexGrow = duration;
     el.style.flexBasis = '0px';
 
-    // Show "ON"/"OFF" text if wide enough
     if (pct >= 4) {
       el.textContent = seg.state === 1 ? 'ON' : 'OFF';
     }
 
-    // ─── HOVER TOOLTIP ───
+    // ─── Custom hover tooltip ───
     const stateLabel = seg.state === 1 ? 'ON' : 'OFF';
-    const startDate = new Date(seg.start).toLocaleString();  // full date + time
-    const endDate   = segEnd < windowEnd 
-                      ? new Date(segEnd).toLocaleString() 
+    const startDate = new Date(seg.start).toLocaleString();
+    const endDate   = segEnd < windowEnd
+                      ? new Date(segEnd).toLocaleString()
                       : 'Now';
-    el.title = `${stateLabel} since ${startDate} until ${endDate}`;
+    const tooltipText = `${stateLabel} since ${startDate} until ${endDate}`;
+
+    el.addEventListener('mouseenter', (e) => {
+      tooltip.style.display = 'block';
+      tooltip.textContent = tooltipText;
+
+      // Position the tooltip above the segment, centred horizontally
+      const barRect = bar.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      const left = elRect.left - barRect.left + elRect.width / 2;
+      const top = -tooltip.offsetHeight - 8;   // 8px gap above bar
+
+      tooltip.style.left = left + 'px';
+      tooltip.style.top = top + 'px';
+    });
+
+    el.addEventListener('mouseleave', () => {
+      tooltip.style.display = 'none';
+    });
 
     bar.appendChild(el);
   });
