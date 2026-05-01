@@ -651,22 +651,27 @@ app.get('/api/debug/timezone', async (req, res) => {
   });
 });
 
+// ─── SAVINGS ROUTE — MONTHLY RESET FIX ───
 app.get('/api/savings', async (req, res) => {
   try {
     const rateRow = db.prepare('SELECT value FROM config WHERE key = ?').get('savings_rate');
     const rate = parseFloat(rateRow?.value) || 0.30;
     const currency = getConfig('savings_currency') || '€';
 
+    // TODAY’S SOLAR FROM POWER INTEGRATION
     const todaySolar = computeTodaySolar();
     const todaySavings = todaySolar * rate;
 
-    function getTotalSolarSince(startDate) {
-      const startUnix = Math.floor(startDate.getTime() / 1000);
+    // UPDATED HELPER: use local date filtering to avoid timezone overlap
+    function getTotalSolarSince(localStartDate) {
+      // localStartDate is a string 'YYYY-MM-DD'
       const rows = db.prepare(`
         SELECT timestamp, daily_solar FROM history 
-        WHERE timestamp >= ? AND daily_solar IS NOT NULL
+        WHERE date(timestamp, 'unixepoch', 'localtime') >= ?
+          AND daily_solar IS NOT NULL
         ORDER BY timestamp ASC
-      `).all(startUnix);
+      `).all(localStartDate);
+
       const dailyMax = {};
       rows.forEach(row => {
         const date = new Date(row.timestamp * 1000).toLocaleDateString('en-CA');
@@ -677,16 +682,21 @@ app.get('/api/savings', async (req, res) => {
     }
 
     const now = new Date();
+    // Week start (Monday)
     const dayOfWeek = now.getDay();
     const diff = (dayOfWeek === 0 ? 6 : dayOfWeek - 1);
     const weekStart = new Date(now); weekStart.setDate(now.getDate() - diff); weekStart.setHours(0,0,0,0);
-    const weekSolar = getTotalSolarSince(weekStart);
+    const weekStartStr = weekStart.toLocaleDateString('en-CA');
+    const weekSolar = getTotalSolarSince(weekStartStr);
     const weekSavings = weekSolar * rate;
 
+    // Month start
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const monthSolar = getTotalSolarSince(monthStart);
+    const monthStartStr = monthStart.toLocaleDateString('en-CA');
+    const monthSolar = getTotalSolarSince(monthStartStr);
     const monthSavings = monthSolar * rate;
 
+    // All-time (unchanged, still uses daily_solar from all time)
     let allTimeSavings;
     const overrideValStr = getConfig('all_time_pv_savings_override');
     if (overrideValStr && !isNaN(parseFloat(overrideValStr))) {
