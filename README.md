@@ -2,17 +2,17 @@
 
 A self‑hosted, real‑time energy monitoring dashboard that integrates with **Home Assistant** and **MQTT**. Designed for public displays – no login required for viewing, while settings are password‑protected.
 
-<img width="1906" height="966" alt="Screenshot From 2026-04-18 18-51-15" src="https://github.com/user-attachments/assets/8e3cc4d9-6b54-40c0-b78b-056ad255876e" />
-<img width="1906" height="966" alt="Screenshot From 2026-04-18 18-51-50" src="https://github.com/user-attachments/assets/681101c9-119a-4353-a2d0-7b33ff16f4bd" />
-<img width="1906" height="966" alt="Screenshot From 2026-04-18 18-52-06" src="https://github.com/user-attachments/assets/9ade7d7e-e1d4-41ae-be30-9ee13597eaeb" />
-<img width="1906" height="966" alt="Screenshot From 2026-04-18 18-52-42" src="https://github.com/user-attachments/assets/3775278e-439e-4e87-964f-42928a38ed31" />
-
+![Screenshot 1](https://github.com/user-attachments/assets/8e3cc4d9-6b54-40c0-b78b-056ad255876e)
+![Screenshot 2](https://github.com/user-attachments/assets/681101c9-119a-4353-a2d0-7b33ff16f4bd)
+![Screenshot 3](https://github.com/user-attachments/assets/9ade7d7e-e1d4-41ae-be30-9ee13597eaeb)
+![Screenshot 4](https://github.com/user-attachments/assets/3775278e-439e-4e87-964f-42928a38ed31)
 
 ## ✨ Features
 
 - **Live Flow Card** – Animated arrows show power flowing between Solar, Battery, Home, and Grid.
 - **Real‑time Stats** – Current power (W), battery state of charge (%), daily totals (kWh), self‑sufficiency, and cost savings.
-- **Grid Status Tracking** – Displays current grid state (ON/OFF), uptime hours (day/week/month/year), and last change timestamps.
+- **Grid Status Tracking** – Displays current grid state (ON/OFF), uptime hours (day/week/month/year).
+- **Grid Timeline Bar** – A continuous 24‑hour bar showing grid ON/OFF segments with **hover tooltips** displaying the exact change timestamps.
 - **Solar Forecast** – Predicts solar generation for the next 4 days using high‑accuracy **Solcast** (with API key) or free **Open‑Meteo** as fallback. Includes hourly chart and daily summary cards.
 - **Historical Charts**
   - Power Overview (line chart) – 24h, 7d, 30d, 90d with smooth gradient fills.
@@ -44,14 +44,17 @@ git clone https://github.com/ashipaek0/energy-dashboard.git
 cd energy-dashboard
 ```
 
-### 2. Set the Settings Password
+### 2. Create Environment File
 
-Edit `docker-compose.yml` and change the `SETTINGS_PASSWORD` environment variable:
+Copy the example environment file and set a **strong password** for the settings page:
 
-```yaml
-environment:
-  - SETTINGS_PASSWORD=your_secure_password_here
+```bash
+cp .env.example .env
+nano .env   # or your favourite editor
 ```
+
+Update the `SETTINGS_PASSWORD` value.  
+*The `.env` file is excluded from version control, keeping your password safe.*
 
 ### 3. Start the Container
 
@@ -64,7 +67,7 @@ The dashboard will be available at `http://localhost:3000` (or your server's IP)
 ### 4. Configure Data Sources
 
 1. Open `http://your-server-ip:3000/settings`
-2. Log in with username `admin` and the password you set.
+2. Log in with username `admin` and the password you set in the `.env` file.
 3. Configure Home Assistant (URL and Long‑Lived Access Token).
 4. Click **Fetch Entities from HA** to load all available sensors.
 5. Map each measurement (consumption, solar, battery, grid, etc.) to the appropriate sensor.
@@ -84,7 +87,7 @@ The dashboard will immediately begin displaying data.
   - Power (Watts): consumption, solar, battery charge/discharge, grid import/export.
   - Battery SOC (%).
   - Grid status (binary sensor – ON/OFF).
-  - Daily energy (kWh) – must reset at midnight (use utility meter or Riemann sum integral sensors).
+  - Daily energy (kWh) – the dashboard now **calculates daily totals internally** from your power sensors, so you don't need sensors that reset at midnight.
 
 ### MQTT
 
@@ -129,7 +132,8 @@ A pre‑built image is available on Docker Hub:
 irunmole/energy-dashboard:latest
 ```
 
-You can use it directly in your `docker-compose.yml`:
+You can use it directly in your `docker-compose.yml` (see the `.env` example below).  
+**Note:** if you use the pre‑built image, make sure to still provide the `SETTINGS_PASSWORD` via environment.
 
 ```yaml
 services:
@@ -142,8 +146,8 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      - SETTINGS_PASSWORD=your_secure_password_here
-      - TZ=??   # Set your timezone here
+      - SETTINGS_PASSWORD=${SETTINGS_PASSWORD}   # from .env
+      - TZ=Africa/Lagos                           # change to your timezone
 ```
 
 ## 🛠️ Development / Manual Installation
@@ -163,17 +167,25 @@ The server listens on port 3000. A SQLite database will be created in `./data`.
 energy-dashboard/
 ├── Dockerfile
 ├── docker-compose.yml
+├── .env.example          # template for credentials
+├── .gitignore
 ├── package.json
-├── server.js          # Express backend + SQLite + polling + forecast
+├── server.js             # Express backend + SQLite + polling + forecast
 ├── public/
-│   ├── index.html     # Main dashboard UI
-│   ├── style.css      # Light/dark theme styles
-│   ├── script.js      # Charts, flow card, tables, forecast
-│   ├── settings.html  # Protected configuration page
-│   └── settings.js    # Settings logic + backup/restore
-├── .env.example
+│   ├── index.html        # Main dashboard UI
+│   ├── style.css         # Light/dark theme styles
+│   ├── script.js         # Charts, flow card, tables, forecast, timeline
+│   ├── settings.html     # Protected configuration page
+│   └── settings.js       # Settings logic + backup/restore
 └── README.md
 ```
+
+## 🔒 Security
+
+- **No hardcoded secrets** – passwords are stored in the `.env` file (excluded from git).
+- **Non‑root container** – the Docker process runs as a non‑privileged `node` user.
+- **No dynamic code execution** – all inputs are properly parsed and sanitised.
+- **XSS‑safe rendering** – the front end uses secure DOM methods; no `innerHTML` with user data.
 
 ## ❓ Troubleshooting
 
@@ -183,22 +195,23 @@ energy-dashboard/
 - Use the **Test MQTT Broker Connection** and **Test Topic** buttons in settings to verify connectivity.
 - For Home Assistant, verify the token has read access to the selected entities.
 
-### Daily energy values grow exponentially
+### Today's solar or savings not updating
 
-The sensors selected for **Daily Energy** must reset to zero at midnight. Use Home Assistant's **Utility Meter** or **Riemann sum** integration to create resetting sensors.
+The dashboard calculates daily solar energy directly from your power sensors – **no special "daily" sensors are required**. If the value seems stuck, check that the correct **power** sensors are mapped (not the daily‑energy sensor).
 
-### Grid status shows "Not configured"
+### Grid timeline not appearing
 
-Select a binary sensor in the settings that reports grid availability (e.g., `binary_sensor.grid_status`).
+Make sure a **grid status entity** is selected in the settings (e.g., `binary_sensor.grid_status`). The timeline bar will appear once the server has recorded at least one state change.
 
 ### Solar forecast shows zero or unrealistic values
 
 - Ensure Latitude, Longitude, and System Capacity are correctly filled.
 - If using Solcast, verify your API key is valid and the hobbyist tier has remaining calls.
 - Check the server logs for detailed error messages:
-  ```bash
-  docker compose logs energy-dashboard | grep -i forecast
-  ```
+
+```bash
+docker compose logs energy-dashboard | grep -i forecast
+```
 
 ### Login popup appears on main page
 
