@@ -1227,7 +1227,20 @@ app.get('/api/backup', authMiddleware, (req, res) => {
 
 app.post('/api/restore', authMiddleware, upload.single('dbfile'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-  const tempPath = req.file.path;
+  const uploadRoot = path.resolve(__dirname, 'uploads');
+  const tempPath = path.resolve(req.file.path);
+  if (!(tempPath === uploadRoot || tempPath.startsWith(uploadRoot + path.sep))) {
+    return res.status(400).json({ error: 'Invalid upload path' });
+  }
+  let tempStat;
+  try {
+    tempStat = fs.statSync(tempPath);
+  } catch (e) {
+    return res.status(400).json({ error: 'Uploaded file not found' });
+  }
+  if (!tempStat.isFile()) {
+    return res.status(400).json({ error: 'Invalid uploaded file' });
+  }
   const backupPath = DB_PATH + '.bak';
 
   try {
