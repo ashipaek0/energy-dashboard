@@ -7,17 +7,51 @@ const basicAuth = require('express-basic-auth');
 const mqtt = require('mqtt');
 const multer = require('multer');
 const fs = require('fs');
+const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const settingsPassword = process.env.SETTINGS_PASSWORD || 'admin';
+// ──────────────────────────── SECURITY FIX: No more "admin" fallback ────────
+let settingsPassword = process.env.SETTINGS_PASSWORD;
+if (!settingsPassword) {
+  settingsPassword = crypto.randomBytes(8).toString('hex');
+  console.warn('⚠️  WARNING: No SETTINGS_PASSWORD provided in environment.');
+  console.warn(`🔒  Using randomly generated password: ${settingsPassword}`);
+}
+
 const authMiddleware = basicAuth({
   users: { 'admin': settingsPassword },
   challenge: true,
   realm: 'Energy Dashboard Settings'
 });
 
+// ──────────────────────────── Rate limiter for brute‑force protection ──────
+const settingsLimiter = rateLimit({
+  windowMs: 60 * 1000,   // 1 minute
+  max: 10,               // 10 attempts per window per IP
+  message: { error: 'Too many requests, please try again later' }
+});
+
+// Apply to all settings‑related routes
+app.use('/settings', settingsLimiter);
+app.use('/api/settings', settingsLimiter);
+
+// ──────────────────────────── CSRF mitigation middleware ───────────────────
+const csrfProtection = (req, res, next) => {
+  // Only apply to state‑changing methods
+  if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') {
+    if (!req.headers['x-requested-with'] || req.headers['x-requested-with'] !== 'XMLHttpRequest') {
+      return res.status(403).json({ error: 'CSRF protection: Missing X-Requested-With header' });
+    }
+  }
+  next();
+};
+
+app.use('/api', csrfProtection);
+
+// ── File upload config unchanged ──────────────────────────────────────────
 const upload = multer({
   dest: '/tmp/',
   fileFilter: (req, file, cb) => {
@@ -295,7 +329,6 @@ setInterval(() => {
   }
 }, 60000);
 
-// ─── HELPER: Integrate solar power from history for a specific local date (full day, past) ───
 function computeSolarForDate(dateStr) {
   const startOfDay = new Date(dateStr + 'T00:00:00');
   const endOfDay = new Date(dateStr + 'T23:59:59');
@@ -324,12 +357,11 @@ function computeSolarForDate(dateStr) {
   return totalKwh;
 }
 
-// ─── Today’s solar: from midnight to NOW ───
 function computeTodaySolar() {
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
   const startUnix = Math.floor(todayStart.getTime() / 1000);
-  const endUnix = Math.floor(now.getTime() / 1000);   // stop at current time, not end of day!
+  const endUnix = Math.floor(now.getTime() / 1000);
 
   const rows = db.prepare(
     'SELECT timestamp, solar FROM history WHERE timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC'
@@ -353,7 +385,7 @@ function computeTodaySolar() {
   return totalKwh;
 }
 
-// --- Public API ---
+// --- Public API (no auth) ---
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
@@ -579,7 +611,6 @@ app.get('/api/grid/hours', async (req, res) => {
   } catch (err) { console.error('[Grid Hours] Error:', err); res.status(500).json({ error: err.message }); }
 });
 
-// ─── TIMELINE ENDPOINT (supports period=24h) ───
 app.get('/api/grid/timeline', async (req, res) => {
   try {
     const entity = getConfig('grid_status_entity');
@@ -680,7 +711,6 @@ app.get('/api/debug/timezone', async (req, res) => {
   });
 });
 
-// ─── SAVINGS ROUTE – now uses power integration for week & month ───
 app.get('/api/savings', async (req, res) => {
   try {
     const rateRow = db.prepare('SELECT value FROM config WHERE key = ?').get('savings_rate');
@@ -690,7 +720,6 @@ app.get('/api/savings', async (req, res) => {
     const todaySolar = computeTodaySolar();
     const todaySavings = todaySolar * rate;
 
-    // Week: Monday to yesterday + today
     function getWeekSolar() {
       const now = new Date();
       const dayOfWeek = now.getDay();
@@ -715,7 +744,6 @@ app.get('/api/savings', async (req, res) => {
       return total;
     }
 
-    // Month: 1st to yesterday + today
     function getMonthSolar() {
       const now = new Date();
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -741,7 +769,6 @@ app.get('/api/savings', async (req, res) => {
     const monthSolar = getMonthSolar();
     const monthSavings = monthSolar * rate;
 
-    // All-time (unchanged, still uses daily_solar max)
     let allTimeSavings;
     const overrideValStr = getConfig('all_time_pv_savings_override');
     if (overrideValStr && !isNaN(parseFloat(overrideValStr))) {
@@ -998,6 +1025,7 @@ app.get('/api/solar-forecast', async (req, res) => {
   }
 });
 
+// ── Settings API (protected) ──
 app.get('/api/test-forecast', authMiddleware, async (req, res) => {
   try {
     const latStr = getConfig('solar_latitude');
@@ -1100,7 +1128,23 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
   } catch (err) { console.error('Test forecast error:', err); res.status(500).json({ error: err.message }); }
 });
 
-// --- Backup & Restore (protected) ---
+// ─── SSRF FIX: No longer accepts query URL/token ──────────────────────────
+app.get('/api/ha/entities', authMiddleware, async (req, res) => {
+  const haUrl = getConfig('ha_url');
+  const haToken = getConfig('ha_token');
+  if (!haUrl || !haToken) return res.status(400).json({ error: 'HA not configured' });
+  try {
+    const response = await fetch(`${haUrl}/api/states`, {
+      headers: { 'Authorization': `Bearer ${haToken}` }
+    });
+    if (!response.ok) throw new Error(`HA error ${response.status}`);
+    const data = await response.json();
+    const sensors = data.filter(e => e.entity_id.startsWith('sensor.') || e.entity_id.startsWith('binary_sensor.')).map(e => e.entity_id);
+    res.json(sensors);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Backup & Restore (protected, CSRF mitigated via global middleware) ────
 app.get('/api/backup', authMiddleware, (req, res) => {
   try {
     if (db) db.close();
@@ -1135,7 +1179,7 @@ app.post('/api/restore', authMiddleware, upload.single('dbfile'), async (req, re
   }
 });
 
-// --- Settings API (protected) ---
+// ── Settings (protected) ──────────────────────────────────────────────────
 app.use('/api/settings', authMiddleware);
 
 app.get('/api/settings', async (req, res) => {
@@ -1166,25 +1210,6 @@ app.post('/api/settings', async (req, res) => {
     }
     res.json({ success: true });
   } catch (err) { console.error('[Settings] Save error:', err); res.status(500).json({ error: err.message }); }
-});
-
-app.get('/api/ha/entities', authMiddleware, async (req, res) => {
-  let haUrl = req.query.url;
-  let haToken = req.query.token;
-  if (!haUrl || !haToken) {
-    haUrl = getConfig('ha_url');
-    haToken = getConfig('ha_token');
-  }
-  if (!haUrl || !haToken) return res.status(400).json({ error: 'HA not configured' });
-  try {
-    const response = await fetch(`${haUrl}/api/states`, {
-      headers: { 'Authorization': `Bearer ${haToken}` }
-    });
-    if (!response.ok) throw new Error(`HA error ${response.status}`);
-    const data = await response.json();
-    const sensors = data.filter(e => e.entity_id.startsWith('sensor.') || e.entity_id.startsWith('binary_sensor.')).map(e => e.entity_id);
-    res.json(sensors);
-  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/test-mqtt', authMiddleware, async (req, res) => {
