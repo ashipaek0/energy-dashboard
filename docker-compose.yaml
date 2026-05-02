@@ -8,6 +8,5 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      - SETTINGS_PASSWORD=your_secure_password_here
-      - TZ=Africa/Lagos   # Change to your timezone
-
+      - SETTINGS_PASSWORD=${SETTINGS_PASSWORD}
+      - TZ=${TZ:-Africa/Lagos}
