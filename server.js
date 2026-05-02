@@ -1214,7 +1214,7 @@ app.get('/api/test-mqtt-topic', authMiddleware, async (req, res) => {
   });
 });
 
-// ── Backup & Restore (protected, CSRF mitigated via global middleware) ────
+// --- Backup & Restore (protected, CSRF mitigated, with safe rollback) ---
 app.get('/api/backup', authMiddleware, (req, res) => {
   try {
     if (db) db.close();
@@ -1228,24 +1228,57 @@ app.get('/api/backup', authMiddleware, (req, res) => {
 app.post('/api/restore', authMiddleware, upload.single('dbfile'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const tempPath = req.file.path;
+  const backupPath = DB_PATH + '.bak';
+
   try {
+    // Pre‑restore backup
+    if (fs.existsSync(DB_PATH)) {
+      fs.copyFileSync(DB_PATH, backupPath);
+    }
+
+    // Quick sanity check
     const testDb = new Database(tempPath);
     testDb.prepare('SELECT 1').get();
     testDb.close();
-    
+
+    // Apply the new database
     if (db) db.close();
     if (mqttClient) { mqttClient.end(); mqttClient = null; }
-    
+
     fs.copyFileSync(tempPath, DB_PATH);
     initializeDatabase();
     await setupMqtt();
+
+    // Clean up
     fs.unlinkSync(tempPath);
-    
+    fs.unlinkSync(backupPath);
+
     res.json({ success: true, message: 'Database restored successfully' });
+
   } catch (err) {
-    try { fs.unlinkSync(tempPath); } catch (e) {}
-    try { initializeDatabase(); } catch (e) {}
-    res.status(500).json({ error: 'Invalid database file: ' + err.message });
+    console.error('Restore error:', err.message);
+
+    // Rollback to original database if possible
+    try {
+      if (fs.existsSync(backupPath)) {
+        if (db) db.close();
+        if (mqttClient) { mqttClient.end(); mqttClient = null; }
+
+        fs.copyFileSync(backupPath, DB_PATH);
+        fs.unlinkSync(backupPath);
+        initializeDatabase();
+        await setupMqtt();
+      }
+    } catch (rollbackErr) {
+      console.error('Critical: rollback failed!', rollbackErr.message);
+    }
+
+    // Clean up the temporary uploaded file if it still exists
+    try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch (e) {}
+
+    res.status(500).json({
+      error: 'Restore failed, the original database has been restored. ' + err.message
+    });
   }
 });
 
