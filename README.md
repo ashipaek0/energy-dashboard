@@ -3,8 +3,8 @@
 A self‑hosted, real‑time energy monitoring dashboard that integrates with **Home Assistant** and **MQTT**. Designed for public displays – no login required for viewing, while settings are password‑protected.
 
 <img width="1491" height="883" alt="Screenshot From 2026-05-02 14-55-31" src="https://github.com/user-attachments/assets/0511a0ba-f08c-4f72-918a-59945d3ee456" />
-<img width="1460" height="703" alt="Screenshot From 2026-05-02 14-57-02" src="https://github.com/user-attachments/assets/35f69b77-0695-48d4-b1d8-9cb9481990d7" />
 <img width="1460" height="803" alt="Screenshot From 2026-05-02 14-56-37" src="https://github.com/user-attachments/assets/d0599cd5-bfd0-45e0-89e0-d8e291e31a0b" />
+<img width="1460" height="703" alt="Screenshot From 2026-05-02 14-57-02" src="https://github.com/user-attachments/assets/35f69b77-0695-48d4-b1d8-9cb9481990d7" />
 <img width="1506" height="956" alt="Screenshot From 2026-05-02 15-04-10" src="https://github.com/user-attachments/assets/0fdc6430-fbcf-438d-9074-f466fe92b363" />
 <img width="1506" height="956" alt="Screenshot From 2026-05-02 15-04-41" src="https://github.com/user-attachments/assets/6498c54d-119e-4754-a2d1-2f672d1624d1" />
 <img width="1506" height="956" alt="Screenshot From 2026-05-02 15-04-23" src="https://github.com/user-attachments/assets/655d143e-f1c2-4bd5-8ff2-39333b9e0f16" />
