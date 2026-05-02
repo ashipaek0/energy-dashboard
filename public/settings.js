@@ -38,7 +38,7 @@ async function fetchEntities() {
   }
   showStatus(saveStatus, 'Fetching entities...', 'info');
   try {
-    const res = await fetch(`/api/ha/entities?url=${encodeURIComponent(haUrl)}&token=${encodeURIComponent(haToken)}`);
+    const res = await fetch(`/api/ha/entities`);
     if (!res.ok) throw new Error('Failed to fetch');
     const entities = await res.json();
     const selects = form.querySelectorAll('select');
