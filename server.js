@@ -18,7 +18,7 @@ let settingsPassword = process.env.SETTINGS_PASSWORD;
 if (!settingsPassword) {
   settingsPassword = crypto.randomBytes(8).toString('hex');
   console.warn('⚠️  WARNING: No SETTINGS_PASSWORD provided in environment.');
-  console.warn(`🔒  Using randomly generated password: ${settingsPassword}`);
+  console.warn('🔒  A random admin password was generated for this runtime. Set SETTINGS_PASSWORD in the environment to a strong value.');
 }
 
 const authMiddleware = basicAuth({
