@@ -7,17 +7,56 @@ const basicAuth = require('express-basic-auth');
 const mqtt = require('mqtt');
 const multer = require('multer');
 const fs = require('fs');
+const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const settingsPassword = process.env.SETTINGS_PASSWORD || 'admin';
+// ──────────────────────────── SECURITY FIX: No more "admin" fallback ────────
+let settingsPassword = process.env.SETTINGS_PASSWORD;
+if (!settingsPassword) {
+  settingsPassword = crypto.randomBytes(8).toString('hex');
+  console.warn('⚠️  WARNING: No SETTINGS_PASSWORD provided in environment.');
+  console.warn('🔒  A random admin password was generated for this runtime. Set SETTINGS_PASSWORD in the environment to a strong value.');
+}
+
 const authMiddleware = basicAuth({
   users: { 'admin': settingsPassword },
   challenge: true,
   realm: 'Energy Dashboard Settings'
 });
 
+// ──────────────────────────── Rate limiter for ALL authenticated routes ─────
+const authLimiter = rateLimit({
+  windowMs: 60 * 1000,   // 1 minute
+  max: 10,               // 10 attempts per window per IP
+  message: { error: 'Too many requests, please try again later' }
+});
+
+// Apply to every route that requires authentication
+app.use('/settings', authLimiter);
+app.use('/api/settings', authLimiter);
+app.use('/api/backup', authLimiter);
+app.use('/api/restore', authLimiter);
+app.use('/api/test-mqtt', authLimiter);
+app.use('/api/test-mqtt-topic', authLimiter);
+app.use('/api/test-forecast', authLimiter);
+app.use('/api/ha/entities', authLimiter);
+
+// ──────────────────────────── CSRF mitigation middleware ───────────────────
+const csrfProtection = (req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') {
+    if (!req.headers['x-requested-with'] || req.headers['x-requested-with'] !== 'XMLHttpRequest') {
+      return res.status(403).json({ error: 'CSRF protection: Missing X-Requested-With header' });
+    }
+  }
+  next();
+};
+
+app.use('/api', csrfProtection);
+
+// ── File upload config unchanged ──────────────────────────────────────────
 const upload = multer({
   dest: '/tmp/',
   fileFilter: (req, file, cb) => {
@@ -295,7 +334,6 @@ setInterval(() => {
   }
 }, 60000);
 
-// ─── HELPER: Integrate solar power from history for a specific local date (full day, past) ───
 function computeSolarForDate(dateStr) {
   const startOfDay = new Date(dateStr + 'T00:00:00');
   const endOfDay = new Date(dateStr + 'T23:59:59');
@@ -324,12 +362,11 @@ function computeSolarForDate(dateStr) {
   return totalKwh;
 }
 
-// ─── Today’s solar: from midnight to NOW ───
 function computeTodaySolar() {
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
   const startUnix = Math.floor(todayStart.getTime() / 1000);
-  const endUnix = Math.floor(now.getTime() / 1000);   // stop at current time, not end of day!
+  const endUnix = Math.floor(now.getTime() / 1000);
 
   const rows = db.prepare(
     'SELECT timestamp, solar FROM history WHERE timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC'
@@ -353,7 +390,7 @@ function computeTodaySolar() {
   return totalKwh;
 }
 
-// --- Public API ---
+// --- Public API (no auth) ---
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
@@ -405,7 +442,9 @@ app.get('/api/current', async (req, res) => {
 });
 
 app.get('/api/history', async (req, res) => {
-  const days = parseInt(req.query.days) || 1;
+  // Cap to a maximum of 7 days to prevent memory exhaustion
+  const requestedDays = parseInt(req.query.days) || 1;
+  const days = Math.min(requestedDays, 7);
   const now = Math.floor(Date.now() / 1000);
   const since = now - (days * 24 * 3600);
   try {
@@ -424,7 +463,9 @@ app.get('/api/history', async (req, res) => {
 });
 
 app.get('/api/daily', async (req, res) => {
-  const days = parseInt(req.query.days) || 30;
+  // Cap to a maximum of 365 days
+  const requestedDays = parseInt(req.query.days) || 30;
+  const days = Math.min(requestedDays, 365);
   const now = Math.floor(Date.now() / 1000);
   const since = now - (days * 24 * 3600);
   try {
@@ -579,7 +620,6 @@ app.get('/api/grid/hours', async (req, res) => {
   } catch (err) { console.error('[Grid Hours] Error:', err); res.status(500).json({ error: err.message }); }
 });
 
-// ─── TIMELINE ENDPOINT (supports period=24h) ───
 app.get('/api/grid/timeline', async (req, res) => {
   try {
     const entity = getConfig('grid_status_entity');
@@ -680,7 +720,6 @@ app.get('/api/debug/timezone', async (req, res) => {
   });
 });
 
-// ─── SAVINGS ROUTE – now uses power integration for week & month ───
 app.get('/api/savings', async (req, res) => {
   try {
     const rateRow = db.prepare('SELECT value FROM config WHERE key = ?').get('savings_rate');
@@ -690,7 +729,6 @@ app.get('/api/savings', async (req, res) => {
     const todaySolar = computeTodaySolar();
     const todaySavings = todaySolar * rate;
 
-    // Week: Monday to yesterday + today
     function getWeekSolar() {
       const now = new Date();
       const dayOfWeek = now.getDay();
@@ -715,7 +753,6 @@ app.get('/api/savings', async (req, res) => {
       return total;
     }
 
-    // Month: 1st to yesterday + today
     function getMonthSolar() {
       const now = new Date();
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -741,7 +778,6 @@ app.get('/api/savings', async (req, res) => {
     const monthSolar = getMonthSolar();
     const monthSavings = monthSolar * rate;
 
-    // All-time (unchanged, still uses daily_solar max)
     let allTimeSavings;
     const overrideValStr = getConfig('all_time_pv_savings_override');
     if (overrideValStr && !isNaN(parseFloat(overrideValStr))) {
@@ -998,6 +1034,7 @@ app.get('/api/solar-forecast', async (req, res) => {
   }
 });
 
+// ── Settings API (protected) ──
 app.get('/api/test-forecast', authMiddleware, async (req, res) => {
   try {
     const latStr = getConfig('solar_latitude');
@@ -1100,7 +1137,84 @@ app.get('/api/test-forecast', authMiddleware, async (req, res) => {
   } catch (err) { console.error('Test forecast error:', err); res.status(500).json({ error: err.message }); }
 });
 
-// --- Backup & Restore (protected) ---
+// ─── SSRF FIX: No longer accepts query URL/token ──────────────────────────
+app.get('/api/ha/entities', authMiddleware, async (req, res) => {
+  const haUrl = getConfig('ha_url');
+  const haToken = getConfig('ha_token');
+  if (!haUrl || !haToken) return res.status(400).json({ error: 'HA not configured' });
+  try {
+    const response = await fetch(`${haUrl}/api/states`, {
+      headers: { 'Authorization': `Bearer ${haToken}` }
+    });
+    if (!response.ok) throw new Error(`HA error ${response.status}`);
+    const data = await response.json();
+    const sensors = data.filter(e => e.entity_id.startsWith('sensor.') || e.entity_id.startsWith('binary_sensor.')).map(e => e.entity_id);
+    res.json(sensors);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── MQTT Test routes – SSRF FIX: no longer accept query overrides ──────
+app.get('/api/test-mqtt', authMiddleware, async (req, res) => {
+  const brokerUrl = getConfig('mqtt_broker_url');
+  if (!brokerUrl) return res.status(400).json({ error: 'MQTT broker URL not configured' });
+  const options = {};
+  const username = getConfig('mqtt_username');
+  const password = getConfig('mqtt_password');
+  if (username) options.username = username;
+  if (password) options.password = password;
+  const testClient = mqtt.connect(brokerUrl, options);
+  let responded = false;
+  const timeout = setTimeout(() => {
+    if (!responded) { testClient.end(); res.status(500).json({ error: 'Connection timeout' }); }
+  }, 5000);
+  testClient.on('connect', () => {
+    clearTimeout(timeout);
+    testClient.end();
+    if (!responded) { responded = true; res.json({ success: true, message: 'Connected to MQTT broker' }); }
+  });
+  testClient.on('error', (err) => {
+    clearTimeout(timeout);
+    testClient.end();
+    if (!responded) { responded = true; res.status(500).json({ error: err.message }); }
+  });
+});
+
+app.get('/api/test-mqtt-topic', authMiddleware, async (req, res) => {
+  const brokerUrl = getConfig('mqtt_broker_url');
+  if (!brokerUrl) return res.status(400).json({ error: 'MQTT broker URL not configured' });
+  const topic = req.query.topic;  // topic is still passed, but broker is fixed
+  if (!topic) return res.status(400).json({ error: 'Topic required' });
+  const options = {};
+  const username = getConfig('mqtt_username');
+  const password = getConfig('mqtt_password');
+  if (username) options.username = username;
+  if (password) options.password = password;
+  const testClient = mqtt.connect(brokerUrl, options);
+  let responded = false;
+  const timeout = setTimeout(() => {
+    if (!responded) { testClient.end(); res.status(500).json({ error: 'No message received within 5 seconds' }); }
+  }, 5000);
+  testClient.on('connect', () => { testClient.subscribe(topic); });
+  testClient.on('message', (recTopic, message) => {
+    if (recTopic === topic) {
+      clearTimeout(timeout);
+      testClient.end();
+      if (!responded) {
+        responded = true;
+        const val = parseFloat(message.toString());
+        if (!isNaN(val)) { res.json({ success: true, value: val }); }
+        else { res.json({ success: true, value: null, raw: message.toString() }); }
+      }
+    }
+  });
+  testClient.on('error', (err) => {
+    clearTimeout(timeout);
+    testClient.end();
+    if (!responded) { responded = true; res.status(500).json({ error: err.message }); }
+  });
+});
+
+// --- Backup & Restore (protected, CSRF mitigated, with safe rollback) ---
 app.get('/api/backup', authMiddleware, (req, res) => {
   try {
     if (db) db.close();
@@ -1113,29 +1227,80 @@ app.get('/api/backup', authMiddleware, (req, res) => {
 
 app.post('/api/restore', authMiddleware, upload.single('dbfile'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-  const tempPath = req.file.path;
+  const uploadRoot = path.resolve(__dirname, 'uploads');
+  const tempPath = path.resolve(req.file.path);
+  if (!(tempPath === uploadRoot || tempPath.startsWith(uploadRoot + path.sep))) {
+    return res.status(400).json({ error: 'Invalid upload path' });
+  }
+  let tempStat;
   try {
-    const testDb = new Database(tempPath);
+    tempStat = fs.statSync(tempPath);
+  } catch (e) {
+    return res.status(400).json({ error: 'Uploaded file not found' });
+  }
+  if (!tempStat.isFile()) {
+    return res.status(400).json({ error: 'Invalid uploaded file' });
+  }
+  const backupPath = DB_PATH + '.bak';
+  const uploadRoot = path.resolve(path.dirname(tempPath));
+  const resolvedTempPath = path.resolve(tempPath);
+  if (!(resolvedTempPath === uploadRoot || resolvedTempPath.startsWith(uploadRoot + path.sep))) {
+    return res.status(400).json({ error: 'Invalid uploaded file path' });
+  }
+
+  try {
+    // Pre‑restore backup
+    if (fs.existsSync(DB_PATH)) {
+      fs.copyFileSync(DB_PATH, backupPath);
+    }
+
+    // Quick sanity check
+    const testDb = new Database(resolvedTempPath);
     testDb.prepare('SELECT 1').get();
     testDb.close();
-    
+
+    // Apply the new database
     if (db) db.close();
     if (mqttClient) { mqttClient.end(); mqttClient = null; }
-    
-    fs.copyFileSync(tempPath, DB_PATH);
+
+    fs.copyFileSync(resolvedTempPath, DB_PATH);
     initializeDatabase();
     await setupMqtt();
-    fs.unlinkSync(tempPath);
-    
+
+    // Clean up
+    fs.unlinkSync(resolvedTempPath);
+    fs.unlinkSync(backupPath);
+
     res.json({ success: true, message: 'Database restored successfully' });
+
   } catch (err) {
-    try { fs.unlinkSync(tempPath); } catch (e) {}
-    try { initializeDatabase(); } catch (e) {}
-    res.status(500).json({ error: 'Invalid database file: ' + err.message });
+    console.error('Restore error:', err.message);
+
+    // Rollback to original database if possible
+    try {
+      if (fs.existsSync(backupPath)) {
+        if (db) db.close();
+        if (mqttClient) { mqttClient.end(); mqttClient = null; }
+
+        fs.copyFileSync(backupPath, DB_PATH);
+        fs.unlinkSync(backupPath);
+        initializeDatabase();
+        await setupMqtt();
+      }
+    } catch (rollbackErr) {
+      console.error('Critical: rollback failed!', rollbackErr.message);
+    }
+
+    // Clean up the temporary uploaded file if it still exists
+    try { if (fs.existsSync(resolvedTempPath)) fs.unlinkSync(resolvedTempPath); } catch (e) {}
+
+    res.status(500).json({
+      error: 'Restore failed, the original database has been restored. ' + err.message
+    });
   }
 });
 
-// --- Settings API (protected) ---
+// ── Settings (protected) ──────────────────────────────────────────────────
 app.use('/api/settings', authMiddleware);
 
 app.get('/api/settings', async (req, res) => {
@@ -1166,87 +1331,6 @@ app.post('/api/settings', async (req, res) => {
     }
     res.json({ success: true });
   } catch (err) { console.error('[Settings] Save error:', err); res.status(500).json({ error: err.message }); }
-});
-
-app.get('/api/ha/entities', authMiddleware, async (req, res) => {
-  let haUrl = req.query.url;
-  let haToken = req.query.token;
-  if (!haUrl || !haToken) {
-    haUrl = getConfig('ha_url');
-    haToken = getConfig('ha_token');
-  }
-  if (!haUrl || !haToken) return res.status(400).json({ error: 'HA not configured' });
-  try {
-    const response = await fetch(`${haUrl}/api/states`, {
-      headers: { 'Authorization': `Bearer ${haToken}` }
-    });
-    if (!response.ok) throw new Error(`HA error ${response.status}`);
-    const data = await response.json();
-    const sensors = data.filter(e => e.entity_id.startsWith('sensor.') || e.entity_id.startsWith('binary_sensor.')).map(e => e.entity_id);
-    res.json(sensors);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/api/test-mqtt', authMiddleware, async (req, res) => {
-  let brokerUrl = req.query.broker;
-  if (!brokerUrl) brokerUrl = getConfig('mqtt_broker_url');
-  if (!brokerUrl) return res.status(400).json({ error: 'MQTT broker URL not configured' });
-  const options = {};
-  const username = req.query.username || getConfig('mqtt_username');
-  const password = req.query.password || getConfig('mqtt_password');
-  if (username) options.username = username;
-  if (password) options.password = password;
-  const testClient = mqtt.connect(brokerUrl, options);
-  let responded = false;
-  const timeout = setTimeout(() => {
-    if (!responded) { testClient.end(); res.status(500).json({ error: 'Connection timeout' }); }
-  }, 5000);
-  testClient.on('connect', () => {
-    clearTimeout(timeout);
-    testClient.end();
-    if (!responded) { responded = true; res.json({ success: true, message: 'Connected to MQTT broker' }); }
-  });
-  testClient.on('error', (err) => {
-    clearTimeout(timeout);
-    testClient.end();
-    if (!responded) { responded = true; res.status(500).json({ error: err.message }); }
-  });
-});
-
-app.get('/api/test-mqtt-topic', authMiddleware, async (req, res) => {
-  let brokerUrl = req.query.broker;
-  if (!brokerUrl) brokerUrl = getConfig('mqtt_broker_url');
-  if (!brokerUrl) return res.status(400).json({ error: 'MQTT broker URL not configured' });
-  const topic = req.query.topic;
-  if (!topic) return res.status(400).json({ error: 'Topic required' });
-  const options = {};
-  const username = req.query.username || getConfig('mqtt_username');
-  const password = req.query.password || getConfig('mqtt_password');
-  if (username) options.username = username;
-  if (password) options.password = password;
-  const testClient = mqtt.connect(brokerUrl, options);
-  let responded = false;
-  const timeout = setTimeout(() => {
-    if (!responded) { testClient.end(); res.status(500).json({ error: 'No message received within 5 seconds' }); }
-  }, 5000);
-  testClient.on('connect', () => { testClient.subscribe(topic); });
-  testClient.on('message', (recTopic, message) => {
-    if (recTopic === topic) {
-      clearTimeout(timeout);
-      testClient.end();
-      if (!responded) {
-        responded = true;
-        const val = parseFloat(message.toString());
-        if (!isNaN(val)) { res.json({ success: true, value: val }); }
-        else { res.json({ success: true, value: null, raw: message.toString() }); }
-      }
-    }
-  });
-  testClient.on('error', (err) => {
-    clearTimeout(timeout);
-    testClient.end();
-    if (!responded) { responded = true; res.status(500).json({ error: err.message }); }
-  });
 });
 
 app.get('/settings', authMiddleware, (req, res) => {

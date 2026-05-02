@@ -161,12 +161,12 @@ async function updateCurrent() {
     document.getElementById('flow-solar').textContent = currentSolarWatts + ' W';
     document.getElementById('flow-battery-soc').textContent = Math.round(battSoc) + '%';
 
-    // ─── XSS-SAFE BATTERY POWER ───
+    // XSS‑safe battery power
     const battNet = battCharge - battDischarge;
     const battSign = battNet >= 0 ? '↑' : '↓';
     const battColor = battNet >= 0 ? 'var(--battery)' : '#f59e0b';
     const battEl = document.getElementById('flow-battery-power');
-    battEl.innerHTML = '';   // clear
+    battEl.innerHTML = '';
     const battSpan = document.createElement('span');
     battSpan.style.color = battColor;
     battSpan.textContent = `${battSign} ${Math.abs(battNet)} W`;
@@ -174,12 +174,12 @@ async function updateCurrent() {
 
     document.getElementById('flow-home').textContent = consumption + ' W';
 
-    // ─── XSS-SAFE GRID POWER ───
+    // XSS‑safe grid power
     const gridNet = gridImport - gridExport;
     const gridDir = gridNet >= 0 ? 'Import' : 'Export';
     const gridColor = gridNet >= 0 ? 'var(--grid)' : '#3b82f6';
     const gridEl = document.getElementById('flow-grid');
-    gridEl.innerHTML = '';   // clear
+    gridEl.innerHTML = '';
     const gridSpan = document.createElement('span');
     gridSpan.style.color = gridColor;
     gridSpan.textContent = Math.abs(gridNet) + ' W';

@@ -114,6 +114,21 @@
       display: none;
     }
   </style>
+  <!-- CSRF protection: add X-Requested-With header to all non-GET fetch requests -->
+  <script>
+    const originalFetch = window.fetch;
+    window.fetch = function(url, options = {}) {
+      if (options.method && options.method.toUpperCase() !== 'GET') {
+        options.headers = options.headers || {};
+        if (options.headers instanceof Headers) {
+          options.headers.set('X-Requested-With', 'XMLHttpRequest');
+        } else {
+          options.headers['X-Requested-With'] = 'XMLHttpRequest';
+        }
+      }
+      return originalFetch.call(this, url, options);
+    };
+  </script>
 </head>
 <body>
 <div class="container">
