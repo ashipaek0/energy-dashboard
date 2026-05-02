@@ -161,17 +161,29 @@ async function updateCurrent() {
     document.getElementById('flow-solar').textContent = currentSolarWatts + ' W';
     document.getElementById('flow-battery-soc').textContent = Math.round(battSoc) + '%';
 
+    // ─── XSS-SAFE BATTERY POWER ───
     const battNet = battCharge - battDischarge;
     const battSign = battNet >= 0 ? '↑' : '↓';
     const battColor = battNet >= 0 ? 'var(--battery)' : '#f59e0b';
-    document.getElementById('flow-battery-power').innerHTML = `<span style="color:${battColor}">${battSign} ${Math.abs(battNet)} W</span>`;
+    const battEl = document.getElementById('flow-battery-power');
+    battEl.innerHTML = '';   // clear
+    const battSpan = document.createElement('span');
+    battSpan.style.color = battColor;
+    battSpan.textContent = `${battSign} ${Math.abs(battNet)} W`;
+    battEl.appendChild(battSpan);
 
     document.getElementById('flow-home').textContent = consumption + ' W';
 
+    // ─── XSS-SAFE GRID POWER ───
     const gridNet = gridImport - gridExport;
     const gridDir = gridNet >= 0 ? 'Import' : 'Export';
     const gridColor = gridNet >= 0 ? 'var(--grid)' : '#3b82f6';
-    document.getElementById('flow-grid').innerHTML = `<span style="color:${gridColor}">${Math.abs(gridNet)} W</span>`;
+    const gridEl = document.getElementById('flow-grid');
+    gridEl.innerHTML = '';   // clear
+    const gridSpan = document.createElement('span');
+    gridSpan.style.color = gridColor;
+    gridSpan.textContent = Math.abs(gridNet) + ' W';
+    gridEl.appendChild(gridSpan);
     document.getElementById('flow-grid-direction').textContent = gridDir;
 
     updateFlowArrows(currentSolarWatts, consumption, battCharge, battDischarge, gridImport, gridExport);
@@ -484,7 +496,6 @@ async function updateGridStatus() {
       document.getElementById(`grid-hours-${p}`).textContent = formatHoursToHM(hData.hours);
     }
 
-    // Keep date current every refresh
     updateGridDate();
   } catch (e) { console.error('Grid error:', e); }
 }
@@ -496,7 +507,7 @@ async function updateGridTimeline() {
     const data = await res.json();
     if (!data.configured || !data.segments || data.segments.length === 0) return;
 
-    updateGridDate();   // also update date when timeline rebuilt
+    updateGridDate();
     renderTimelineBar(data.segments, data.windowStart, data.windowEnd);
   } catch (e) { console.error('Grid timeline error:', e); }
 }
@@ -509,13 +520,11 @@ function renderTimelineBar(segments, windowStart, windowEnd) {
   const totalMs = windowEnd - windowStart;
   if (totalMs <= 0) return;
 
-  // ── Tooltip element (shared) ──
   const tooltip = document.createElement('div');
   tooltip.className = 'tl-tooltip';
   tooltip.style.display = 'none';
   container.appendChild(tooltip);
 
-  // ── Flex bar ──
   const bar = document.createElement('div');
   bar.className = 'tl-bar';
 
@@ -536,7 +545,6 @@ function renderTimelineBar(segments, windowStart, windowEnd) {
       el.textContent = seg.state === 1 ? 'ON' : 'OFF';
     }
 
-    // ─── Custom hover tooltip ───
     const stateLabel = seg.state === 1 ? 'ON' : 'OFF';
     const startDate = new Date(seg.start).toLocaleString();
     const endDate   = segEnd < windowEnd
@@ -548,11 +556,10 @@ function renderTimelineBar(segments, windowStart, windowEnd) {
       tooltip.style.display = 'block';
       tooltip.textContent = tooltipText;
 
-      // Position the tooltip above the segment, centred horizontally
       const barRect = bar.getBoundingClientRect();
       const elRect = el.getBoundingClientRect();
       const left = elRect.left - barRect.left + elRect.width / 2;
-      const top = -tooltip.offsetHeight - 8;   // 8px gap above bar
+      const top = -tooltip.offsetHeight - 8;
 
       tooltip.style.left = left + 'px';
       tooltip.style.top = top + 'px';
@@ -567,7 +574,6 @@ function renderTimelineBar(segments, windowStart, windowEnd) {
 
   container.appendChild(bar);
 
-  // ── Time axis ticks every 4h ──
   const labelRow = document.createElement('div');
   labelRow.className = 'tl-labels';
 
