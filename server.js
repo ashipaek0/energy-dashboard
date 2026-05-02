@@ -27,20 +27,25 @@ const authMiddleware = basicAuth({
   realm: 'Energy Dashboard Settings'
 });
 
-// ──────────────────────────── Rate limiter for brute‑force protection ──────
-const settingsLimiter = rateLimit({
+// ──────────────────────────── Rate limiter for ALL authenticated routes ─────
+const authLimiter = rateLimit({
   windowMs: 60 * 1000,   // 1 minute
   max: 10,               // 10 attempts per window per IP
   message: { error: 'Too many requests, please try again later' }
 });
 
-// Apply to all settings‑related routes
-app.use('/settings', settingsLimiter);
-app.use('/api/settings', settingsLimiter);
+// Apply to every route that requires authentication
+app.use('/settings', authLimiter);
+app.use('/api/settings', authLimiter);
+app.use('/api/backup', authLimiter);
+app.use('/api/restore', authLimiter);
+app.use('/api/test-mqtt', authLimiter);
+app.use('/api/test-mqtt-topic', authLimiter);
+app.use('/api/test-forecast', authLimiter);
+app.use('/api/ha/entities', authLimiter);
 
 // ──────────────────────────── CSRF mitigation middleware ───────────────────
 const csrfProtection = (req, res, next) => {
-  // Only apply to state‑changing methods
   if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') {
     if (!req.headers['x-requested-with'] || req.headers['x-requested-with'] !== 'XMLHttpRequest') {
       return res.status(403).json({ error: 'CSRF protection: Missing X-Requested-With header' });
@@ -437,7 +442,9 @@ app.get('/api/current', async (req, res) => {
 });
 
 app.get('/api/history', async (req, res) => {
-  const days = parseInt(req.query.days) || 1;
+  // Cap to a maximum of 7 days to prevent memory exhaustion
+  const requestedDays = parseInt(req.query.days) || 1;
+  const days = Math.min(requestedDays, 7);
   const now = Math.floor(Date.now() / 1000);
   const since = now - (days * 24 * 3600);
   try {
@@ -456,7 +463,9 @@ app.get('/api/history', async (req, res) => {
 });
 
 app.get('/api/daily', async (req, res) => {
-  const days = parseInt(req.query.days) || 30;
+  // Cap to a maximum of 365 days
+  const requestedDays = parseInt(req.query.days) || 30;
+  const days = Math.min(requestedDays, 365);
   const now = Math.floor(Date.now() / 1000);
   const since = now - (days * 24 * 3600);
   try {
@@ -1144,6 +1153,67 @@ app.get('/api/ha/entities', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── MQTT Test routes – SSRF FIX: no longer accept query overrides ──────
+app.get('/api/test-mqtt', authMiddleware, async (req, res) => {
+  const brokerUrl = getConfig('mqtt_broker_url');
+  if (!brokerUrl) return res.status(400).json({ error: 'MQTT broker URL not configured' });
+  const options = {};
+  const username = getConfig('mqtt_username');
+  const password = getConfig('mqtt_password');
+  if (username) options.username = username;
+  if (password) options.password = password;
+  const testClient = mqtt.connect(brokerUrl, options);
+  let responded = false;
+  const timeout = setTimeout(() => {
+    if (!responded) { testClient.end(); res.status(500).json({ error: 'Connection timeout' }); }
+  }, 5000);
+  testClient.on('connect', () => {
+    clearTimeout(timeout);
+    testClient.end();
+    if (!responded) { responded = true; res.json({ success: true, message: 'Connected to MQTT broker' }); }
+  });
+  testClient.on('error', (err) => {
+    clearTimeout(timeout);
+    testClient.end();
+    if (!responded) { responded = true; res.status(500).json({ error: err.message }); }
+  });
+});
+
+app.get('/api/test-mqtt-topic', authMiddleware, async (req, res) => {
+  const brokerUrl = getConfig('mqtt_broker_url');
+  if (!brokerUrl) return res.status(400).json({ error: 'MQTT broker URL not configured' });
+  const topic = req.query.topic;  // topic is still passed, but broker is fixed
+  if (!topic) return res.status(400).json({ error: 'Topic required' });
+  const options = {};
+  const username = getConfig('mqtt_username');
+  const password = getConfig('mqtt_password');
+  if (username) options.username = username;
+  if (password) options.password = password;
+  const testClient = mqtt.connect(brokerUrl, options);
+  let responded = false;
+  const timeout = setTimeout(() => {
+    if (!responded) { testClient.end(); res.status(500).json({ error: 'No message received within 5 seconds' }); }
+  }, 5000);
+  testClient.on('connect', () => { testClient.subscribe(topic); });
+  testClient.on('message', (recTopic, message) => {
+    if (recTopic === topic) {
+      clearTimeout(timeout);
+      testClient.end();
+      if (!responded) {
+        responded = true;
+        const val = parseFloat(message.toString());
+        if (!isNaN(val)) { res.json({ success: true, value: val }); }
+        else { res.json({ success: true, value: null, raw: message.toString() }); }
+      }
+    }
+  });
+  testClient.on('error', (err) => {
+    clearTimeout(timeout);
+    testClient.end();
+    if (!responded) { responded = true; res.status(500).json({ error: err.message }); }
+  });
+});
+
 // ── Backup & Restore (protected, CSRF mitigated via global middleware) ────
 app.get('/api/backup', authMiddleware, (req, res) => {
   try {
@@ -1210,68 +1280,6 @@ app.post('/api/settings', async (req, res) => {
     }
     res.json({ success: true });
   } catch (err) { console.error('[Settings] Save error:', err); res.status(500).json({ error: err.message }); }
-});
-
-app.get('/api/test-mqtt', authMiddleware, async (req, res) => {
-  let brokerUrl = req.query.broker;
-  if (!brokerUrl) brokerUrl = getConfig('mqtt_broker_url');
-  if (!brokerUrl) return res.status(400).json({ error: 'MQTT broker URL not configured' });
-  const options = {};
-  const username = req.query.username || getConfig('mqtt_username');
-  const password = req.query.password || getConfig('mqtt_password');
-  if (username) options.username = username;
-  if (password) options.password = password;
-  const testClient = mqtt.connect(brokerUrl, options);
-  let responded = false;
-  const timeout = setTimeout(() => {
-    if (!responded) { testClient.end(); res.status(500).json({ error: 'Connection timeout' }); }
-  }, 5000);
-  testClient.on('connect', () => {
-    clearTimeout(timeout);
-    testClient.end();
-    if (!responded) { responded = true; res.json({ success: true, message: 'Connected to MQTT broker' }); }
-  });
-  testClient.on('error', (err) => {
-    clearTimeout(timeout);
-    testClient.end();
-    if (!responded) { responded = true; res.status(500).json({ error: err.message }); }
-  });
-});
-
-app.get('/api/test-mqtt-topic', authMiddleware, async (req, res) => {
-  let brokerUrl = req.query.broker;
-  if (!brokerUrl) brokerUrl = getConfig('mqtt_broker_url');
-  if (!brokerUrl) return res.status(400).json({ error: 'MQTT broker URL not configured' });
-  const topic = req.query.topic;
-  if (!topic) return res.status(400).json({ error: 'Topic required' });
-  const options = {};
-  const username = req.query.username || getConfig('mqtt_username');
-  const password = req.query.password || getConfig('mqtt_password');
-  if (username) options.username = username;
-  if (password) options.password = password;
-  const testClient = mqtt.connect(brokerUrl, options);
-  let responded = false;
-  const timeout = setTimeout(() => {
-    if (!responded) { testClient.end(); res.status(500).json({ error: 'No message received within 5 seconds' }); }
-  }, 5000);
-  testClient.on('connect', () => { testClient.subscribe(topic); });
-  testClient.on('message', (recTopic, message) => {
-    if (recTopic === topic) {
-      clearTimeout(timeout);
-      testClient.end();
-      if (!responded) {
-        responded = true;
-        const val = parseFloat(message.toString());
-        if (!isNaN(val)) { res.json({ success: true, value: val }); }
-        else { res.json({ success: true, value: null, raw: message.toString() }); }
-      }
-    }
-  });
-  testClient.on('error', (err) => {
-    clearTimeout(timeout);
-    testClient.end();
-    if (!responded) { responded = true; res.status(500).json({ error: err.message }); }
-  });
 });
 
 app.get('/settings', authMiddleware, (req, res) => {

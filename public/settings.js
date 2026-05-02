@@ -30,15 +30,9 @@ async function loadSettings() {
 }
 
 async function fetchEntities() {
-  const haUrl = form.querySelector('[name="ha_url"]').value.trim();
-  const haToken = form.querySelector('[name="ha_token"]').value.trim();
-  if (!haUrl || !haToken) {
-    showStatus(saveStatus, 'Please enter HA URL and Token first', 'error');
-    return;
-  }
   showStatus(saveStatus, 'Fetching entities...', 'info');
   try {
-    const res = await fetch(`/api/ha/entities`);
+    const res = await fetch('/api/ha/entities');
     if (!res.ok) throw new Error('Failed to fetch');
     const entities = await res.json();
     const selects = form.querySelectorAll('select');
@@ -61,29 +55,17 @@ async function fetchEntities() {
 
 document.getElementById('fetch-entities').addEventListener('click', fetchEntities);
 
-// MQTT broker test
+// MQTT broker test – now uses stored configuration
 document.getElementById('test-mqtt').addEventListener('click', async function() {
   const btn = this;
   const statusEl = document.getElementById('mqtt-test-status');
-  const broker = form.querySelector('[name="mqtt_broker_url"]').value.trim();
-  const username = form.querySelector('[name="mqtt_username"]').value.trim();
-  const password = form.querySelector('[name="mqtt_password"]').value.trim();
-  
-  if (!broker) {
-    showStatus(statusEl, 'Please enter Broker URL', 'error');
-    return;
-  }
   
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Testing...';
-  showStatus(statusEl, 'Testing connection...', 'info');
-  
-  const params = new URLSearchParams({ broker });
-  if (username) params.append('username', username);
-  if (password) params.append('password', password);
+  showStatus(statusEl, 'Testing connection (using saved settings)...', 'info');
   
   try {
-    const res = await fetch(`/api/test-mqtt?${params.toString()}`);
+    const res = await fetch('/api/test-mqtt');
     const data = await res.json();
     if (res.ok) {
       showStatus(statusEl, '✅ Connected to MQTT broker!', 'success');
@@ -98,19 +80,12 @@ document.getElementById('test-mqtt').addEventListener('click', async function() 
   }
 });
 
-// MQTT topic test
+// MQTT topic test – broker is from DB, but topic can still be entered
 document.getElementById('test-mqtt-topic').addEventListener('click', async function() {
   const btn = this;
   const statusEl = document.getElementById('topic-test-status');
-  const broker = form.querySelector('[name="mqtt_broker_url"]').value.trim();
-  const username = form.querySelector('[name="mqtt_username"]').value.trim();
-  const password = form.querySelector('[name="mqtt_password"]').value.trim();
   const topic = document.getElementById('test-topic').value.trim();
   
-  if (!broker) {
-    showStatus(statusEl, 'Please enter Broker URL first', 'error');
-    return;
-  }
   if (!topic) {
     showStatus(statusEl, 'Please enter a topic to test', 'error');
     return;
@@ -118,11 +93,9 @@ document.getElementById('test-mqtt-topic').addEventListener('click', async funct
   
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Testing...';
-  showStatus(statusEl, `Waiting for message on "${topic}"...`, 'info');
+  showStatus(statusEl, `Waiting for message on "${topic}" (using saved broker)...`, 'info');
   
-  const params = new URLSearchParams({ broker, topic });
-  if (username) params.append('username', username);
-  if (password) params.append('password', password);
+  const params = new URLSearchParams({ topic });
   
   try {
     const res = await fetch(`/api/test-mqtt-topic?${params.toString()}`);
@@ -144,7 +117,7 @@ document.getElementById('test-mqtt-topic').addEventListener('click', async funct
   }
 });
 
-// Test Forecast
+// Test Forecast – unchanged
 document.getElementById('test-forecast').addEventListener('click', async function() {
   const btn = this;
   const statusEl = document.getElementById('forecast-test-status');
@@ -169,7 +142,7 @@ document.getElementById('test-forecast').addEventListener('click', async functio
   }
 });
 
-// Backup & Restore
+// Backup & Restore – unchanged
 document.getElementById('backup-btn').addEventListener('click', async function() {
   const btn = this;
   btn.disabled = true;
