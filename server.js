@@ -295,12 +295,13 @@ setInterval(() => {
   }
 }, 60000);
 
-// ─── HELPER: Integrate solar power from history to get today's energy ───
-function computeTodaySolar() {
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
-  const startUnix = Math.floor(todayStart.getTime() / 1000);
-  const endUnix = Math.floor(now.getTime() / 1000);
+// ─── HELPER: Integrate solar power from history for a specific local date ───
+function computeSolarForDate(dateStr) {
+  // dateStr like '2026-05-02'
+  const startOfDay = new Date(dateStr + 'T00:00:00');
+  const endOfDay = new Date(dateStr + 'T23:59:59');
+  const startUnix = Math.floor(startOfDay.getTime() / 1000);
+  const endUnix = Math.floor(endOfDay.getTime() / 1000);
 
   const rows = db.prepare(
     'SELECT timestamp, solar FROM history WHERE timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC'
@@ -315,13 +316,21 @@ function computeTodaySolar() {
     totalKwh += avgKw * dtHours;
   }
 
+  // Last segment to end of day
   const last = rows[rows.length - 1];
   const dtLastHours = (endUnix - last.timestamp) / 3600;
-  if (dtLastHours > 0) {
+  if (dtLastHours > 0 && last.timestamp < endUnix) {
     totalKwh += (last.solar / 1000) * dtLastHours;
   }
 
   return totalKwh;
+}
+
+// ─── Today's solar (unchanged) ───
+function computeTodaySolar() {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+  return computeSolarForDate(todayStart.toLocaleDateString('en-CA'));
 }
 
 // --- Public API ---
@@ -550,7 +559,7 @@ app.get('/api/grid/hours', async (req, res) => {
   } catch (err) { console.error('[Grid Hours] Error:', err); res.status(500).json({ error: err.message }); }
 });
 
-// ─── TIMELINE ENDPOINT (now supports period=24h) ───
+// ─── TIMELINE ENDPOINT (supports period=24h) ───
 app.get('/api/grid/timeline', async (req, res) => {
   try {
     const entity = getConfig('grid_status_entity');
@@ -651,52 +660,68 @@ app.get('/api/debug/timezone', async (req, res) => {
   });
 });
 
-// ─── SAVINGS ROUTE — MONTHLY RESET FIX ───
+// ─── SAVINGS ROUTE – now uses power integration for week & month ───
 app.get('/api/savings', async (req, res) => {
   try {
     const rateRow = db.prepare('SELECT value FROM config WHERE key = ?').get('savings_rate');
     const rate = parseFloat(rateRow?.value) || 0.30;
     const currency = getConfig('savings_currency') || '€';
 
-    // TODAY’S SOLAR FROM POWER INTEGRATION
     const todaySolar = computeTodaySolar();
     const todaySavings = todaySolar * rate;
 
-    // UPDATED HELPER: use local date filtering to avoid timezone overlap
-    function getTotalSolarSince(localStartDate) {
-      // localStartDate is a string 'YYYY-MM-DD'
-      const rows = db.prepare(`
-        SELECT timestamp, daily_solar FROM history 
-        WHERE date(timestamp, 'unixepoch', 'localtime') >= ?
-          AND daily_solar IS NOT NULL
-        ORDER BY timestamp ASC
-      `).all(localStartDate);
+    // Week: Monday to yesterday + today
+    function getWeekSolar() {
+      const now = new Date();
+      const dayOfWeek = now.getDay();
+      const diff = (dayOfWeek === 0 ? 6 : dayOfWeek - 1);
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() - diff);
+      weekStart.setHours(0, 0, 0, 0);
 
-      const dailyMax = {};
-      rows.forEach(row => {
-        const date = new Date(row.timestamp * 1000).toLocaleDateString('en-CA');
-        const val = row.daily_solar;
-        if (!dailyMax[date] || val > dailyMax[date]) { dailyMax[date] = val; }
-      });
-      return Object.values(dailyMax).reduce((sum, val) => sum + val, 0);
+      let total = 0;
+      const loopDate = new Date(weekStart);
+      const todayStr = now.toLocaleDateString('en-CA');
+
+      while (loopDate.toLocaleDateString('en-CA') <= todayStr) {
+        const dateStr = loopDate.toLocaleDateString('en-CA');
+        if (dateStr === todayStr) {
+          total += computeTodaySolar();
+        } else {
+          total += computeSolarForDate(dateStr);
+        }
+        loopDate.setDate(loopDate.getDate() + 1);
+      }
+      return total;
     }
 
-    const now = new Date();
-    // Week start (Monday)
-    const dayOfWeek = now.getDay();
-    const diff = (dayOfWeek === 0 ? 6 : dayOfWeek - 1);
-    const weekStart = new Date(now); weekStart.setDate(now.getDate() - diff); weekStart.setHours(0,0,0,0);
-    const weekStartStr = weekStart.toLocaleDateString('en-CA');
-    const weekSolar = getTotalSolarSince(weekStartStr);
+    // Month: 1st to yesterday + today
+    function getMonthSolar() {
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      let total = 0;
+      const loopDate = new Date(monthStart);
+      const todayStr = now.toLocaleDateString('en-CA');
+
+      while (loopDate.toLocaleDateString('en-CA') <= todayStr) {
+        const dateStr = loopDate.toLocaleDateString('en-CA');
+        if (dateStr === todayStr) {
+          total += computeTodaySolar();
+        } else {
+          total += computeSolarForDate(dateStr);
+        }
+        loopDate.setDate(loopDate.getDate() + 1);
+      }
+      return total;
+    }
+
+    const weekSolar = getWeekSolar();
     const weekSavings = weekSolar * rate;
 
-    // Month start
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const monthStartStr = monthStart.toLocaleDateString('en-CA');
-    const monthSolar = getTotalSolarSince(monthStartStr);
+    const monthSolar = getMonthSolar();
     const monthSavings = monthSolar * rate;
 
-    // All-time (unchanged, still uses daily_solar from all time)
+    // All-time (unchanged, still uses daily_solar max)
     let allTimeSavings;
     const overrideValStr = getConfig('all_time_pv_savings_override');
     if (overrideValStr && !isNaN(parseFloat(overrideValStr))) {
