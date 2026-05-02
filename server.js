@@ -295,9 +295,8 @@ setInterval(() => {
   }
 }, 60000);
 
-// ─── HELPER: Integrate solar power from history for a specific local date ───
+// ─── HELPER: Integrate solar power from history for a specific local date (full day, past) ───
 function computeSolarForDate(dateStr) {
-  // dateStr like '2026-05-02'
   const startOfDay = new Date(dateStr + 'T00:00:00');
   const endOfDay = new Date(dateStr + 'T23:59:59');
   const startUnix = Math.floor(startOfDay.getTime() / 1000);
@@ -316,7 +315,6 @@ function computeSolarForDate(dateStr) {
     totalKwh += avgKw * dtHours;
   }
 
-  // Last segment to end of day
   const last = rows[rows.length - 1];
   const dtLastHours = (endUnix - last.timestamp) / 3600;
   if (dtLastHours > 0 && last.timestamp < endUnix) {
@@ -326,11 +324,33 @@ function computeSolarForDate(dateStr) {
   return totalKwh;
 }
 
-// ─── Today's solar (unchanged) ───
+// ─── Today’s solar: from midnight to NOW ───
 function computeTodaySolar() {
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
-  return computeSolarForDate(todayStart.toLocaleDateString('en-CA'));
+  const startUnix = Math.floor(todayStart.getTime() / 1000);
+  const endUnix = Math.floor(now.getTime() / 1000);   // stop at current time, not end of day!
+
+  const rows = db.prepare(
+    'SELECT timestamp, solar FROM history WHERE timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC'
+  ).all(startUnix, endUnix);
+
+  if (rows.length < 2) return 0;
+
+  let totalKwh = 0;
+  for (let i = 0; i < rows.length - 1; i++) {
+    const dtHours = (rows[i + 1].timestamp - rows[i].timestamp) / 3600;
+    const avgKw = (rows[i].solar + rows[i + 1].solar) / 2000;
+    totalKwh += avgKw * dtHours;
+  }
+
+  const last = rows[rows.length - 1];
+  const dtLastHours = (endUnix - last.timestamp) / 3600;
+  if (dtLastHours > 0) {
+    totalKwh += (last.solar / 1000) * dtLastHours;
+  }
+
+  return totalKwh;
 }
 
 // --- Public API ---
