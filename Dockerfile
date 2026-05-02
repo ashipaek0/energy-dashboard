@@ -1,20 +1,18 @@
-FROM node:18-slim
+FROM node:18-alpine
 
-# Install only runtime timezone data
-RUN apt-get update && apt-get install -y tzdata \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
+# Create app directory and set ownership to the 'node' user
+RUN mkdir -p /app/data && chown -R node:node /app
 WORKDIR /app
 
+# Copy package files first for better caching
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm install --production
 
-COPY . .
+# Copy the rest of the app
+COPY --chown=node:node . .
 
-RUN mkdir -p /app/data
+# Switch to non-root user
+USER node
 
 EXPOSE 3000
-
-ENV TZ=UTC
-
 CMD ["npm", "start"]
