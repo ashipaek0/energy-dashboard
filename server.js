@@ -13,12 +13,12 @@ const rateLimit = require('express-rate-limit');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ──────────────────────────── SECURITY FIX: No more "admin" fallback ────────
+// ──────────────────────────── SECURITY: No more "admin" fallback ────────
 let settingsPassword = process.env.SETTINGS_PASSWORD;
 if (!settingsPassword) {
   settingsPassword = crypto.randomBytes(8).toString('hex');
   console.warn('⚠️  WARNING: No SETTINGS_PASSWORD provided in environment.');
-  console.warn('🔒  A random admin password was generated for this runtime. Set SETTINGS_PASSWORD in the environment to a strong value.');
+  console.warn(`🔒  Using randomly generated password: ${settingsPassword}`);
 }
 
 const authMiddleware = basicAuth({
@@ -1227,26 +1227,8 @@ app.get('/api/backup', authMiddleware, (req, res) => {
 
 app.post('/api/restore', authMiddleware, upload.single('dbfile'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-  const uploadRoot = path.resolve(__dirname, 'uploads');
-  const tempPath = path.resolve(req.file.path);
-  if (!(tempPath === uploadRoot || tempPath.startsWith(uploadRoot + path.sep))) {
-    return res.status(400).json({ error: 'Invalid upload path' });
-  }
-  let tempStat;
-  try {
-    tempStat = fs.statSync(tempPath);
-  } catch (e) {
-    return res.status(400).json({ error: 'Uploaded file not found' });
-  }
-  if (!tempStat.isFile()) {
-    return res.status(400).json({ error: 'Invalid uploaded file' });
-  }
+  const tempPath = req.file.path;
   const backupPath = DB_PATH + '.bak';
-  const uploadRoot = path.resolve(path.dirname(tempPath));
-  const resolvedTempPath = path.resolve(tempPath);
-  if (!(resolvedTempPath === uploadRoot || resolvedTempPath.startsWith(uploadRoot + path.sep))) {
-    return res.status(400).json({ error: 'Invalid uploaded file path' });
-  }
 
   try {
     // Pre‑restore backup
@@ -1255,7 +1237,7 @@ app.post('/api/restore', authMiddleware, upload.single('dbfile'), async (req, re
     }
 
     // Quick sanity check
-    const testDb = new Database(resolvedTempPath);
+    const testDb = new Database(tempPath);
     testDb.prepare('SELECT 1').get();
     testDb.close();
 
@@ -1263,12 +1245,12 @@ app.post('/api/restore', authMiddleware, upload.single('dbfile'), async (req, re
     if (db) db.close();
     if (mqttClient) { mqttClient.end(); mqttClient = null; }
 
-    fs.copyFileSync(resolvedTempPath, DB_PATH);
+    fs.copyFileSync(tempPath, DB_PATH);
     initializeDatabase();
     await setupMqtt();
 
     // Clean up
-    fs.unlinkSync(resolvedTempPath);
+    fs.unlinkSync(tempPath);
     fs.unlinkSync(backupPath);
 
     res.json({ success: true, message: 'Database restored successfully' });
@@ -1292,7 +1274,7 @@ app.post('/api/restore', authMiddleware, upload.single('dbfile'), async (req, re
     }
 
     // Clean up the temporary uploaded file if it still exists
-    try { if (fs.existsSync(resolvedTempPath)) fs.unlinkSync(resolvedTempPath); } catch (e) {}
+    try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch (e) {}
 
     res.status(500).json({
       error: 'Restore failed, the original database has been restored. ' + err.message
