@@ -1,41 +1,29 @@
-name: Build and Push Docker Image
+name: Build and Push Main Image
 
 on:
   push:
-    branches: [ "main" ]
-  workflow_dispatch:
+    branches:
+      - main
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true   # opt into Node.js 24 now
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Log in to Docker Hub
-        uses: docker/login-action@v4
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels)
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/energy-dashboard
-          tags: |
-            type=raw,value=latest
-            type=sha,format=short
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v7
+      - name: Build and push latest image
+        uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: irunmole/energy-dashboard:latest
