@@ -1,0 +1,1 @@
+[{"name":"DNG-luxpower-geta","enabled":true,"profile":"luxpower-geta","transport":"luxpower-tcp","host":"10.0.0.9","port":10001,"serial_number":"","dongle_serial":"DNG001","inverter_serial":"INV9","modbus_unit_id":1,"poll_interval":5,"prefix":"","_luxpowerPhase2":true,"mappings":{"battery_soc":"input:0x0000","solar_power":"input:0x0001","stranded":"input:0x9FFF"}}]

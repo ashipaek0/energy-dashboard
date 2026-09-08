@@ -1,0 +1,1 @@
+[{"name":"Weather","enabled":true,"url":"https://api.example.com/v1/current.json","mappings":{"battery_soc":"current.temp_c","wind_speed":"current.condition","house_load":"current.humidity"}}]

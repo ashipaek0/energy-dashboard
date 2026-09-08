@@ -45,6 +45,248 @@ const { startBmsPolling, restartBmsPolling, stopBmsPolling } = require('./module
 const { startBmsWiredPolling, restartBmsWiredPolling, stopBmsWiredPolling, testBmsWiredConnection, getBmsWiredFields } = require('./modules/bmsWired');
 const { startDonglePolling, restartDonglePolling, stopDonglePolling } = require('./modules/dongle');
 const pvoutput = require('./modules/pvoutput');
+// Issue #108 (AC-1..13): dongle projections live in the pure module; the
+// remaining per-family projections are route-level pure helpers below (server
+// wave touches server.js only). All catalog routes are thin wrappers.
+const entityCatalog = require('./modules/entityCatalog');
+
+// ================= #108 catalog projections (pure) =================
+// No fs / network / DB / logger. Every function below takes parsed data and
+// returns catalog items, so the route handlers stay thin wrappers. Named to
+// mirror the entityCatalog.js API (catEntity + per-source projections) so a
+// later slice can move them into that module verbatim.
+// ===================================================================
+
+function modbusProfileEntities(profile) {
+  // AC-7: one item per registers[], id = String(r.address) — the exact handle
+  // modules/modbus.js addrToMetric[String(address)] consumes (poll filter L132,
+  // metric name L167). name = r.metric, the implicit default metric name.
+  const registers = profile && Array.isArray(profile.registers) ? profile.registers : [];
+  const entities = [];
+  for (const r of registers) {
+    if (r.address === undefined || r.address === null || String(r.address).trim() === '') continue;
+    if (r.metric === undefined) continue; // not decode-reachable without a metric
+    entities.push(entityCatalog.catEntity({
+      id: String(r.address),
+      name: r.metric,
+      label: r.label,
+      unit: r.unit,
+      scale: r.scale,
+      type: r.type,
+      kind: 'register'
+    }));
+  }
+  entities.sort((a, b) => (Number(a.id) - Number(b.id)) || String(a.id).localeCompare(String(b.id)));
+  return entities;
+}
+
+function rs232HexNum(reg) {
+  const s = String(reg).trim();
+  return /^0x/i.test(s) ? parseInt(s, 16) : parseInt(s, 10);
+}
+
+function rs232ProfileEntities(profile) {
+  // AC-8: per-family projection over an ALIAS-RESOLVED profile (the route feeds
+  // the in-memory profile, which loadRs232Profiles()/resolveAliases() already
+  // merged — infinisolar yields voltronic's commands). Decode-key contract
+  // mirrors modules/rs232.js exactly:
+  //  - query/ascii family:  decodeAsciiResponse L261 → `${cmd.name}:${idx}`
+  //  - modbus-rtu family:   pollModbusRtuDevice L496 → m.register (bare hex)
+  //  - vedirect family:     decodeVedirectFrame L293 → field.label
+  //  - solax/binary family: solax-decoder L120 → `${dataCmd.name}:${offset}`
+  if (!profile || typeof profile !== 'object') return [];
+  const protocol = profile.protocol ? String(profile.protocol).toLowerCase() : '';
+  const entities = [];
+
+  if (protocol === 'modbus-rtu') {
+    for (const m of (Array.isArray(profile.metrics) ? profile.metrics : [])) {
+      if (m.register === undefined || m.register === null || String(m.register).trim() === '') continue;
+      entities.push(entityCatalog.catEntity({
+        id: m.register,
+        name: m.name,
+        label: m.label,
+        unit: m.unit,
+        scale: m.scale,
+        type: m.type,
+        kind: 'register'
+      }));
+    }
+    entities.sort((a, b) => rs232HexNum(a.id) - rs232HexNum(b.id));
+    return entities;
+  }
+
+  if (protocol === 'vedirect-streaming') {
+    for (const f of (Array.isArray(profile.fields) ? profile.fields : [])) {
+      if (f.label === undefined || f.label === null) continue;
+      const metricName = f.metric_prefix ? `${f.metric_prefix}_${f.metric}` : f.metric;
+      entities.push(entityCatalog.catEntity({
+        id: f.label,
+        name: metricName,
+        label: f.label,
+        unit: f.unit,
+        scale: f.scale,
+        type: f.type,
+        kind: 'vedirect'
+      }));
+    }
+    entities.sort((a, b) => String(a.label).localeCompare(String(b.label)));
+    return entities;
+  }
+
+  const commands = Array.isArray(profile.commands) ? profile.commands : [];
+
+  if (profile.decoder || protocol === 'solax-aa55') {
+    // Custom binary decoder (SolaX AA55): only the DATA command (function > 5)
+    // carries metric payload — register/serial handshakes decode to nothing
+    // (solax-decoder L77-79). Fall back to the LAST command when none exceeds 5.
+    const funcVal = (cmd) => {
+      if (!cmd || cmd.function === undefined) return NaN;
+      const v = cmd.function;
+      if (typeof v === 'number') return v;
+      const s = String(v).trim();
+      return /^0x/i.test(s) ? parseInt(s, 16) : parseInt(s, 10);
+    };
+    const dataCmd = commands.find(c => Number.isFinite(funcVal(c)) && funcVal(c) > 5) || commands[commands.length - 1] || null;
+    if (dataCmd) {
+      for (const f of (Array.isArray(profile.fields) ? profile.fields : [])) {
+        if (f.offset === undefined || f.offset === null) continue;
+        entities.push(entityCatalog.catEntity({
+          id: `${dataCmd.name}:${f.offset}`,
+          name: f.metric,
+          label: f.label,
+          unit: f.unit,
+          scale: f.scale,
+          type: f.type,
+          kind: 'binary'
+        }));
+      }
+    }
+    return entities;
+  }
+
+  // Default query/response ASCII family (voltronic-qpigs, infinisolar alias,
+  // and any future ascii query profile) — fields nested per command, keyed by
+  // index. Deterministic: command order preserved, then field index order.
+  for (const cmd of commands) {
+    if (!cmd || cmd.name === undefined) continue;
+    for (const f of (Array.isArray(cmd.fields) ? cmd.fields : [])) {
+      if (f.index === undefined || f.index === null) continue;
+      entities.push(entityCatalog.catEntity({
+        id: `${cmd.name}:${f.index}`,
+        name: f.metric,
+        label: f.label,
+        unit: f.unit,
+        scale: f.scale,
+        type: f.type,
+        kind: 'ascii'
+      }));
+    }
+  }
+  return entities;
+}
+
+// 8-domain set shared with modules/ha.js fetchHAEntities filter (L147-156).
+const HA_CATALOG_DOMAINS = ['sensor', 'binary_sensor', 'switch', 'light', 'climate', 'fan', 'cover', 'input_boolean'];
+
+function haStatesToCatalog(states) {
+  // AC-10: enrich ONE /api/states fetch into catalog items (no registry, no
+  // websocket). The legacy /api/ha-device-entities (entity_id strings only)
+  // stays untouched — both endpoints remain callable.
+  const items = [];
+  if (!Array.isArray(states)) return items;
+  for (const e of states) {
+    if (!e || typeof e.entity_id !== 'string' || e.entity_id === '') continue;
+    const domain = e.entity_id.split('.')[0];
+    if (!HA_CATALOG_DOMAINS.includes(domain)) continue;
+    const attrs = (e.attributes && typeof e.attributes === 'object' && !Array.isArray(e.attributes)) ? e.attributes : {};
+    const friendly = (typeof attrs.friendly_name === 'string' && attrs.friendly_name !== '')
+      ? attrs.friendly_name : e.entity_id;
+    items.push({
+      id: e.entity_id, // persisted handle (entity_id)
+      entity_id: e.entity_id,
+      domain,
+      label: friendly,
+      name: friendly,
+      unit_of_measurement: attrs.unit_of_measurement !== undefined ? attrs.unit_of_measurement : null,
+      device_class: attrs.device_class !== undefined ? attrs.device_class : null,
+      state: e.state !== undefined ? e.state : null,
+      attributes: attrs,
+      kind: 'ha'
+    });
+  }
+  return items;
+}
+
+const REST_FLATTEN_DEFAULT_CAPS = Object.freeze({ maxDepth: 6, maxLeaves: 500, maxArrayItems: 100 });
+
+function flattenJsonLeaves(doc, caps) {
+  // AC-11: deterministic DFS flatten of a parsed JSON document to scalar leaves
+  // {path, value, type, sample}. Caps: path ≤ maxDepth segments, ≤ maxLeaves
+  // leaves (first-N), arrays expanded to maxArrayItems items then capped.
+  // Objects iterate in insertion order, arrays by numeric index; only
+  // number/string/boolean leaves are emitted; empty containers and non-leaf
+  // values are skipped. Returns { leaves, truncated }.
+  const maxDepth = caps && caps.maxDepth !== undefined ? caps.maxDepth : REST_FLATTEN_DEFAULT_CAPS.maxDepth;
+  const maxLeaves = caps && caps.maxLeaves !== undefined ? caps.maxLeaves : REST_FLATTEN_DEFAULT_CAPS.maxLeaves;
+  const maxArrayItems = caps && caps.maxArrayItems !== undefined ? caps.maxArrayItems : REST_FLATTEN_DEFAULT_CAPS.maxArrayItems;
+  const leaves = [];
+  let truncated = false;
+
+  const kindOf = (v) => {
+    if (v === null) return 'null';
+    return Array.isArray(v) ? 'array' : typeof v;
+  };
+  const sampleOf = (value) => {
+    const s = typeof value === 'string' ? value : String(value);
+    return s.length > 200 ? s.slice(0, 200) : s;
+  };
+
+  function visit(value, segments) {
+    if (leaves.length >= maxLeaves) { truncated = true; return; }
+    const kind = kindOf(value);
+    if (kind === 'number' || kind === 'string' || kind === 'boolean') {
+      // Scalars are leaves when their path fits the segment budget (parents
+      // refuse to descend past maxDepth).
+      if (segments.length <= maxDepth) {
+        leaves.push({ path: segments.join('.'), value, type: kind, sample: sampleOf(value) });
+      }
+      return;
+    }
+    if (kind === 'null') return;
+    if (kind !== 'array' && kind !== 'object') return; // function/symbol/undefined etc. are not JSON — skipped silently
+    const isEmpty = kind === 'array' ? value.length === 0 : Object.keys(value).length === 0;
+    if (isEmpty) return; // skip empty containers
+    if (segments.length >= maxDepth) { truncated = true; return; } // non-empty content beyond depth budget
+    if (kind === 'array') {
+      if (value.length > maxArrayItems) truncated = true;
+      const n = Math.min(value.length, maxArrayItems);
+      for (let i = 0; i < n; i++) visit(value[i], segments.concat(String(i)));
+    } else if (kind === 'object') {
+      for (const key of Object.keys(value)) visit(value[key], segments.concat(key));
+    }
+  }
+
+  visit(doc, []);
+  return { leaves, truncated };
+}
+
+function mqttSampleOf(rawText, retained) {
+  // AC-12: type inference for one MQTT payload sample. rawText is the payload
+  // already capped at 200 chars by the caller. Types: number (full-string
+  // numeric literal), boolean ('true'/'false', case-insensitive like the repo's
+  // saveMetric convention), else string — plain text AND JSON payloads collapse
+  // to 'string' (JSON→string per AC-12).
+  const s = String(rawText).trim();
+  const retainedFlag = !!retained;
+  if (/^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/.test(s)) {
+    const n = Number(s);
+    if (Number.isFinite(n)) return { value: n, type: 'number', raw: String(rawText), retained: retainedFlag };
+  }
+  const lower = s.toLowerCase();
+  if (lower === 'true' || lower === 'false') return { value: lower === 'true', type: 'boolean', raw: String(rawText), retained: retainedFlag };
+  return { value: String(rawText), type: 'string', raw: String(rawText), retained: retainedFlag };
+}
+// ================= /#108 catalog projections =================
 
 const app = express();
 app.set('trust proxy', 1);
@@ -196,6 +438,10 @@ wss.on('connection', (ws) => {
  * 24h power history, 7d energy bar data.
  * @returns {Promise<object>} dashboard state
  */
+// 24h power history is downsampled into 10-minute buckets so the chart gets a
+// bounded, deterministic point count (~145) across the FULL window regardless
+// of the raw ~30s poll density (was LIMIT 300, which truncated to ~2.5h).
+const POWER_HISTORY_BUCKET_SECONDS = 600;
 async function buildDashboardState() {
   const start = Date.now();
   const latest = db.prepare('SELECT * FROM history ORDER BY timestamp DESC LIMIT 1').get();
@@ -210,6 +456,7 @@ async function buildDashboardState() {
       solar_kw: latest.solar / 1000,
       battery_charge_kw: latest.battery_charge / 1000,
       battery_discharge_kw: latest.battery_discharge / 1000,
+      battery_power_kw: (latest.battery_charge - latest.battery_discharge) / 1000,
       grid_import_kw: latest.grid_import / 1000,
       grid_export_kw: latest.grid_export / 1000,
       battery_soc: latest.battery_soc,
@@ -232,7 +479,16 @@ async function buildDashboardState() {
     getCurrentMetrics(),
     getSavings(),
     getCurrentGridStatus(),
-    db.prepare('SELECT * FROM (SELECT * FROM history WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT 300) ORDER BY timestamp ASC').all(historySince),
+    db.prepare(`SELECT (timestamp / ${POWER_HISTORY_BUCKET_SECONDS}) * ${POWER_HISTORY_BUCKET_SECONDS} AS timestamp,
+       AVG(consumption) as consumption,
+       AVG(solar) as solar,
+       AVG(battery_charge) as battery_charge,
+       AVG(battery_discharge) as battery_discharge,
+       AVG(grid_import) as grid_import,
+       AVG(grid_export) as grid_export
+     FROM history WHERE timestamp >= ?
+     GROUP BY (timestamp / ${POWER_HISTORY_BUCKET_SECONDS})
+     ORDER BY timestamp ASC`).all(historySince),
     db.prepare(`
       SELECT date(timestamp, 'unixepoch') as day,
         MAX(daily_solar) as solar_kwh,
@@ -268,6 +524,7 @@ async function buildDashboardState() {
     solar_kw: r.solar / 1000,
     battery_charge_kw: r.battery_charge / 1000,
     battery_discharge_kw: r.battery_discharge / 1000,
+    battery_power_kw: (r.battery_charge - r.battery_discharge) / 1000,
     grid_import_kw: r.grid_import / 1000,
     grid_export_kw: r.grid_export / 1000
   }));
@@ -358,6 +615,7 @@ app.get('/api/current', async (req, res) => {
         solar_kw: latest.solar / 1000,
         battery_charge_kw: latest.battery_charge / 1000,
         battery_discharge_kw: latest.battery_discharge / 1000,
+        battery_power_kw: (latest.battery_charge - latest.battery_discharge) / 1000,
         grid_import_kw: latest.grid_import / 1000,
         grid_export_kw: latest.grid_export / 1000,
         battery_soc: latest.battery_soc,
@@ -396,6 +654,7 @@ app.get('/api/history', async (req, res) => {
       solar_kw: r.solar / 1000,
       battery_charge_kw: r.battery_charge / 1000,
       battery_discharge_kw: r.battery_discharge / 1000,
+      battery_power_kw: (r.battery_charge - r.battery_discharge) / 1000,
       grid_import_kw: r.grid_import / 1000,
       grid_export_kw: r.grid_export / 1000,
       timestamp: r.timestamp * 1000
@@ -734,6 +993,42 @@ app.get('/api/ha-device-entities', async (req, res) => {
   }
 });
 
+// AC-10 (#108): enriched HA entity catalog — ONE /states fetch, same SSRF guard
+// as /api/ha-device-entities above (allowPrivate:true), same 8-domain filter
+// (ha.js L147-156), items enriched with friendly_name/unit/device_class/state/
+// attributes. Pure projection (haStatesToCatalog) — no registry, no websocket,
+// no writes. The legacy string-array endpoint above is untouched.
+app.use('/api/ha/entities', isAuthenticated);
+app.get('/api/ha/entities', async (req, res) => {
+  const { url, token } = req.query;
+  if (!url || !token) return res.status(400).json({ error: 'HA URL and token required' });
+  const { ok, error, url: safeUrl } = await assertSafeFetchUrl(url, { allowPrivate: true });
+  if (!ok) return res.status(400).json({ error });
+  try {
+    // CodeQL-recognized sanitizer (mirrors ha.js fetchHAEntities): parse to a
+    // URL object, enforce http/https, and pass the URL OBJECT to fetch.
+    let u;
+    try { u = new URL(String(safeUrl)); } catch (_) { return res.status(400).json({ error: 'Invalid HA URL' }); }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+      return res.status(400).json({ error: 'HA URL scheme not allowed (must use http or https)' });
+    }
+    let p = u.pathname.replace(/\/+$/, '');
+    if (p === '') p = '/api';
+    else if (!p.endsWith('/api')) p = p + '/api';
+    u.pathname = p + '/states';
+    const response = await fetch(u, {
+      headers: { 'Authorization': `Bearer ${token}` },
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!response.ok) throw new Error(`HA error ${response.status} for GET ${u.toString()}`);
+    const states = await response.json();
+    res.json(haStatesToCatalog(states));
+  } catch (err) {
+    logger.error('Error fetching HA entity catalog:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Resolve the last-known state of an entity from the latest_metrics table via
 // the ha_devices mapping (used when the request does not carry url/token).
 function findLatestStateForEntity(entityId) {
@@ -922,12 +1217,23 @@ app.get('/api/mqtt-discover-topics', async (req, res) => {
   const client = mqtt.connect(safe.url, options);
   let responded = false;
   const topics = new Set();
+  // AC-12 (#108): during the 15s window also keep the LAST message payload per
+  // topic (payload capped at 200 chars) so the response can carry typed
+  // samples; on window end the window is persisted under mqtt_discovery_cache.
+  const lastMessageByTopic = new Map();
+  const PAYLOAD_CAP = 200;
+  const MAX_ENTRIES = 2000;
   const timeout = setTimeout(() => {
     client.end();
     if (!responded) {
       responded = true;
       const sorted = [...topics].sort();
-      res.json({ success: true, topics: sorted, count: sorted.length });
+      const entries = [...lastMessageByTopic.entries()]
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .slice(0, MAX_ENTRIES)
+        .map(([topic, sample]) => ({ topic, sample }));
+      persistMqttDiscoveryCache(safe.url, entries); // AC-12 — the only config write of the catalog slice
+      res.json({ success: true, topics: sorted, count: sorted.length, entries });
     }
   }, 15000);
   client.on('connect', () => {
@@ -939,13 +1245,58 @@ app.get('/api/mqtt-discover-topics', async (req, res) => {
       }
     });
   });
-  client.on('message', (topic) => { topics.add(topic); });
+  client.on('message', (topic, message) => {
+    if (typeof topic !== 'string') return;
+    topics.add(topic);
+    let text = '';
+    try { text = message.toString('utf8'); } catch (_) { text = ''; }
+    lastMessageByTopic.set(topic, mqttSampleOf(text.slice(0, PAYLOAD_CAP), !!(message && message.retain)));
+  });
   client.on('error', (err) => {
     clearTimeout(timeout);
     client.end();
     if (!responded) { responded = true; logger.error('MQTT discover error:', err.message); res.status(500).json({ error: 'Internal server error' }); }
   });
 });
+
+// AC-12 (#108): cached MQTT discovery window — returned WITHOUT listening (D9),
+// so the MQTT card can re-hydrate rows from a previous 15s window. The broker
+// key is the same assertSafeBrokerUrl-normalized URL used at persist time, so
+// lookups always match.
+app.use('/api/mqtt-discovery-cache', isAuthenticated);
+app.get('/api/mqtt-discovery-cache', (req, res) => {
+  const broker = req.query.broker;
+  if (!broker) return res.status(400).json({ error: 'Broker URL required' });
+  const safe = assertSafeBrokerUrl(broker);
+  if (!safe.ok) return res.status(400).json({ error: safe.error });
+  try {
+    const cache = JSON.parse(getConfig('mqtt_discovery_cache') || '{}');
+    const hit = cache && typeof cache === 'object' ? cache[safe.url] : null;
+    res.json({
+      success: true,
+      broker: safe.url,
+      ts: hit ? hit.ts : null,
+      entries: hit && Array.isArray(hit.entries) ? hit.entries : []
+    });
+  } catch (err) {
+    logger.error('Error reading mqtt_discovery_cache:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// AC-12 (#108): persist one broker's discovery window under the additive
+// mqtt_discovery_cache config key — keyed by normalized broker URL, capped at
+// MAX_ENTRIES topics, additive per broker (never reads/writes mqtt_devices; a
+// later window for the same broker replaces only that broker's entry).
+function persistMqttDiscoveryCache(brokerUrlKey, entries) {
+  try {
+    const cache = JSON.parse(getConfig('mqtt_discovery_cache') || '{}');
+    cache[brokerUrlKey] = { ts: Date.now(), broker: brokerUrlKey, entries };
+    setConfig('mqtt_discovery_cache', JSON.stringify(cache));
+  } catch (err) {
+    logger.error('Error persisting mqtt_discovery_cache:', err.message);
+  }
+}
 
 app.use('/api/modbus/profiles', isAuthenticated);
 app.get('/api/modbus/profiles', (req, res) => {
@@ -958,6 +1309,23 @@ app.get('/api/modbus/profile/:id', (req, res) => {
   const profile = getProfileById(req.params.id);
   if (!profile) return res.status(404).json({ error: 'Profile not found' });
   res.json(profile);
+});
+
+// AC-7 (#108): entity catalog for one modbus profile — one item per
+// registers[], id = String(address) (decimal), the exact handle the module
+// reverse-lookup consumes (modules/modbus.js L132/L167); name = r.metric (the
+// implicit default). Same auth as the profile GET above; pure projection, no
+// metric creation, no writes.
+app.get('/api/modbus/profile/:id/entities', (req, res) => {
+  const { getProfileById } = require('./modules/modbus');
+  const profile = getProfileById(req.params.id);
+  if (!profile) return res.status(404).json({ error: 'Profile not found' });
+  try {
+    res.json(modbusProfileEntities(profile));
+  } catch (err) {
+    logger.error('Error projecting modbus profile entities:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 app.use('/api/test-modbus', isAuthenticated);
@@ -990,8 +1358,40 @@ app.get('/api/rs232/profile/:id', (req, res) => {
   const profilePath = path.join(__dirname, 'profiles', 'rs232', `${safeId}.json`);
   try {
     const fullProfile = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    // Issue #108 AC-9: serve the ALIAS-MERGED profile — resolve profile_file
+    // exactly like modules/rs232.js resolveAliases() (L117-130), so legacy
+    // "📥 Load Profile Fields" renders commands/fields for alias profiles
+    // (infinisolar → voltronic-qpigs) instead of the raw file's empty arrays.
+    if (fullProfile.profile_file) {
+      const targetId = String(fullProfile.profile_file).replace(/\.json$/i, '').replace(/[^a-zA-Z0-9_-]/g, '');
+      const targetPath = path.join(__dirname, 'profiles', 'rs232', `${targetId}.json`);
+      if (fs.existsSync(targetPath)) {
+        const target = JSON.parse(fs.readFileSync(targetPath, 'utf8'));
+        fullProfile.commands = target.commands !== undefined ? target.commands : (fullProfile.commands || []);
+        fullProfile.fields = target.fields !== undefined ? target.fields : (fullProfile.fields || []);
+        fullProfile.frame_format = target.frame_format !== undefined ? target.frame_format : fullProfile.frame_format;
+        fullProfile.call_order = target.call_order !== undefined ? target.call_order : fullProfile.call_order;
+        if (!fullProfile.decoder && target.decoder !== undefined) fullProfile.decoder = target.decoder;
+      }
+    }
     res.json(fullProfile);
   } catch (err) {
+    logger.error('Error loading rs232 profile:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// AC-8 (#108): entity catalog for one rs232 profile — projects the IN-MEMORY
+// profile, which loadRs232Profiles()/resolveAliases() already alias-merged, so
+// infinisolar yields voltronic's commands. id is the exact decode handle per
+// protocol family (see rs232ProfileEntities); pure projection, no writes.
+app.get('/api/rs232/profile/:id/entities', (req, res) => {
+  const profile = rs232Profiles.find(p => p.id === req.params.id);
+  if (!profile) return res.status(404).json({ error: 'Profile not found' });
+  try {
+    res.json(rs232ProfileEntities(profile));
+  } catch (err) {
+    logger.error('Error projecting rs232 profile entities:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -1446,11 +1846,17 @@ app.post('/api/action', isAuthenticated, async (req, res) => {
         // components send action = command name and params.value = value.
         result = await executeRs232ProfileAction(device, action, params?.value);
         break;
-      case 'dongle':
+      case 'dongle': {
         const { executeDongleAction } = require('./modules/dongle');
-        // (deviceName, registerAddr, value) — register = entity
-        result = await executeDongleAction(device, entity, params?.value);
+        // (deviceName, registerAddr, value). The entity may be a namespaced id
+        // from the profile entity catalog ('holding:0x0069') or a bare hex
+        // register — hand only the register address to the transport. Action
+        // strings other than 'write' pass through untouched (executeDongleAction
+        // is write-only today; presets are reserved for later).
+        const registerAddr = typeof entity === 'string' && entity.includes(':') ? entity.split(':').pop() : entity;
+        result = await executeDongleAction(device, registerAddr, params?.value);
         break;
+      }
       default:
         return res.status(501).json({ success: false, error: 'Source not yet supported' });
     }
@@ -1827,6 +2233,30 @@ app.post('/api/test-external', async (req, res) => {
   }
 });
 
+// AC-11 (#108): REST field catalog — flatten a live JSON document into
+// deterministic scalar leaves {path,value,type,sample} with caps (depth ≤ 6
+// segments, ≤ 500 leaves, arrays ≤ 100 items). Guard is EXACTLY the
+// /api/test-external guard (assertSafeFetchUrl allowPrivate:true), 5s timeout,
+// JSON only, and the error contract mirrors the test route. modules/external.js
+// is untouched — this route never writes config or metrics.
+app.use('/api/external/fields', isAuthenticated);
+app.post('/api/external/fields', async (req, res) => {
+  const { url } = req.body || {};
+  if (!url) return res.status(400).json({ error: 'URL required' });
+  const { ok, error, url: safeUrl } = await assertSafeFetchUrl(url, { allowPrivate: true });
+  if (!ok) return res.status(400).json({ error });
+  try {
+    const response = await fetch(safeUrl, { signal: AbortSignal.timeout(5000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    const { leaves, truncated } = flattenJsonLeaves(data, REST_FLATTEN_DEFAULT_CAPS);
+    res.json({ leaves, truncated, leafCount: leaves.length });
+  } catch (err) {
+    logger.error('Error fetching external fields:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ========== DONGLE ENDPOINTS (protected) ==========
 app.get('/api/dongle/profiles', isAuthenticated, (req, res) => {
   try {
@@ -1835,7 +2265,7 @@ app.get('/api/dongle/profiles', isAuthenticated, (req, res) => {
     const files = fs.readdirSync(profilesDir).filter(f => f.endsWith('.json'));
     const profiles = files.map(f => {
       const raw = JSON.parse(fs.readFileSync(path.join(profilesDir, f), 'utf8'));
-      return { id: f.replace('.json', ''), name: raw.name, transport: raw.transport, requires_serial: raw.requires_serial, default_port: raw.default_port, default_unit_id: raw.default_unit_id };
+      return { id: f.replace('.json', ''), name: raw.name, transport: raw.transport, requires_serial: raw.requires_serial, default_port: raw.default_port, default_unit_id: raw.default_unit_id, protocol: raw.protocol, capabilities: raw.capabilities, mapping: raw.mapping };
     });
     res.json(profiles);
   } catch (err) {
@@ -1858,21 +2288,45 @@ app.get('/api/dongle/profile/:id', (req, res) => {
   }
 });
 
+// Issue #108 AC-2..6: dongle profile entity catalog — thin wrapper over the
+// pure projections in modules/entityCatalog.js (dispatcher mirrors modules/
+// dongle.js poll branch keys: luxpower-tcp → namespaced ids, felicity-tcp →
+// JSON paths, growatt → field ids, every other transport → bare-hex registers).
+// luxpower-geta output is byte-identical to the pre-#108 inline handler
+// (snapshot fixture test/entity-catalog.test.js). Pure projection — no metric
+// creation, no config writes, no poll side effects. 404/500 shapes unchanged.
+app.get('/api/dongle/profile/:id/entities', (req, res) => {
+  try {
+    const safeId = req.params.id.replace(/[^a-zA-Z0-9_-]/g, '');
+    const profilePath = path.join(__dirname, 'profiles', 'dongles', `${safeId}.json`);
+    if (!fs.existsSync(profilePath)) return res.status(404).json({ error: 'Profile not found' });
+    const profile = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    res.json(entityCatalog.dongleProfileEntities(profile));
+  } catch (err) {
+    logger.error('Error loading dongle profile entities:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.use('/api/dongle/test', isAuthenticated);
 app.post('/api/dongle/test', async (req, res) => {
   const { host, port, serial_number, modbus_unit_id, transport } = req.body;
   if (!host) return res.status(400).json({ error: 'Host required' });
 
   const rawHost = String(host).trim();
-  const isPrivateOrLocalIp = (ip) => {
-    if (ip === '127.0.0.1' || ip === '::1') return true;
-    if (ip.startsWith('10.')) return true;
-    if (ip.startsWith('192.168.')) return true;
-    if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(ip)) return true;
-    if (ip.startsWith('169.254.')) return true;
-    if (ip.startsWith('fc') || ip.startsWith('fd')) return true;
-    if (ip.startsWith('fe80:')) return true;
-    return false;
+  // #103: RFC1918 literals/resolutions (10/8, 172.16/12, 192.168/16) are now
+  // ALLOWED for dongle test dials (intranet inverters). Still blocked: loopback
+  // 127/8 + ::1 (+ IPv4-mapped), link-local 169.254/16 incl. metadata + fe80::/10,
+  // ULA fc00::/7, and unspecified 0.0.0.0/::. isBlockedIp(ip, true) already blocks
+  // loopback/link-local/unspecified (and mapped-loopback via its IPv4 re-check)
+  // while ALLOWING RFC1918 — but it also allows ULA when allowPrivate is true,
+  // so add an explicit fc00::/7 first-hextet check. Anything non-IP → blocked.
+  const isRestrictedTestIp = (ip) => {
+    if (isBlockedIp(ip, true)) return true;
+    if (net.isIP(ip) !== 6) return false; // v4 RFC1918 + public, or 0 → allow
+    const first = String(ip).toLowerCase().split(':')[0];
+    if (!/^[0-9a-f]{1,4}$/.test(first)) return false;
+    return (parseInt(first, 16) & 0xfe00) === 0xfc00; // ULA fc00::/7
   };
   const isValidHostname = (value) => {
     if (value.length > 253) return false;
@@ -1886,7 +2340,7 @@ app.post('/api/dongle/test', async (req, res) => {
 
   const ipVersion = net.isIP(rawHost);
   if (ipVersion) {
-    if (isPrivateOrLocalIp(rawHost.toLowerCase())) {
+    if (isRestrictedTestIp(rawHost.toLowerCase())) {
       return res.status(400).json({ error: 'Host is not allowed' });
     }
   } else {
@@ -1904,12 +2358,14 @@ app.post('/api/dongle/test', async (req, res) => {
   if (port !== undefined && port !== null && port !== '' && safePort === null) {
     return res.status(400).json({ error: 'Invalid port' });
   }
-  // SSRF guard (#71): resolve hostnames up front and dial the RESOLVED IP so a
-  // DNS-rebinding swap between validation and connect() cannot redirect the TCP
-  // dial to a private/loopback/link-local address. Every A/AAAA record must be
-  // a public address (isBlockedIp with allowPrivate:false blocks RFC1918, ULA,
-  // loopback, link-local/metadata, unspecified). Literal IPs are already vetted
-  // by the string-level block above.
+  // SSRF guard (#71/#103): resolve hostnames up front and dial the RESOLVED IP
+  // so a DNS-rebinding swap between validation and connect() cannot redirect the
+  // TCP dial to a blocked address. Every A/AAAA record must be either public or
+  // RFC1918 (intranet inverters are first-class targets); loopback, link-local/
+  // metadata, ULA and unspecified stay blocked (isRestrictedTestIp). Mixed
+  // public+blocked resolution sets → blocked. Literal IPs are vetted by the
+  // same numeric check above (string-prefix block removed — numeric checks now
+  // cover 0.0.0.0 and :: too).
   let safeHost = rawHost;
   if (!net.isIP(rawHost)) {
     let addrs;
@@ -1920,7 +2376,7 @@ app.post('/api/dongle/test', async (req, res) => {
     }
     if (!addrs || addrs.length === 0) return res.status(400).json({ error: 'Invalid host' });
     for (const a of addrs) {
-      if (isBlockedIp(a.address, false)) {
+      if (isRestrictedTestIp(a.address)) {
         return res.status(400).json({ error: 'Host is not allowed' });
       }
     }
@@ -1934,6 +2390,35 @@ app.post('/api/dongle/test', async (req, res) => {
       const data = await transportObj.poll();
       const count = data.realtime ? Object.keys(data.realtime).length : 0;
       res.json({ success: true, raw: `JSON OK — ${count} realtime keys` });
+      return;
+    }
+    if (transport === 'luxpower-tcp') {
+      // #103/AC18: stranded serial_number is usable as the dongle serial too.
+      const dongleSerial = String(req.body.dongle_serial || req.body.serial_number || '').trim();
+      const inverterSerial = String(req.body.inverter_serial || req.body.serial_number || '').trim();
+      if (!dongleSerial || !inverterSerial) {
+        return res.status(400).json({ error: 'Dongle serial and inverter serial are required for luxpower-tcp' });
+      }
+      const LuxpowerTcpTransport = require('./modules/dongle/luxpowerTcp').LuxpowerTcpTransport;
+      try {
+        transportObj = new LuxpowerTcpTransport({
+          host: safeHost,
+          port: safePort || 8000,
+          dongle_serial: dongleSerial,
+          inverter_serial: inverterSerial,
+          timeout_ms: 3000
+        });
+      } catch (e) {
+        return res.status(400).json({ error: e.message });
+      }
+      try {
+        // Real read cycle: input register 0x0000 (operational state); values
+        // are little-endian words on the wire (see luxpower-geta profile).
+        const data = await transportObj.readRegisters(0, 1, 0x04);
+        res.json({ success: true, raw: data.readUInt16LE(0) });
+      } finally {
+        transportObj.stop();
+      }
       return;
     }
     if (transport === 'solarman-v5') {

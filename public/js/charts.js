@@ -24,7 +24,8 @@ function resolvePowerField(metricName) {
   if (/consumption|load/.test(n)) return 'consumption_kw';
   if (/battery/.test(n)) {
     if (/discharge|discharging/.test(n)) return 'battery_discharge_kw';
-    return 'battery_charge_kw';
+    if (/charge|charging/.test(n)) return 'battery_charge_kw';
+    return 'battery_power_kw';
   }
   if (/grid/.test(n)) {
     if (/export/.test(n)) return 'grid_export_kw';
@@ -57,7 +58,7 @@ function resolveMetricField(metricName) {
 }
 
 function getDatasets(c) { if (c && c.dataset.chartDatasets) { try { return JSON.parse(c.dataset.chartDatasets); } catch (e) {} } return null; }
-function defaultPower() { return [{ label: 'Load', metric: 'consumption', color: '#44403c' }, { label: 'Solar', metric: 'solar', color: '#f59e0b' }, { label: 'Battery Charge', metric: 'battery_charge', color: '#84a45a' }, { label: 'Grid Import', metric: 'grid_import', color: '#87aec8' }]; }
+function defaultPower() { return [{ label: 'Load', metric: 'consumption', color: '#44403c' }, { label: 'Solar', metric: 'solar', color: '#f59e0b' }, { label: 'Battery Power', metric: 'battery_power', color: '#84a45a' }, { label: 'Grid Import', metric: 'grid_import', color: '#87aec8' }]; }
 function defaultEnergy() { return [{ label: 'Solar Generated', metric: 'daily_solar', color: '#f59e0b' }, { label: 'Grid Imported', metric: 'daily_grid_import', color: '#87aec8' }, { label: 'Energy Consumed', metric: 'daily_consumption', color: '#44403c' }]; }
 
 /** Read chart config from the container's data attribute. */
@@ -130,7 +131,7 @@ export function applyGradientFills(chart) { if (!chart || !chart.ctx) return; re
 
 export function updateChartColors() { const isDark = document.documentElement.getAttribute('data-theme') === 'dark', gc = isDark ? '#334155' : '#cbd5e1', tc = isDark ? '#f8fafc' : '#0f172a'; Object.values(powerCharts).forEach(c => { const ct = c.canvas?.closest?.('.chart-container'); const cfg = getChartConfig(ct); c.options.scales.x.grid.color = gc; c.options.scales.y.grid.color = gc; c.options.scales.x.grid.display = !cfg.hideGrid; c.options.scales.y.grid.display = !cfg.hideGrid; c.options.plugins.legend.labels.color = tc; c.update(); if (cfg.fill !== false) applyGradientFills(c); }); Object.values(energyCharts).forEach(c => { const ct = c.canvas?.closest?.('.chart-container'); const cfg = getChartConfig(ct); c.options.scales.x.grid.color = gc; c.options.scales.y.grid.color = gc; c.options.scales.x.grid.display = !cfg.hideGrid; c.options.scales.y.grid.display = !cfg.hideGrid; c.options.plugins.legend.labels.color = tc; c.update(); }); Object.values(metricCharts).forEach(c => { const ct = c.canvas?.closest?.('.chart-container'); const cfg = getChartConfig(ct); c.options.scales.x.grid.color = gc; c.options.scales.y.grid.color = gc; c.options.scales.x.grid.display = !cfg.hideGrid; c.options.scales.y.grid.display = !cfg.hideGrid; c.options.plugins.legend.labels.color = tc; c.update(); if (cfg.fill !== false) applyGradientFills(c); }); }
 
-async function refreshPowerChartFor(cid) { const chart = powerCharts[cid]; if (!chart) return; let data; if (currentPowerRange === '24h') { const s = await fetchDashboardState(); data = s.powerHistory; } else if (currentPowerRange === '3d') { const r = await fetch('/api/history?days=3'); const hd = await r.json(); data = hd.map(d => ({ timestamp: d.timestamp, consumption_kw: d.consumption_kw ?? 0, solar_kw: d.solar_kw ?? 0, battery_charge_kw: d.battery_charge_kw ?? 0, battery_discharge_kw: d.battery_discharge_kw ?? 0, grid_import_kw: d.grid_import_kw ?? 0, grid_export_kw: d.grid_export_kw ?? 0 })); } else { const s = await fetchDashboardState(); data = s.powerHistory; } updatePowerChartData(chart, cid, data); }
+async function refreshPowerChartFor(cid) { const chart = powerCharts[cid]; if (!chart) return; let data; if (currentPowerRange === '24h') { const s = await fetchDashboardState(); data = s.powerHistory; } else if (currentPowerRange === '3d') { const r = await fetch('/api/history?days=3'); const hd = await r.json(); data = hd.map(d => ({ timestamp: d.timestamp, consumption_kw: d.consumption_kw ?? 0, solar_kw: d.solar_kw ?? 0, battery_charge_kw: d.battery_charge_kw ?? 0, battery_discharge_kw: d.battery_discharge_kw ?? 0, battery_power_kw: d.battery_power_kw ?? 0, grid_import_kw: d.grid_import_kw ?? 0, grid_export_kw: d.grid_export_kw ?? 0 })); } else { const s = await fetchDashboardState(); data = s.powerHistory; } updatePowerChartData(chart, cid, data); }
 
 export async function refreshPowerChart() { for (const cid of Object.keys(powerCharts)) await refreshPowerChartFor(cid); }
 

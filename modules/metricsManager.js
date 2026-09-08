@@ -83,20 +83,54 @@ function deleteMetric(name) {
   });
   if (mqttChanged) setConfig('mqtt_devices', JSON.stringify(mqttDevices));
 
-  // 5. Remove from external sources mappings
+  // 5. Remove from external sources mappings (mappings: { metricName → jsonPath })
   const externalSources = JSON.parse(getConfig('external_sources') || '[]');
   let extChanged = false;
   externalSources.forEach(src => {
     if (src.mappings) {
-      for (const [jsonPath, metricName] of Object.entries(src.mappings)) {
+      // Iterate metric-first: the key IS the metric name in this store
+      for (const metricName of Object.keys(src.mappings)) {
         if (metricName === name) {
-          delete src.mappings[jsonPath];
+          delete src.mappings[metricName];
           extChanged = true;
         }
       }
     }
   });
   if (extChanged) setConfig('external_sources', JSON.stringify(externalSources));
+
+  // 6. Remove from dongle_config device mappings (mappings: { metricName → register })
+  const dongleDevices = JSON.parse(getConfig('dongle_config') || '[]');
+  let dongleChanged = false;
+  dongleDevices.forEach(device => {
+    if (device.mappings && Object.prototype.hasOwnProperty.call(device.mappings, name)) {
+      delete device.mappings[name];
+      dongleChanged = true;
+    }
+  });
+  if (dongleChanged) setConfig('dongle_config', JSON.stringify(dongleDevices));
+
+  // 7. Remove from Modbus device mappings (mappings: { metricName → address })
+  const modbusDevices = JSON.parse(getConfig('modbus_devices') || '[]');
+  let modbusChanged = false;
+  modbusDevices.forEach(device => {
+    if (device.mappings && Object.prototype.hasOwnProperty.call(device.mappings, name)) {
+      delete device.mappings[name];
+      modbusChanged = true;
+    }
+  });
+  if (modbusChanged) setConfig('modbus_devices', JSON.stringify(modbusDevices));
+
+  // 8. Remove from RS232 device mappings (mappings: { metricName → handle })
+  const rs232Devices = JSON.parse(getConfig('rs232_devices') || '[]');
+  let rs232Changed = false;
+  rs232Devices.forEach(device => {
+    if (device.mappings && Object.prototype.hasOwnProperty.call(device.mappings, name)) {
+      delete device.mappings[name];
+      rs232Changed = true;
+    }
+  });
+  if (rs232Changed) setConfig('rs232_devices', JSON.stringify(rs232Devices));
 
   logger.info(`Deleted metric: ${name}`);
 }

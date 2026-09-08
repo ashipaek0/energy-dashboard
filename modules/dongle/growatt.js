@@ -94,11 +94,33 @@ class GrowattServer {
     if (!profile) return;
 
     const prefix = instance.prefix || '';
+    const mappings = instance.mappings || null;
+    // Build reverse lookup: field → metric name (mappings is { metricName → m.field })
+    let fieldToMetric = null;
+    if (mappings) {
+      fieldToMetric = {};
+      for (const [metric, field] of Object.entries(mappings)) {
+        fieldToMetric[field] = metric;
+      }
+    }
+
     const metrics = {};
     for (const m of profile.metrics) {
       const val = data[m.field];
       if (val !== undefined && val !== null && !isNaN(val)) {
-        metrics[prefix + m.name] = parseFloat((val * (m.scale || 1)).toFixed(4));
+        let metricName;
+        if (fieldToMetric) {
+          const key = m.field; // e.g., "pv1_power"
+          if (fieldToMetric[key] !== undefined) {
+            metricName = fieldToMetric[key];
+          } else {
+            // Key not in mappings at all — skip unmapped when mappings exist
+            continue;
+          }
+        } else {
+          metricName = prefix + m.name;
+        }
+        metrics[metricName] = parseFloat((val * (m.scale || 1)).toFixed(4));
       }
     }
 

@@ -274,22 +274,46 @@ function renderHaDevice(device, idx) {
     }
     showStatus(statusEl, 'Fetching...', 'info');
     try {
-      const res = await fetch(`/api/ha-device-entities?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}`);
-      const entities = await res.json();
-      if (!res.ok) throw new Error(entities.error || 'Failed');
-      const selects = card.querySelectorAll('.mappings-list select.entity-select');
-      selects.forEach(select => {
+      // AC-25: enriched catalog (friendly_name / unit / state / domain). Items
+      // are display-only — mapping values stay plain entity_id strings.
+      const items = await fetchHaEntityCatalog(url, token);
+      card._haCatalog = items;
+      // Legacy-compatible refresh of the entity pickers on SAVED and blank
+      // add-rows (values preserved; options now carry friendly labels). Expose
+      // rows are rebuilt below with their own enriched labels.
+      const byId = new Map(items.map(it => [haEntityIdOf(it), it]));
+      card.querySelectorAll('.mappings-list select.entity-select').forEach(select => {
         const currentVal = select.value;
         select.innerHTML = '<option value="">-- Select entity --</option>';
-        entities.sort().forEach(id => {
+        items.forEach(ent => {
+          const id = haEntityIdOf(ent);
           const opt = document.createElement('option');
           opt.value = id;
-          opt.textContent = id;
+          opt.textContent = haEntityLabelText(ent);
           select.appendChild(opt);
         });
-        if (currentVal) select.value = currentVal;
+        if (currentVal) {
+          if (byId.has(currentVal)) select.value = currentVal;
+          else {
+            // Entity no longer in the 8-domain catalog — keep it selectable so
+            // an existing mapping is never silently dropped by a refresh.
+            const keep = document.createElement('option');
+            keep.value = currentVal;
+            keep.textContent = currentVal + ' (kept)';
+            select.appendChild(keep);
+            select.value = currentVal;
+          }
+        }
       });
-      showStatus(statusEl, 'Entities loaded!', 'success');
+      if (!items.length) {
+        showStatus(statusEl, 'No entities found in the 8 supported HA domains', 'info');
+        return;
+      }
+      // AC-25: expose-all rows with a domain filter over the last fetch.
+      ensureHaDomainToolbar(card);
+      const added = renderHaCatalogRows(card);
+      const domains = new Set(items.map(it => haDomainOf(it)).filter(Boolean));
+      showStatus(statusEl, `Loaded ${items.length} entities across ${domains.size} domains — ${added} catalog rows` + (added ? '' : ' (everything already mapped)'), 'success');
     } catch (e) {
       showStatus(statusEl, e.message, 'error');
     }
@@ -528,6 +552,166 @@ function addHaMetricRow(device, deviceIdx, container, metric = '', entityId = ''
   row.appendChild(removeBtn);
   container.appendChild(row);
   updateActionsSummary(row);
+  return row;
+}
+
+// ── HA enriched entity catalog (issue #108 wave 5, AC-25) ────────────────
+// Fetch Entities now pulls the enriched catalog (GET /api/ha/entities — the
+// 8-domain projection with friendly_name/unit/state enrichment) and renders
+// expose-all rows: empty metric dropdown + entity <select> whose option reads
+// "friendly_name (unit) - entity_id - <state>". A domain filter <select>
+// re-renders those rows from the last fetch. The existing add-row entity-<select>
+// flow, '⚙ Configure Actions' and the {entityId, actions} value round-trip are
+// all preserved — expose rows use the SAME row anatomy as addHaMetricRow, so
+// the unchanged save collector persists {userMetric: entity_id} byte-identically
+// (actions only when configured). Expose rows never touch saved mappings and
+// never remove rows that already carry a metric.
+const HA_ENTITY_DOMAINS = ['sensor', 'binary_sensor', 'switch', 'light', 'climate', 'fan', 'cover', 'input_boolean'];
+
+function haEntityIdOf(e) {
+  if (!e) return '';
+  if (typeof e.entity_id === 'string') return e.entity_id;
+  if (e.id !== undefined && e.id !== null) return String(e.id);
+  return '';
+}
+
+function haDomainOf(e) {
+  const id = haEntityIdOf(e);
+  return id ? id.split('.')[0] : '';
+}
+
+// "friendly_name (unit) - sensor.x - <state>" — AC-25 chip/option text.
+function haEntityLabelText(e) {
+  const id = haEntityIdOf(e);
+  const name = (e && (e.label || e.name)) || id;
+  const unit = (e && e.unit_of_measurement !== undefined && e.unit_of_measurement !== null && e.unit_of_measurement !== '') ? ` (${e.unit_of_measurement})` : '';
+  let state = '';
+  if (e && e.state !== undefined && e.state !== null && e.state !== '') state = String(e.state);
+  return `${name}${unit} - ${id}${state ? ` - ${state}` : ''}`;
+}
+
+async function fetchHaEntityCatalog(url, token) {
+  // Enriched endpoint (wave 2): items [{ id: entity_id, entity_id, domain,
+  // label: friendly_name, name, unit_of_measurement, device_class, state,
+  // attributes, kind: 'ha' }] for the same 8 domains. The legacy string-array
+  // /api/ha-device-entities endpoint stays untouched for the setup.js wizard.
+  const res = await fetch(`/api/ha/entities?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error((data && data.error) || `HA fetch failed (HTTP ${res.status})`);
+  return Array.isArray(data) ? data : [];
+}
+
+// Domain filter <select> (all + the 8 catalog domains). Created lazily on the
+// first successful fetch; re-render keeps only the expose rows, never rows that
+// carry a mapping.
+function ensureHaDomainToolbar(card) {
+  if (!card || !card.querySelector) return null;
+  let existing = card.querySelector('.ha-catalog-toolbar .ha-domain-filter');
+  if (existing) return existing;
+  const listEl = card.querySelector('.mappings-section .mappings-list');
+  if (!listEl) return null;
+  const bar = document.createElement('div');
+  bar.className = 'ha-catalog-toolbar';
+  bar.style.cssText = 'display:flex;align-items:center;gap:0.5rem;margin:0 0 0.5rem;flex-wrap:wrap;';
+  const lbl = document.createElement('span');
+  lbl.style.cssText = 'font-size:0.75em;color:var(--text-muted);white-space:nowrap;';
+  lbl.textContent = 'Catalog domain:';
+  const sel = document.createElement('select');
+  sel.className = 'ha-domain-filter';
+  sel.style.cssText = 'font-size:0.8rem;padding:0.3rem 0.5rem;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;';
+  const addOpt = (v, t) => {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = t;
+    sel.appendChild(o);
+  };
+  addOpt('all', 'All domains');
+  HA_ENTITY_DOMAINS.forEach(d => addOpt(d, d));
+  sel.value = (card && card._haDomain) || 'all';
+  sel.addEventListener('change', () => {
+    card._haDomain = sel.value;
+    renderHaCatalogRows(card);
+  });
+  const count = document.createElement('span');
+  count.className = 'ha-catalog-count';
+  count.style.cssText = 'font-size:0.72em;color:var(--text-secondary);';
+  bar.appendChild(lbl);
+  bar.appendChild(sel);
+  bar.appendChild(count);
+  listEl.before(bar);
+  return sel;
+}
+
+// One expose-all row for a catalog entity: the addHaMetricRow anatomy (metric
+// dropdown + entity <select> + Configure Actions + remove) with the entity
+// pre-bound and its option text enriched. Marked data-ha-expose="1" so
+// re-renders can replace the unmapped rows while never dropping mapped ones.
+function addHaCatalogRow(card, listEl, ent, excludeMetrics) {
+  const id = haEntityIdOf(ent);
+  if (!id || !listEl) return null;
+  const row = addHaMetricRow({}, card ? (card.dataset.index || 0) : 0, listEl, '', id, excludeMetrics || []);
+  if (!row) return null;
+  row.dataset.haExpose = '1';
+  row._catalogEntity = ent || null;
+  const label = haEntityLabelText(ent);
+  const es = row.querySelector('.entity-select');
+  if (es) {
+    const opt = Array.from(es.options).find(o => o.value === id);
+    if (opt) opt.textContent = label;
+    es.title = label;
+  }
+  const metricSelect = row.querySelector('.metric-name');
+  if (metricSelect && window.CatalogUI && typeof window.CatalogUI.createInlineMetricControl === 'function') {
+    window.CatalogUI.createInlineMetricControl(haAdapter, row, metricSelect, () => row._catalogEntity || null);
+  }
+  return row;
+}
+
+// Re-render the expose rows from the card's last fetch (card._haCatalog),
+// honoring card._haDomain. Mapped rows are never dropped or duplicated: stale
+// expose rows that now carry a metric + entity become regular mapped rows
+// (marker removed); the rest are replaced by fresh rows for the current
+// domain, skipping entities already mapped on this card.
+function renderHaCatalogRows(card) {
+  const listEl = card ? card.querySelector('.mappings-section .mappings-list') : null;
+  if (!card || !listEl) return 0;
+  Array.from(listEl.querySelectorAll('.metric-row[data-ha-expose="1"]')).forEach(row => {
+    const ms = row.querySelector('.metric-name');
+    const es = row.querySelector('.entity-select');
+    if (ms && ms.value && es && es.value) row.removeAttribute('data-ha-expose');
+    else row.remove();
+  });
+  const mappedEntities = new Set();
+  listEl.querySelectorAll('.metric-row').forEach(row => {
+    const ms = row.querySelector('.metric-name');
+    const es = row.querySelector('.entity-select');
+    if (ms && ms.value && es && es.value) mappedEntities.add(es.value);
+  });
+  const items = (card && Array.isArray(card._haCatalog)) ? card._haCatalog : [];
+  const domain = (card && card._haDomain) || 'all';
+  const filtered = (domain === 'all' ? items : items.filter(it => haDomainOf(it) === domain))
+    .filter(it => haEntityIdOf(it))
+    .sort((a, b) => {
+      const d = haDomainOf(a).localeCompare(haDomainOf(b));
+      return d !== 0 ? d : haEntityIdOf(a).localeCompare(haEntityIdOf(b));
+    });
+  const used = Array.from(getAllUsedMetrics());
+  let added = 0;
+  filtered.forEach(ent => {
+    const id = haEntityIdOf(ent);
+    if (!id || mappedEntities.has(id)) return;
+    addHaCatalogRow(card, listEl, ent, used);
+    added++;
+  });
+  const countEl = card.querySelector('.ha-catalog-count');
+  if (countEl) {
+    countEl.textContent = domain === 'all'
+      ? `${filtered.length} entities across all domains — ${added} expose rows added, ${mappedEntities.size} already mapped`
+      : `${filtered.length} entities in "${domain}" — ${added} expose rows added, ${mappedEntities.size} already mapped`;
+  }
+  refreshAllMetricDropdowns();
+  updateMappingSaveNote(card);
+  return added;
 }
 
 function reindexHa() {
@@ -699,24 +883,30 @@ function renderMqttDevice(device, idx) {
       if (password) params.set('password', password);
       const res = await fetch(`/api/mqtt-discover-topics?${params.toString()}`);
       const data = await res.json();
-      if (res.ok && data.topics && data.topics.length) {
+      const entries = Array.isArray(data && data.entries) ? data.entries : [];
+      const topicsOnly = Array.isArray(data && data.topics) ? data.topics : [];
+      if (res.ok && (entries.length || topicsOnly.length)) {
         // Collect existing topic→metric mappings before modifying DOM
-        const existingRows = mappingsContainer.querySelectorAll('.metric-row');
         const existingTopics = new Set();
-        existingRows.forEach(row => {
-          const ti = row.querySelector('.topic-input');
+        mappingsContainer.querySelectorAll('.metric-row .topic-input').forEach(ti => {
           if (ti && ti.value) existingTopics.add(ti.value);
         });
-        // Add rows for newly discovered topics (never remove existing ones)
+        // AC-26/a5e9c01: add rows for newly discovered topics — additive only,
+        // never remove or duplicate existing rows, never clear mapped rows.
+        const globalUsed = getAllUsedMetrics();
         let added = 0;
-        data.topics.forEach(topic => {
-          if (existingTopics.has(topic)) return; // already mapped — keep
-          const globalUsed = getAllUsedMetrics();
-          addMqttMetricRow({}, idx, mappingsContainer, '', topic, Array.from(globalUsed));
+        const discovered = entries.length
+          ? entries.map(en => ({ topic: (en && en.topic != null) ? String(en.topic) : '', sample: (en && en.sample) || null }))
+          : topicsOnly.map(t => ({ topic: String(t), sample: null }));
+        discovered.forEach(en => {
+          if (!en.topic || existingTopics.has(en.topic)) return; // already mapped — keep
+          existingTopics.add(en.topic);
+          addMqttDiscoveryRow(idx, mappingsContainer, en.topic, en.sample, Array.from(globalUsed));
           added++;
         });
-        showStatus(statusEl, `Found ${data.count} topics` + (added ? ` (${added} new)` : ' — all already mapped'), 'success');
+        showStatus(statusEl, `Found ${data.count != null ? data.count : discovered.length} topics` + (added ? ` (${added} new)` : ' — all already mapped'), 'success');
         refreshAllMetricDropdowns();
+        updateMappingSaveNote(mappingsContainer.closest('.device-card'));
       } else if (res.ok) {
         showStatus(statusEl, 'No topics found on broker', 'info');
       } else {
@@ -754,6 +944,10 @@ function renderMqttDevice(device, idx) {
     });
   }
   renderMqttMappings(device.topics || {}, idx, mappingsList);
+  // AC-26: on card render, re-hydrate additive catalog rows from the broker's
+  // persisted discovery window (cache-backed; saved mappings are never touched).
+  const brokerVal = card.querySelector('[name^="mqtt_devices"][name$="[broker]"]')?.value?.trim();
+  if (brokerVal) hydrateMqttDiscoveryCache(card, idx, brokerVal);
   mqttDeviceCounter++;
 }
 
@@ -765,9 +959,9 @@ function renderMqttMappings(topics, deviceIdx, container) {
   if (Object.keys(topics).length === 0) addMqttMetricRow({}, deviceIdx, container);
 }
 
-function addMqttMetricRow(device, deviceIdx, container, metric = '', topic = '', excludeMetrics = []) {
+function addMqttMetricRow(device, deviceIdx, container, metric = '', topic = '', excludeMetrics = [], sampleText = '') {
   if (!container) container = document.getElementById(`mqtt-mappings-list-${deviceIdx}`);
-  if (!container) return;
+  if (!container) return null;
   const row = document.createElement('div');
   row.className = 'metric-row';
   const metricSelect = createMetricDropdown(metric, excludeMetrics);
@@ -790,8 +984,95 @@ function addMqttMetricRow(device, deviceIdx, container, metric = '', topic = '',
   });
   row.appendChild(metricSelect);
   row.appendChild(topicInput);
+  if (sampleText) {
+    const chip = makeSampleChip('mqtt-sample', sampleText);
+    if (chip) row.appendChild(chip);
+  }
   row.appendChild(removeBtn);
   container.appendChild(row);
+  return row;
+}
+
+// ── MQTT discovery catalog (issue #108 wave 5, AC-26) ────────────────────
+// Sample chips (shared with the REST/external card): "topic = sample (type)".
+function makeSampleChip(cls, text) {
+  if (!text) return null;
+  const chip = document.createElement('span');
+  chip.className = cls;
+  chip.textContent = text;
+  chip.title = text;
+  chip.style.cssText = 'flex:0 1 auto;max-width:38%;min-width:0;font-size:0.74em;padding:0.15rem 0.55rem;border:1px solid #39414f;border-radius:999px;background:rgba(120,145,190,0.08);color:var(--text-secondary,#93a1b5);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+  return chip;
+}
+
+function mqttSampleText(topic, sample) {
+  let out = String(topic == null ? '' : topic);
+  if (sample && typeof sample === 'object') {
+    const type = sample.type ? String(sample.type) : '';
+    let val = sample.value;
+    if (type === 'string' && sample.raw !== undefined && sample.raw !== null) val = sample.raw;
+    const vs = String(val == null ? '' : val);
+    out = `${out} = ${vs}${type ? ` (${type})` : ''}`;
+  }
+  return out;
+}
+
+// One cache/discovery row: metric dropdown + topic input prefilled + sample
+// chip. Same .metric-row DOM contract as addMqttMetricRow, so the collector
+// persists only rows with a chosen metric AND topic; mapped rows keep polling.
+function addMqttDiscoveryRow(deviceIdx, container, topic, sample, excludeMetrics) {
+  const t = String(topic == null ? '' : topic);
+  if (!t || !container) return null;
+  const row = addMqttMetricRow({}, deviceIdx, container, '', t, excludeMetrics || [], mqttSampleText(t, sample));
+  if (!row) return null;
+  row._catalogEntity = (sample && typeof sample === 'object') ? { topic: t, sample } : { topic: t, sample: null };
+  // AC-38: cache/discovery rows are catalog rows — the save collector stamps
+  // _catalogV2 when a card persists one (manual '+ Add Mapping' rows via
+  // addMqttMetricRow carry no data-catalog and stay legacy-stamped).
+  row.dataset.catalog = '1';
+  const metricSelect = row.querySelector('.metric-name');
+  if (metricSelect && window.CatalogUI && typeof window.CatalogUI.createInlineMetricControl === 'function') {
+    window.CatalogUI.createInlineMetricControl(mqttAdapter, row, metricSelect, () => row._catalogEntity || null);
+  }
+  return row;
+}
+
+// AC-26: on card render, re-hydrate rows from the persisted discovery window
+// for this broker (GET /api/mqtt-discovery-cache — no listening). Additive:
+// never removes or duplicates rows that already exist (saved mappings win).
+async function hydrateMqttDiscoveryCache(card, idx, broker) {
+  try {
+    const res = await fetch(`/api/mqtt-discovery-cache?broker=${encodeURIComponent(broker)}`);
+    const data = await res.json();
+    if (!res.ok || !data || !Array.isArray(data.entries) || !data.entries.length) return;
+    const mappingsContainer = (card ? card.querySelector('.mappings-list') : null) || document.getElementById(`mqtt-mappings-list-${idx}`);
+    if (!mappingsContainer) return;
+    const existingTopics = new Set();
+    mappingsContainer.querySelectorAll('.metric-row .topic-input').forEach(ti => {
+      if (ti && ti.value) existingTopics.add(ti.value);
+    });
+    const used = getAllUsedMetrics();
+    let added = 0;
+    data.entries.slice()
+      .sort((a, b) => String(a && a.topic).localeCompare(String(b && b.topic)))
+      .forEach(en => {
+        const topic = (en && en.topic != null) ? String(en.topic) : '';
+        if (!topic || existingTopics.has(topic)) return;
+        existingTopics.add(topic);
+        addMqttDiscoveryRow(idx, mappingsContainer, topic, (en && en.sample) || null, Array.from(used));
+        added++;
+      });
+    if (!added) return;
+    refreshAllMetricDropdowns();
+    updateMappingSaveNote(mappingsContainer.closest('.device-card'));
+    const statusEl = document.getElementById(`mqtt-discover-status-${idx}`);
+    if (statusEl) {
+      statusEl.textContent = `Cache: ${data.entries.length} topics from the last discovery window (${added} added)`;
+      statusEl.className = 'status info';
+    }
+  } catch (e) {
+    // Discovery cache hydration is best-effort — a missing/empty cache is fine.
+  }
 }
 
 function reindexMqtt() {
@@ -870,13 +1151,26 @@ function renderModbusDevice(device, idx) {
     </div>
     <div class="section-divider"><span class="stg-divider-icon">🔗</span> Register Mappings</div>
     <div class="mappings-section">
+      <div class="mappings-filter-bar">
+        <input type="text" class="mappings-filter-input" placeholder="🔍 Filter mappings..." data-container="modbus-mappings-list-${idx}">
+      </div>
       <div class="mappings-list" id="modbus-mappings-list-${idx}"></div>
       <button type="button" class="fetch-btn load-modbus-registers" data-device="${idx}">
         📥 Load Profile Registers
       </button>
+      <button type="button" class="fetch-btn fetch-modbus-entities" data-device="${idx}" style="display:none;">
+        📋 Fetch Profile Entities
+      </button>
+      <button type="button" class="fetch-btn add-modbus-mapping" data-device="${idx}" style="display:none;">
+        + Add Mapping
+      </button>
     </div>
   `;
   container.appendChild(card);
+  // AC-29: remember the STORED device (mappings-key presence decides the
+  // implicit→explicit-none flip warning on save). Brand-new cards carry
+  // _newCard and are never warned.
+  card._origDevice = (!device || device._newCard) ? null : device;
   const transportSelect = card.querySelector('.modbus-transport-select');
   const tcpFields = card.querySelector('.modbus-tcp-fields');
   const serialFields = card.querySelector('.modbus-serial-fields');
@@ -927,26 +1221,95 @@ function renderModbusDevice(device, idx) {
     }
   });
   modbusDeviceCounter++;
-  // Profile change → auto-load register mappings
+  // Profile change → reset to the explicit catalog UI (AC-21): the mapping
+  // list shows a hint (nothing is auto-created or pre-bound), the legacy
+  // 'Load Profile Registers' button stays alongside Fetch/Add for the
+  // import-style flow.
   profileSelect.addEventListener('change', () => {
+    const profileId = profileSelect.value;
     const mappingsList = card.querySelector('.mappings-list');
     if (!mappingsList) return;
     if (mappingsList.children.length > 0 && !showConfirm('Changing profile will replace existing register mappings. Continue?')) {
       profileSelect.value = device.profile || '';
       return;
     }
-    loadModbusRegisterMappings(profileSelect.value, idx, mappingsList);
+    card._modbusEntities = null;
+    if (!profileId) {
+      CatalogUI.applyMode(modbusRegister, card, false);
+      mappingsList.innerHTML = '';
+      updateMappingSaveNote(card);
+      return;
+    }
+    CatalogUI.applyMode(modbusRegister, card, true);
+    mappingsList.innerHTML = '';
+    mappingsList.appendChild(modbusRegisterResetNote());
+    updateMappingSaveNote(card);
   });
-  // Load button click
+  // Load button click — retained legacy path (imports the profile's register
+  // defaults into pre-bound rows).
   card.querySelector('.load-modbus-registers').addEventListener('click', () => {
     const mappingsList = card.querySelector('.mappings-list');
-    loadModbusRegisterMappings(profileSelect.value, idx, mappingsList);
+    loadModbusRegisterMappings(profileSelect.value, idx, mappingsList).then(() => updateMappingSaveNote(card));
   });
-  // Restore saved mappings on initial load
-  if (device.mappings && Object.keys(device.mappings).length > 0) {
+  // Catalog flows: one empty-dropdown row per profile register (fetch) or a
+  // blank entity-picker row (+ Add Mapping). Zero auto-creation.
+  card.querySelector('.fetch-modbus-entities').addEventListener('click', () => {
+    const profileId = profileSelect.value || device.profile || '';
+    CatalogUI.fetchAndRender(modbusRegister, card.querySelector('.mappings-list'), card.querySelector('.fetch-modbus-entities'), { profileId });
+  });
+  card.querySelector('.add-modbus-mapping').addEventListener('click', () => {
+    const profileId = profileSelect.value || device.profile || '';
+    CatalogUI.addRow(modbusRegister, card, { profileId });
+  });
+  // Restore saved mappings on initial load (adapter-driven, resolves saved
+  // addresses against the profile entity catalog). Blank cards start in the
+  // Load-only state until a profile is chosen.
+  if (device.profile) {
     const mappingsList = card.querySelector('.mappings-list');
-    renderModbusMappings(profileSelect.value, device.mappings, mappingsList);
+    const hasMappings = device.mappings && Object.keys(device.mappings).length > 0;
+    if (hasMappings) mappingsList.innerHTML = '<div class="note">Loading saved mappings…</div>';
+    initModbusCardMappings(card, device.profile, device.mappings || {}, mappingsList);
+  } else if (window.CatalogUI) {
+    CatalogUI.applyMode(modbusRegister, card, false);
   }
+}
+
+function modbusRegisterResetNote() {
+  const note = document.createElement('div');
+  note.className = 'note';
+  note.textContent = 'No mappings yet — “Fetch Profile Entities” lists every register for this profile (metrics are never auto-created), “+ Add Mapping” adds a single row, or “Load Profile Registers” imports the profile defaults.';
+  return note;
+}
+
+// Async initialiser for a Modbus card: catalog mode + restore saved mappings
+// through the shared component (chip rows, metric dropdowns pre-selected).
+// NOTE: the shared component (catalog-ui.js) loads AFTER this file, so nothing
+// here may touch CatalogUI before the first await yields.
+async function initModbusCardMappings(card, profileId, savedMappings, mappingsList) {
+  if (!profileId) return;
+  if (!mappingsList) mappingsList = card.querySelector('.mappings-list');
+  if (!mappingsList) return;
+  const profileSel = card.querySelector('.modbus-profile-select');
+  const profileStillSelected = () => {
+    if (!profileSel) return true;
+    return profileSel.value === '' || profileSel.value === profileId;
+  };
+  let entities = [];
+  try {
+    entities = await fetchModbusProfileEntities(profileId);
+    card._modbusEntities = entities;
+  } catch (e) {
+    card._modbusEntities = [];
+  }
+  if (!profileStillSelected()) return;
+  if (window.CatalogUI) CatalogUI.applyMode(modbusRegister, card, true);
+  if (savedMappings && Object.keys(savedMappings).length > 0) {
+    CatalogUI.renderSaved(modbusRegister, savedMappings, entities, mappingsList);
+  } else {
+    mappingsList.innerHTML = '';
+    mappingsList.appendChild(modbusRegisterResetNote());
+  }
+  updateMappingSaveNote(card);
 }
 
 function reindexModbus() {
@@ -960,7 +1323,7 @@ function reindexModbus() {
 const addModbusBtn = document.getElementById('add-modbus-device');
 if (addModbusBtn) addModbusBtn.addEventListener('click', () => {
   const idx = modbusDeviceCounter;
-  renderModbusDevice({ name: '', host: '', port: 502, unit: 1, poll_interval: 30, enabled: true, profile: '', transport: 'tcp' }, idx);
+  renderModbusDevice({ name: '', host: '', port: 502, unit: 1, poll_interval: 30, enabled: true, profile: '', transport: 'tcp', _newCard: true }, idx);
 });
 
 // ---------- Modbus register mapping helpers ----------
@@ -1003,6 +1366,9 @@ function renderModbusMappings(profileId, mappings, container) {
       const row = document.createElement('div');
       row.className = 'metric-row';
       row.dataset.address = address;
+      // AC-29: legacy Load rows stamp the same row-state contract as CatalogUI
+      // rows (prevMetric + cleared flag when flipped back to empty).
+      stampRowMetricState(row, metricName);
 
       const descSpan = document.createElement('span');
       descSpan.className = 'register-desc';
@@ -1021,11 +1387,14 @@ function renderModbusMappings(profileId, mappings, container) {
       removeBtn.className = 'remove-btn remove-metric';
       removeBtn.textContent = '✕';
       removeBtn.addEventListener('click', () => {
+        const cardEl = row.closest('.device-card');
         row.remove();
         if (refreshAllMetricDropdowns) refreshAllMetricDropdowns();
+        updateMappingSaveNote(cardEl);
       });
 
       metricSelect.addEventListener('change', () => {
+        syncRowClearedFlag(row, metricSelect);
         if (refreshAllMetricDropdowns) refreshAllMetricDropdowns();
       });
 
@@ -1035,6 +1404,7 @@ function renderModbusMappings(profileId, mappings, container) {
       container.appendChild(row);
     });
     if (refreshAllMetricDropdowns) refreshAllMetricDropdowns();
+    updateMappingSaveNote(container.closest ? container.closest('.device-card') : null);
   }).catch(() => {
     container.innerHTML = '<div class="note" style="color:var(--error);">Failed to load register details</div>';
   });
@@ -1128,6 +1498,8 @@ function renderRs232Mappings(profileId, savedMappings, container) {
       const row = document.createElement('div');
       row.className = 'metric-row';
       row.dataset.address = sourceKey;
+      // AC-29: legacy Load rows stamp the same row-state contract as CatalogUI rows.
+      stampRowMetricState(row, metricName);
 
       const descSpan = document.createElement('span');
       descSpan.className = 'register-desc';
@@ -1149,11 +1521,14 @@ function renderRs232Mappings(profileId, savedMappings, container) {
       removeBtn.className = 'remove-btn remove-metric';
       removeBtn.textContent = '✕';
       removeBtn.addEventListener('click', () => {
+        const cardEl = row.closest('.device-card');
         row.remove();
         if (refreshAllMetricDropdowns) refreshAllMetricDropdowns();
+        updateMappingSaveNote(cardEl);
       });
 
       metricSelect.addEventListener('change', () => {
+        syncRowClearedFlag(row, metricSelect);
         if (refreshAllMetricDropdowns) refreshAllMetricDropdowns();
       });
 
@@ -1164,6 +1539,7 @@ function renderRs232Mappings(profileId, savedMappings, container) {
     });
 
     if (refreshAllMetricDropdowns) refreshAllMetricDropdowns();
+    updateMappingSaveNote(container.closest ? container.closest('.device-card') : null);
   }).catch(() => {
     container.innerHTML = '<div class="note" style="color:var(--error);">Failed to load RS232 field details</div>';
   });
@@ -1171,6 +1547,9 @@ function renderRs232Mappings(profileId, savedMappings, container) {
 
 let rs232DeviceCounter = 0;
 let availableRs232Ports = [];
+// Profile list cache ({id,name,protocol}) — protocol drives which rs232 family
+// adapter a card uses (register / ascii / vedirect / solax).
+let rs232ProfilesCache = [];
 
 function buildRs232DeviceList(devices) {
   const container = document.getElementById('rs232-devices-container');
@@ -1240,13 +1619,24 @@ function renderRs232Device(device, idx) {
     </div>
     <div class="section-divider"><span class="stg-divider-icon">🔗</span> Field Mappings</div>
     <div class="mappings-section">
+      <div class="mappings-filter-bar">
+        <input type="text" class="mappings-filter-input" placeholder="🔍 Filter mappings..." data-container="rs232-mappings-list-${idx}">
+      </div>
       <div class="mappings-list" id="rs232-mappings-list-${idx}"></div>
       <button type="button" class="fetch-btn load-rs232-fields" data-device="${idx}">
         📥 Load Profile Fields
       </button>
+      <button type="button" class="fetch-btn fetch-rs232-entities" data-device="${idx}" style="display:none;">
+        📋 Fetch Profile Entities
+      </button>
+      <button type="button" class="fetch-btn add-rs232-mapping" data-device="${idx}" style="display:none;">
+        + Add Mapping
+      </button>
     </div>
   `;
   container.appendChild(card);
+  // AC-29: stored-device capture (see renderModbusDevice).
+  card._origDevice = (!device || device._newCard) ? null : device;
 
   const portSelect = card.querySelector('.rs232-port-select');
   const customPathDiv = card.querySelector('.rs232-custom-path');
@@ -1256,15 +1646,19 @@ function renderRs232Device(device, idx) {
 
   const profileSelect = card.querySelector('.rs232-profile-select');
   fetch('/api/rs232/profiles').then(r => r.json()).then(profiles => {
+    rs232ProfilesCache = Array.isArray(profiles) ? profiles : rs232ProfilesCache;
     profiles.forEach(p => {
-      if (!/bms/i.test(String(p.id) + ' ' + String(p.name))) return;
+      if (/bms/i.test(String(p.id) + ' ' + String(p.name))) return;
       const opt = document.createElement('option');
       opt.value = p.id;
       opt.textContent = `${p.name} (${p.protocol})`;
       if (p.id === device.profile) opt.selected = true;
       profileSelect.appendChild(opt);
     });
-    // Auto-load field mappings when profile changes
+    // Profile change → family-adapter dispatch (#108 wave 4, AC-22): apply the
+    // profile's serial defaults, reset the mapping list to the explicit
+    // catalog UI (nothing auto-created/pre-bound). The legacy 'Load Profile
+    // Fields' button stays alongside Fetch/Add.
     profileSelect.addEventListener('change', () => {
       const mappingsList = card.querySelector('.mappings-list');
       if (!mappingsList) return;
@@ -1272,9 +1666,17 @@ function renderRs232Device(device, idx) {
         profileSelect.value = device.profile || '';
         return;
       }
+      const profileId = profileSelect.value;
+      card._rs232Entities = null;
+      if (!profileId) {
+        CatalogUI.applyMode(CatalogUI.adapter('rs232Ascii'), card, false);
+        mappingsList.innerHTML = '';
+        updateMappingSaveNote(card);
+        return;
+      }
       // Apply profile defaults (serial params + modbus unit id) so e.g. the
       // Anern renders at its 2400 baud / unit id 5 without manual tuning.
-      fetch(`/api/rs232/profile/${encodeURIComponent(profileSelect.value)}`)
+      fetch(`/api/rs232/profile/${encodeURIComponent(profileId)}`)
         .then(r => (r.ok ? r.json() : null))
         .then(profile => {
           if (profile && profile.defaults) {
@@ -1292,7 +1694,14 @@ function renderRs232Device(device, idx) {
           if (unitIdInput && profile && profile.default_unit_id != null) unitIdInput.value = profile.default_unit_id;
         })
         .catch(() => {})
-        .finally(() => loadRs232Mappings(profileSelect.value, idx, mappingsList));
+        .finally(() => {
+          const meta = rs232ProfilesCache.find(x => x.id === profileId) || null;
+          const adapter = CatalogUI.adapter(rs232FamilyAdapterKey(meta) || 'rs232Ascii');
+          CatalogUI.applyMode(adapter, card, true);
+          mappingsList.innerHTML = '';
+          mappingsList.appendChild(rs232ResetNote());
+          updateMappingSaveNote(card);
+        });
     });
   });
 
@@ -1325,17 +1734,92 @@ function renderRs232Device(device, idx) {
 
   rs232DeviceCounter++;
 
-  // Load button click
+  // Load button click — retained legacy path (imports the profile's field
+  // defaults into pre-bound rows; covers query/ascii + vedirect families).
   card.querySelector('.load-rs232-fields').addEventListener('click', () => {
     const mappingsList = card.querySelector('.mappings-list');
-    loadRs232Mappings(profileSelect.value, idx, mappingsList);
+    loadRs232Mappings(profileSelect.value, idx, mappingsList).then(() => updateMappingSaveNote(card));
   });
 
-  // Restore saved mappings on initial load
-  if (device.mappings && Object.keys(device.mappings).length > 0) {
+  // Catalog flows: one empty-dropdown row per profile entity (fetch) or a
+  // blank entity-picker row (+ Add Mapping). Zero auto-creation.
+  card.querySelector('.fetch-rs232-entities').addEventListener('click', () => {
+    const profileId = profileSelect.value || device.profile || '';
+    const meta = rs232ProfilesCache.find(x => x.id === profileId) || null;
+    const adapter = CatalogUI.adapter(rs232FamilyAdapterKey(meta) || 'rs232Ascii');
+    CatalogUI.fetchAndRender(adapter, card.querySelector('.mappings-list'), card.querySelector('.fetch-rs232-entities'), { profileId });
+  });
+  card.querySelector('.add-rs232-mapping').addEventListener('click', () => {
+    const profileId = profileSelect.value || device.profile || '';
+    const meta = rs232ProfilesCache.find(x => x.id === profileId) || null;
+    const adapter = CatalogUI.adapter(rs232FamilyAdapterKey(meta) || 'rs232Ascii');
+    CatalogUI.addRow(adapter, card, { profileId });
+  });
+
+  // Restore saved mappings on initial load (family-adapter driven, resolves
+  // saved values against the profile entity catalog). Blank cards start in the
+  // Load-only state until a profile is chosen.
+  if (device.profile) {
     const mappingsList = card.querySelector('.mappings-list');
-    renderRs232Mappings(profileSelect.value, device.mappings, mappingsList);
+    const hasMappings = device.mappings && Object.keys(device.mappings).length > 0;
+    if (hasMappings) mappingsList.innerHTML = '<div class="note">Loading saved mappings…</div>';
+    initRs232CardMappings(card, device.profile, device.mappings || {}, mappingsList);
+  } else if (window.CatalogUI) {
+    CatalogUI.applyMode(CatalogUI.adapter('rs232Ascii'), card, false);
   }
+}
+
+function rs232ResetNote() {
+  const note = document.createElement('div');
+  note.className = 'note';
+  note.textContent = 'No mappings yet — “Fetch Profile Entities” lists every field for this profile (metrics are never auto-created), “+ Add Mapping” adds a single row, or “Load Profile Fields” imports the profile defaults.';
+  return note;
+}
+
+// Pick the rs232 family adapter from fetched entities when the profile-list
+// metadata is unavailable (entities carry the projection kind).
+function rs232AdapterFromEntities(entities) {
+  const first = (Array.isArray(entities) && entities[0]) || null;
+  if (!first || !window.CatalogUI) return CatalogUI.adapter('rs232Ascii');
+  const kind = String(first.kind || '').toLowerCase();
+  if (kind === 'register') return CatalogUI.adapter('rs232Register');
+  if (kind === 'vedirect') return CatalogUI.adapter('rs232Vedirect');
+  if (kind === 'binary') return CatalogUI.adapter('rs232Solax');
+  return CatalogUI.adapter('rs232Ascii');
+}
+
+// Async initialiser for an RS232 card: family-adapter mode + restore saved
+// mappings through the shared component (chip rows, metric dropdowns
+// pre-selected, handles resolved against the catalog).
+async function initRs232CardMappings(card, profileId, savedMappings, mappingsList) {
+  if (!profileId) return;
+  if (!mappingsList) mappingsList = card.querySelector('.mappings-list');
+  if (!mappingsList) return;
+  const profileSel = card.querySelector('.rs232-profile-select');
+  const profileStillSelected = () => {
+    if (!profileSel) return true;
+    return profileSel.value === '' || profileSel.value === profileId;
+  };
+  let entities = [];
+  try {
+    entities = await fetchRs232ProfileEntities(profileId);
+    card._rs232Entities = entities;
+  } catch (e) {
+    card._rs232Entities = [];
+  }
+  if (!profileStillSelected()) return;
+  const meta = rs232ProfilesCache.find(x => x.id === profileId) || null;
+  let adapter = meta ? CatalogUI.adapter(rs232FamilyAdapterKey(meta)) : null;
+  if (!adapter) adapter = rs232AdapterFromEntities(entities);
+  if (!adapter) adapter = CatalogUI.adapter('rs232Ascii');
+  CatalogUI.applyMode(adapter, card, true);
+  if (savedMappings && Object.keys(savedMappings).length > 0) {
+    CatalogUI.renderSaved(adapter, savedMappings, entities, mappingsList);
+  } else {
+    mappingsList.innerHTML = '';
+    mappingsList.appendChild(rs232ResetNote());
+  }
+  updateMappingSaveNote(card);
 }
 
 function reindexRs232() {
@@ -1368,6 +1852,9 @@ function collectRs232Config(card) {
     const metricName = row.querySelector('.metric-name').value;
     if (key && metricName) dev.mappings[metricName] = key;
   });
+  // AC-38: catalog-mode saves (fetch/+Add/restore rows) carry data-catalog;
+  // legacy 'Load Profile Fields' rows never do.
+  if (cardHasCatalogRows(card)) dev._catalogV2 = true;
   return dev;
 }
 
@@ -1378,7 +1865,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderRs232Device({
       name: '', serial_path: '', baud: 9600, data_bits: 8,
       stop_bits: 1, parity: 'none', profile: '', timeout: 5000,
-      enabled: true,
+      enabled: true, _newCard: true,
     }, idx);
   });
 });
@@ -1416,7 +1903,11 @@ function renderExternalSource(source, idx) {
         <span style="width:60px;"></span>
       </div>
       <div class="mappings-list" id="external-mappings-list-${idx}"></div>
-      <button type="button" class="fetch-btn add-external-metric" data-device="${idx}">+ Add Mapping</button>
+      <div class="form-row" style="gap:0.5rem;align-items:center;margin-top:0.3rem;">
+        <button type="button" class="fetch-btn add-external-metric" data-device="${idx}" style="flex:none;">+ Add Mapping</button>
+        <button type="button" class="fetch-btn fetch-external-fields" data-device="${idx}" style="flex:none;">📋 Fetch Fields</button>
+        <span class="test-status" id="external-fields-status-${idx}"></span>
+      </div>
     </div>
     <div class="section-divider"><span class="stg-divider-icon">🧪</span> Test Path <span style="font-weight:normal;font-size:0.8em;color:var(--text-muted);">— enter a JSON path and test it against the URL above</span></div>
     <div class="test-row" style="display:flex;gap:0.5rem;align-items:center;margin-top:0.3rem;">
@@ -1440,6 +1931,57 @@ function renderExternalSource(source, idx) {
     const used = getAllUsedMetrics();
     addExternalMetricRow(idx, mappingsList, '', '', Array.from(used));
     refreshAllMetricDropdowns();
+  });
+  // AC-27: "Fetch Fields" — flatten the live JSON document into one row per
+  // scalar leaf (.jsonpath prefilled + sample/type chip). Re-fetch replaces
+  // only the unmapped leaf rows; rows that gained a metric stay (they are
+  // mappings now), and saved mappings/manual rows are never touched.
+  card.querySelector('.fetch-external-fields').addEventListener('click', async () => {
+    const statusEl = document.getElementById(`external-fields-status-${idx}`);
+    const url = card.querySelector('input[name$="[url]"]').value;
+    if (!url) { showStatus(statusEl, 'URL required', 'error'); return; }
+    showStatus(statusEl, 'Fetching fields…', 'info');
+    try {
+      const res = await fetch('/api/external/fields', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ url })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data && data.error) || `Fields fetch failed (HTTP ${res.status})`);
+      const leaves = Array.isArray(data && data.leaves) ? data.leaves : [];
+      // Drop unmapped leaf rows from a previous fetch; keep rows that now hold
+      // a metric (they are real mappings and must survive a re-fetch).
+      mappingsList.querySelectorAll('.metric-row[data-external-leaf="1"]').forEach(row => {
+        const ms = row.querySelector('.metric-name');
+        if (ms && ms.value) row.removeAttribute('data-external-leaf');
+        else row.remove();
+      });
+      // Never duplicate a path already present in ANY row (manual or mapped).
+      const presentPaths = new Set();
+      mappingsList.querySelectorAll('.metric-row .jsonpath').forEach(inp => {
+        const p = (inp && inp.value) ? inp.value.trim() : '';
+        if (p) presentPaths.add(p);
+      });
+      const used = getAllUsedMetrics();
+      let added = 0;
+      leaves.forEach(leaf => {
+        const path = (leaf && leaf.path !== undefined) ? String(leaf.path).trim() : '';
+        if (!path || presentPaths.has(path)) return;
+        presentPaths.add(path);
+        addExternalLeafRow(idx, mappingsList, leaf, Array.from(used));
+        added++;
+      });
+      showStatus(statusEl,
+        `Fetched ${data.leafCount != null ? data.leafCount : leaves.length} ${(data.leafCount || leaves.length) === 1 ? 'leaf' : 'leaves'}`
+        + (data.truncated ? ' (truncated by caps)' : '')
+        + (added ? ` — ${added} new field rows` : ' — all fields already listed'),
+        'success');
+      refreshAllMetricDropdowns();
+      updateMappingSaveNote(mappingsList.closest('.device-card'));
+    } catch (e) {
+      showStatus(statusEl, e.message, 'error');
+    }
   });
   const testBtn = card.querySelector('.test-external');
   const testPathInput = card.querySelector('.test-jsonpath');
@@ -1501,7 +2043,44 @@ function addExternalMetricRow(deviceIdx, container, metric = '', jsonPath = '', 
   row.appendChild(jsonPathInput);
   row.appendChild(removeBtn);
   container.appendChild(row);
+  return row;
 }
+
+// ── REST/external leaf catalog (issue #108 wave 5, AC-27) ────────────────
+// "Fetch Fields" → POST /api/external/fields {url} → one row per flattened
+// scalar leaf: .jsonpath prefilled with the leaf path + a sample/type chip.
+// Manual rows and the Test Path flow are unchanged; re-fetch replaces ONLY the
+// unmapped leaf rows (data-external-leaf="1") — saved mappings are never
+// touched, and leaf paths already present in any row are never duplicated.
+function externalLeafSampleText(leaf) {
+  const path = (leaf && leaf.path !== undefined) ? String(leaf.path) : '';
+  let vs = '';
+  let type = '';
+  if (leaf) {
+    if (leaf.sample !== undefined && leaf.sample !== null) vs = String(leaf.sample);
+    else if (leaf.value !== undefined && leaf.value !== null) vs = String(leaf.value);
+    if (leaf.type !== undefined && leaf.type !== null) type = String(leaf.type);
+  }
+  return `${path} = ${vs}${type ? ` (${type})` : ''}`;
+}
+
+function addExternalLeafRow(deviceIdx, container, leaf, excludeMetrics) {
+  const path = (leaf && leaf.path !== undefined) ? String(leaf.path) : '';
+  if (!path || !container) return null;
+  const row = addExternalMetricRow(deviceIdx, container, '', path, excludeMetrics || []);
+  if (!row) return null;
+  row.dataset.externalLeaf = '1';
+  row._catalogLeaf = leaf || null;
+  const chip = makeSampleChip('jsonpath-sample', externalLeafSampleText(leaf));
+  const removeBtn = row.querySelector('.remove-metric');
+  if (chip && removeBtn) row.insertBefore(chip, removeBtn);
+  const metricSelect = row.querySelector('.metric-name');
+  if (metricSelect && window.CatalogUI && typeof window.CatalogUI.createInlineMetricControl === 'function') {
+    window.CatalogUI.createInlineMetricControl(externalAdapter, row, metricSelect, () => row._catalogLeaf || null);
+  }
+  return row;
+}
+
 function reindexExternal() {
   const cards = document.querySelectorAll('#external-sources-container .device-card');
   externalSourceCounter = 0;
@@ -2424,6 +3003,7 @@ function getTransportForProfile(profileId) {
   const p = getProfileById(profileId);
   if (!p) return 'solarman-v5';
   if (p.protocol === 'felicity-tcp') return 'felicity-tcp';
+  if (p.protocol === 'luxpower-tcp') return 'luxpower-tcp';
   return p.transport || 'solarman-v5';
 }
 
@@ -2431,17 +3011,33 @@ function updateDongleTransportUI(card) {
   const transportSelect = card.querySelector('select[name$="[transport]"]');
   if (!transportSelect) return;
   const tx = transportSelect.value;
+  const isLux = tx === 'luxpower-tcp';
   const serialRow = card.querySelector('.dongle-serial-row');
   const hostInput = card.querySelector('input[name$="[host]"]');
   const portInput = card.querySelector('input[name$="[port]"]');
-  if (tx === 'modbus-tcp') {
-    if (serialRow) serialRow.style.display = 'none';
-    if (hostInput) hostInput.style.display = '';
-    if (portInput) portInput.style.display = '';
-  } else {
-    if (serialRow) serialRow.style.display = (tx === 'felicity-tcp') ? 'none' : '';
-    if (hostInput) hostInput.style.display = '';
-    if (portInput) portInput.style.display = '';
+  const serialInput = card.querySelector('input[name$="[serial_number]"]');
+  const dongleSerialInput = card.querySelector('input[name$="[dongle_serial]"]');
+  const inverterSerialInput = card.querySelector('input[name$="[inverter_serial]"]');
+  const unitIdInput = card.querySelector('input[name$="[modbus_unit_id]"]');
+  if (serialRow) serialRow.style.display = (tx === 'modbus-tcp' || tx === 'felicity-tcp') ? 'none' : '';
+  if (hostInput) hostInput.style.display = '';
+  if (portInput) portInput.style.display = '';
+  if (serialInput) serialInput.style.display = isLux ? 'none' : '';
+  if (dongleSerialInput) dongleSerialInput.style.display = isLux ? '' : 'none';
+  if (inverterSerialInput) inverterSerialInput.style.display = isLux ? '' : 'none';
+  if (unitIdInput) unitIdInput.style.display = isLux ? 'none' : '';
+  if (isLux && portInput && !portInput.value) portInput.value = 8000;
+  // #103 (AC12/AC13/D4): migrate a stranded serial_number into dongle_serial for
+  // LuxPower — but ONLY when dongle_serial is empty; if dongle_serial is already
+  // filled, touch nothing. Idempotent: runs on profile change, transport change
+  // and initial render.
+  if (isLux) {
+    const sn = serialInput ? serialInput.value.trim() : '';
+    const ds = dongleSerialInput ? dongleSerialInput.value.trim() : '';
+    if (ds === '' && sn !== '') {
+      if (dongleSerialInput) dongleSerialInput.value = sn;
+      if (serialInput) serialInput.value = '';
+    }
   }
 }
 
@@ -2469,11 +3065,13 @@ function renderDongleDevice(device, idx) {
     </div>
     <div class="form-row dongle-serial-row" style="${transport === 'modbus-tcp' ? 'display:none;' : ''}">
       <input type="text" name="dongle_config[${idx}][serial_number]" placeholder="Logger Serial Number" value="${escapeHtml(device.serial_number || '')}">
+      <input type="text" name="dongle_config[${idx}][dongle_serial]" placeholder="Dongle Serial" value="${escapeHtml(device.dongle_serial || '')}" title="Dongle serial — 10-char serial on the dongle label (LuxPower only)">
+      <input type="text" name="dongle_config[${idx}][inverter_serial]" placeholder="Inverter Serial" value="${escapeHtml(device.inverter_serial || '')}" title="Inverter serial — 10-char serial on the inverter label (LuxPower only)">
     </div>
     <div class="section-divider"><span class="stg-divider-icon">⚙️</span> Configuration</div>
     <div class="form-row">
       <input type="number" name="dongle_config[${idx}][modbus_unit_id]" placeholder="Modbus Unit ID" value="${device.modbus_unit_id || 1}" style="width:100px;">
-      <input type="number" name="dongle_config[${idx}][poll_interval]" placeholder="Poll (s)" value="${device.poll_interval || 30}" style="width:100px;">
+      <input type="number" name="dongle_config[${idx}][poll_interval]" placeholder="Poll (s)" value="${device.poll_interval || (transport === 'luxpower-tcp' ? 5 : 30)}" style="width:100px;">
       <input type="text" name="dongle_config[${idx}][prefix]" placeholder="Metric Prefix (optional)" value="${escapeHtml(device.prefix || '')}" style="width:150px;">
       <button type="button" class="fetch-btn test-dongle">Test Connection</button>
       <span class="test-status" id="dongle-test-status-${idx}"></span>
@@ -2483,16 +3081,30 @@ function renderDongleDevice(device, idx) {
       <option value="solarman-v5" ${transport === 'solarman-v5' ? 'selected' : ''}>Solarman v5</option>
       <option value="felicity-tcp" ${transport === 'felicity-tcp' ? 'selected' : ''}>Felicity TCP</option>
       <option value="growatt" ${transport === 'growatt' ? 'selected' : ''}>Growatt</option>
+      <option value="luxpower-tcp" ${transport === 'luxpower-tcp' ? 'selected' : ''}>LuxPower Local TCP</option>
     </select>
     <div class="section-divider"><span class="stg-divider-icon">🔗</span> Register Mappings</div>
     <div class="mappings-section">
+      <div class="mappings-filter-bar">
+        <input type="text" class="mappings-filter-input" placeholder="🔍 Filter mappings..." data-container="dongle-mappings-list-${idx}">
+      </div>
       <div class="mappings-list" id="dongle-mappings-list-${idx}"></div>
       <button type="button" class="fetch-btn load-dongle-registers" data-device="${idx}">
         📥 Load Profile Registers
       </button>
+      <button type="button" class="fetch-btn fetch-dongle-entities" data-device="${idx}" style="display:none;">
+        📋 Fetch Profile Entities
+      </button>
+      <button type="button" class="fetch-btn add-dongle-mapping" data-device="${idx}" style="display:none;">
+        + Add Mapping
+      </button>
     </div>
+    <div class="section-divider dongle-write-divider" id="dongle-write-divider-${idx}" style="display:none;"><span class="stg-divider-icon">✍️</span> Write Controls</div>
+    <div class="write-controls" id="dongle-write-controls-${idx}" style="display:none;"></div>
   `;
   container.appendChild(card);
+  // AC-29: stored-device capture (see renderModbusDevice).
+  card._origDevice = (!device || device._newCard) ? null : device;
 
   const transportSelect = card.querySelector('select[name$="[transport]"]');
 
@@ -2509,8 +3121,9 @@ function renderDongleDevice(device, idx) {
       });
     }).catch(() => {});
 
-  profileSelect.addEventListener('change', () => {
-    const p = getProfileById(profileSelect.value);
+  profileSelect.addEventListener('change', async () => {
+    const profileId = profileSelect.value;
+    const p = await resolveDongleProfile(profileId);
     if (!p) return;
     const tx = p.protocol === 'felicity-tcp' ? 'felicity-tcp' : p.transport;
     transportSelect.value = tx;
@@ -2520,14 +3133,42 @@ function renderDongleDevice(device, idx) {
     const unitIdInput = card.querySelector('input[name$="[modbus_unit_id]"]');
     unitIdInput.value = p.default_unit_id || 1;
     unitIdInput.style.display = (tx === 'felicity-tcp') ? 'none' : '';
-    // Auto-load register mappings when profile changes
+    // Mapping UI is adapter-dispatched by the profile's family (#108 wave 4):
+    //   luxpower-tcp → entity-catalog UI only (wave-3 path, unchanged)
+    //   register transports → entity-catalog UI with the legacy Load retained
+    //   growatt/felicity → legacy register/field UI (input families, later wave)
+    // Metrics are never auto-created or pre-bound in the catalog paths; the
+    // legacy Load button stays as the only auto-creating entry point.
     const mappingsList = card.querySelector('.mappings-list');
     if (mappingsList) {
       if (mappingsList.children.length > 0 && !showConfirm('Changing profile will replace existing register mappings. Continue?')) {
         profileSelect.value = device.profile || '';
         return;
       }
-      loadDongleRegisterMappings(profileSelect.value, idx, mappingsList);
+      const lux = isLuxpowerDongleProfile(p);
+      const reg = isDongleRegisterProfile(p);
+      card._dongleEntities = null;
+      // Card button mode is adapter-driven via the shared CatalogUI component.
+      applyDongleMappingMode(card, p);
+      if (lux) {
+        const note = document.createElement('div');
+        note.className = 'note';
+        note.textContent = 'No entities mapped yet — “Fetch Profile Entities” lists every register for this profile, or “+ Add Mapping” adds a single row.';
+        mappingsList.innerHTML = '';
+        mappingsList.appendChild(note);
+        populateDongleWriteControls(card, profileSelect.value);
+      } else if (reg) {
+        hideDongleWriteControls(card);
+        // Register transport: explicit catalog UI. Reset with a hint — nothing
+        // auto-creates; 'Load Profile Registers' (visible alongside) is the
+        // retained legacy auto-create path.
+        mappingsList.innerHTML = '';
+        mappingsList.appendChild(dongleRegisterResetNote());
+      } else {
+        hideDongleWriteControls(card);
+        loadDongleRegisterMappings(profileSelect.value, idx, mappingsList);
+      }
+      updateMappingSaveNote(card);
     }
   });
 
@@ -2547,6 +3188,8 @@ function renderDongleDevice(device, idx) {
     const host = card.querySelector('input[name$="[host]"]')?.value.trim() || '';
     const port = card.querySelector('input[name$="[port]"]')?.value;
     const serial = card.querySelector('input[name$="[serial_number]"]')?.value || '';
+    const dongleSerial = card.querySelector('input[name$="[dongle_serial]"]')?.value || '';
+    const inverterSerial = card.querySelector('input[name$="[inverter_serial]"]')?.value || '';
     const unitId = card.querySelector('input[name$="[modbus_unit_id]"]')?.value;
     const tx = transportSelect.value;
     if (!host) { showStatus(statusEl, 'Host required', 'error'); return; }
@@ -2555,10 +3198,13 @@ function renderDongleDevice(device, idx) {
       const res = await fetch('/api/dongle/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-        body: JSON.stringify({ host, port: parseInt(port) || undefined, serial_number: serial, modbus_unit_id: parseInt(unitId) || 1, transport: tx })
+        body: JSON.stringify({ host, port: parseInt(port) || undefined, serial_number: serial, dongle_serial: dongleSerial, inverter_serial: inverterSerial, modbus_unit_id: parseInt(unitId) || 1, transport: tx })
       });
       const data = await res.json();
-      if (res.ok) showStatus(statusEl, `OK — Register 0x0100 = ${data.raw}`, 'success');
+      if (res.ok) {
+        const label = (tx === 'luxpower-tcp') ? 'OK — Operational State (reg 0x0000) =' : 'OK — Register 0x0100 =';
+        showStatus(statusEl, `${label} ${data.raw}`, 'success');
+      }
       else showStatus(statusEl, data.error, 'error');
     } catch (err) {
       showStatus(statusEl, err.message, 'error');
@@ -2567,16 +3213,47 @@ function renderDongleDevice(device, idx) {
 
   dongleDeviceCounter++;
 
-  // Load button click
-  card.querySelector('.load-dongle-registers').addEventListener('click', () => {
+  // Load button click (register-based profiles; luxpower-tcp cards use the
+  // 'Fetch Profile Entities' / '+ Add Mapping' buttons instead — visible only
+  // in luxpower mode via CatalogUI.applyMode with the dongleLux adapter).
+  card.querySelector('.load-dongle-registers').addEventListener('click', async () => {
+    const profileId = profileSelect.value || device.profile || '';
+    if (!profileId) return;
+    if (await isLuxpowerDongleProfileAsync(profileId)) return; // hidden in lux mode — guard anyway (no auto-create)
     const mappingsList = card.querySelector('.mappings-list');
-    loadDongleRegisterMappings(profileSelect.value, idx, mappingsList);
+    loadDongleRegisterMappings(profileId, idx, mappingsList).then(() => updateMappingSaveNote(card));
   });
 
-  // Restore saved mappings on initial load
-  if (device.mappings && Object.keys(device.mappings).length > 0) {
+  // LuxPower local-TCP / register transports (#106 2C / #108): fetch the
+  // profile entity catalog via the shared CatalogUI component and render one
+  // row per entity — metric dropdown EMPTY (metrics are never auto-created or
+  // pre-bound). Which adapter runs is decided by the profile's family, so the
+  // same buttons serve dongleLux (luxpower-tcp) and dongleRegister (register
+  // transports). growatt/felicity never show these buttons (applyMode).
+  card.querySelector('.fetch-dongle-entities').addEventListener('click', () => {
+    const profileId = profileSelect.value || device.profile || '';
+    resolveDongleProfile(profileId).then(p => {
+      const adapter = dongleCatalogAdapterForProfile(p);
+      if (!adapter) return;
+      CatalogUI.fetchAndRender(adapter, card.querySelector('.mappings-list'), card.querySelector('.fetch-dongle-entities'), { profileId });
+    });
+  });
+  card.querySelector('.add-dongle-mapping').addEventListener('click', () => {
+    const profileId = profileSelect.value || device.profile || '';
+    resolveDongleProfile(profileId).then(p => {
+      const adapter = dongleCatalogAdapterForProfile(p);
+      if (!adapter) return;
+      CatalogUI.addRow(adapter, card, { profileId });
+    });
+  });
+
+  // Restore saved mappings on initial load (mode-aware: luxpower-tcp profiles
+  // restore namespaced metric↔entity rows resolved via the entity catalog).
+  if (device.profile) {
     const mappingsList = card.querySelector('.mappings-list');
-    renderDongleMappings(profileSelect.value, device.mappings, mappingsList);
+    const hasMappings = device.mappings && Object.keys(device.mappings).length > 0;
+    if (hasMappings) mappingsList.innerHTML = '<div class="note">Loading saved mappings…</div>';
+    initDongleCardMappings(card, device.profile, device.mappings || {}, mappingsList);
   }
 }
 function reindexDongle() {
@@ -2590,7 +3267,7 @@ function reindexDongle() {
 const addDongleBtn = document.getElementById('add-dongle-device');
 if (addDongleBtn) addDongleBtn.addEventListener('click', () => {
   const idx = dongleDeviceCounter;
-  renderDongleDevice({ name: '', host: '', port: '', serial_number: '', modbus_unit_id: 1, poll_interval: 30, transport: 'solarman-v5', profile: '', prefix: '', enabled: true }, idx);
+  renderDongleDevice({ name: '', host: '', port: '', serial_number: '', modbus_unit_id: 1, poll_interval: 30, transport: 'solarman-v5', profile: '', prefix: '', enabled: true, _newCard: true }, idx);
 });
 
 // ---------- Dongle register/field mapping helpers ----------
@@ -2684,6 +3361,8 @@ function renderDongleMappings(profileId, mappings, container) {
       const row = document.createElement('div');
       row.className = 'metric-row';
       row.dataset.address = key;
+      // AC-29: legacy Load rows stamp the same row-state contract as CatalogUI rows.
+      stampRowMetricState(row, metricName);
 
       const descSpan = document.createElement('span');
       descSpan.className = 'register-desc';
@@ -2702,11 +3381,14 @@ function renderDongleMappings(profileId, mappings, container) {
       removeBtn.className = 'remove-btn remove-metric';
       removeBtn.textContent = '✕';
       removeBtn.addEventListener('click', () => {
+        const cardEl = row.closest('.device-card');
         row.remove();
         if (refreshAllMetricDropdowns) refreshAllMetricDropdowns();
+        updateMappingSaveNote(cardEl);
       });
 
       metricSelect.addEventListener('change', () => {
+        syncRowClearedFlag(row, metricSelect);
         if (refreshAllMetricDropdowns) refreshAllMetricDropdowns();
       });
 
@@ -2716,9 +3398,922 @@ function renderDongleMappings(profileId, mappings, container) {
       container.appendChild(row);
     });
     if (refreshAllMetricDropdowns) refreshAllMetricDropdowns();
+    updateMappingSaveNote(container.closest ? container.closest('.device-card') : null);
   }).catch(() => {
     container.innerHTML = '<div class="note" style="color:var(--error);">Failed to load register details</div>';
   });
+}
+
+// ---------- LuxPower TCP entity-catalog mapping helpers (#106 Batch 2C) ----------
+// Row machinery now lives in the shared, source-generic CatalogUI component
+// (public/js/catalog-ui.js, #108 wave 3); this section keeps the LuxPower
+// profile predicates, the entities fetcher and the dongleLux reference adapter.
+// luxpower-tcp profiles are mapping:'explicit': the UI pairs an EXISTING metric
+// (user-picked dropdown — never auto-created, never pre-bound) with a namespaced
+// entity handle (input:0xNNNN / holding:0xNNNN) that is persisted verbatim as
+// the mapping value. The entity catalog comes from GET
+// /api/dongle/profile/<id>/entities (id/register_type/register/name/label/unit/
+// scale/type/count/access/writable/min/max/step/kind/actions?).
+
+function isLuxpowerDongleProfile(p) {
+  return !!(p && (p.protocol === 'luxpower-tcp' || p.transport === 'luxpower-tcp'));
+}
+
+function dongleProfileIsLuxpower(profileId) {
+  if (!profileId) return false;
+  return isLuxpowerDongleProfile(getProfileById(profileId));
+}
+
+async function isLuxpowerDongleProfileAsync(profileId) {
+  if (!profileId) return false;
+  if (dongleProfileIsLuxpower(profileId)) return true;
+  try {
+    const res = await fetch(`/api/dongle/profile/${encodeURIComponent(profileId)}`);
+    if (!res.ok) return false;
+    return isLuxpowerDongleProfile(await res.json());
+  } catch (e) { return false; }
+}
+
+async function fetchDongleProfileEntities(profileId) {
+  if (!profileId) throw new Error('Select a profile first');
+  const res = await fetch(`/api/dongle/profile/${encodeURIComponent(profileId)}/entities`);
+  if (!res.ok) {
+    let msg = `Failed to load entities (HTTP ${res.status})`;
+    try { const d = await res.json(); if (d && d.error) msg = d.error; } catch (e) {}
+    throw new Error(msg);
+  }
+  const list = await res.json();
+  return Array.isArray(list) ? list : [];
+}
+
+// dongleLux — the LuxPower TCP reference CatalogUI adapter (issue #108 wave 3).
+// The shared component (public/js/catalog-ui.js) is source-generic: families
+// supply an adapter implementing fetch / entityId / entityLabel / resolveHandle /
+// handleCtrl / defaultUnit / applyMode (adapter-interface doc lives in that
+// file). All logic below is moved verbatim from the pre-#108 helpers
+// (dongleEntityId / dongleEntityLabel / resolveDongleMappingHandle /
+// applyDongleMappingMode) — the DOM contract, handle semantics, bare-hex
+// fallback and unresolvable round-trip are unchanged.
+const dongleLux = {
+  // Card property holding the fetched entity catalog. '_dongleEntities'
+  // predates #108 and is still consumed by populateDongleWriteControls() and
+  // reset on profile change in renderDongleDevice — sharing the store keeps
+  // both identical to the pre-refactor behavior (component default: '_catalog').
+  cacheKey: '_dongleEntities',
+
+  // Thin wrapper over the dongle profile entity catalog endpoint.
+  // ctx = { profileId }. Throws 'Select a profile first' when profileId is
+  // empty; the component surfaces err.message as an inline .note.
+  fetch(ctx) {
+    return fetchDongleProfileEntities(ctx && ctx.profileId);
+  },
+
+  // Source-native persisted handle: namespaced 'register_type:register'
+  // (input:0x0065 / holding:0x005B) — the decode key modules/dongle.js reverse-
+  // looks up. Falls back to a bare register for catalog items without
+  // register_type.
+  entityId(e) {
+    if (!e) return '';
+    if (e.id) return String(e.id);
+    return (e.register_type && e.register) ? `${e.register_type}:${e.register}` : (e.register ? String(e.register) : '');
+  },
+
+  // Chip text: "Label (unit) - input:0x0001 - read" / "… - holding:0x005B - readwrite".
+  entityLabel(e) {
+    const id = dongleLux.entityId(e);
+    const name = (e && (e.label || e.name)) || id;
+    const unit = (e && e.unit) ? ` (${e.unit})` : '';
+    return `${name}${unit} - ${id} - ${dongleLux.entityAccess(e)}`;
+  },
+
+  // Access suffix for the chip label: explicit access key when present, else
+  // derived (holding registers are writable, inputs are read-only).
+  entityAccess(e) {
+    if (e && e.access) return String(e.access);
+    return (e && (e.writable || e.register_type === 'holding')) ? 'readwrite' : 'read';
+  },
+
+  // Resolve a saved mapping value against the catalog → { id, entity }.
+  // Namespaced handles match exactly; legacy bare-hex values (pre-namespacing
+  // saves) resolve by register number (input preferred). Unresolvable handles
+  // round-trip as-is so the readable raw chip survives save/reload.
+  resolveHandle(value, entities) {
+    const raw = String(value == null ? '' : value).trim();
+    if (!raw) return { id: '', entity: null };
+    const list = Array.isArray(entities) ? entities : [];
+    const bareHex = /^0x[0-9a-f]+$/i.test(raw);
+    const lower = raw.toLowerCase();
+    const hit = list.find(e => dongleLux.entityId(e).toLowerCase() === lower)
+      || (bareHex
+        ? (list.find(e => e.register_type === 'input' && String(e.register || '').toLowerCase() === lower)
+          || list.find(e => String(e.register || '').toLowerCase() === lower))
+        : null);
+    if (!hit) return { id: raw, entity: null };
+    return { id: dongleLux.entityId(hit), entity: hit };
+  },
+
+  // Register-family rows: fixed chip for Fetch / restore rows, entity <select>
+  // for "+ Add Mapping" rows (createRow's explicit mode overrides this).
+  handleCtrl: 'chip',
+
+  // D4 inline-create unit prefill (adapter interface contract; the D4
+  // affordance is wired by a later wave — unused here).
+  defaultUnit(e) {
+    return (e && e.unit) ? String(e.unit) : '';
+  },
+
+  // Which mapping-section buttons the card shows for a profile capability:
+  // luxpower-tcp → '📋 Fetch Profile Entities' + '+ Add Mapping'; every other
+  // dongle transport keeps the legacy '📥 Load Profile Registers' button.
+  // Verbatim legacy applyDongleMappingMode logic (#106 Batch 2C).
+  applyMode(card, enabled) {
+    const loadBtn = card.querySelector('.load-dongle-registers');
+    const fetchBtn = card.querySelector('.fetch-dongle-entities');
+    const addBtn = card.querySelector('.add-dongle-mapping');
+    if (loadBtn) loadBtn.style.display = enabled ? 'none' : '';
+    if (fetchBtn) fetchBtn.style.display = enabled ? '' : 'none';
+    if (addBtn) addBtn.style.display = enabled ? '' : 'none';
+  }
+};
+// Adapter registry (window.catalogAdapters): defined on the page side because
+// adapters depend on settings.js runtime helpers (predicates, fetchers), while
+// catalog-ui.js loads AFTER settings.js. CatalogUI.adapter(name) resolves
+// adapters lazily from here. Later families register alongside dongleLux.
+window.catalogAdapters = window.catalogAdapters || {};
+window.catalogAdapters.dongleLux = dongleLux;
+
+// ============ Issue #108 wave 4 (AC-20..24, AC-28..31): register-family UI ====
+// The dongleLux adapter above is the reference. This wave registers the
+// remaining register-source adapters the shared CatalogUI component drives:
+//   dongleRegister  — dongle register transports (solarman-v5 / modbus-tcp /
+//                     default): GET /api/dongle/profile/:id/entities returns
+//                     register-family items with id = bare-hex register string
+//                     (the exact handle modules/dongle.js decode consumes).
+//   modbusRegister  — GET /api/modbus/profile/:id/entities, id = String(address).
+//   rs232*          — GET /api/rs232/profile/:id/entities, one adapter per
+//                     protocol family: modbus-rtu (bare-hex register), ascii
+//                     query/response (`${cmd}:${index}`), vedirect-streaming
+//                     (field label), solax-aa55 decoder (`${cmd}:${offset}`).
+// All of them: chip rows, catalog-exact restore with family legacy fallbacks,
+// explicit metric mapping only — fetch/save/add never auto-create a metric
+// (zero auto-creation, AC-30). Legacy "Load Profile Registers/Fields" buttons
+// stay side-by-side as the only auto-creating path.
+
+// Register-family chip trailing token: the entity's kind word ('register',
+// 'ascii', 'vedirect', …) — access is already surfaced where the projection
+// carries it (see dongleLux for the luxpower-tcp variant).
+function catalogKindToken(e) {
+  return (e && e.kind) ? String(e.kind) : 'read';
+}
+
+// A dongle profile whose entities are bare-hex registers: anything that is not
+// luxpower-tcp / felicity-tcp (JSON paths) / growatt (push fields). Mirrors the
+// modules/entityCatalog.js dongleProfileEntities dispatcher exactly.
+function isDongleRegisterProfile(p) {
+  if (!p || typeof p !== 'object') return false;
+  const protocol = String(p.protocol || '').toLowerCase();
+  if (protocol === 'luxpower-tcp' || protocol === 'felicity-tcp') return false;
+  if (String(p.transport || '').toLowerCase() === 'growatt') return false;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// dongleRegister — bare-hex register transports (solarman-v5 / modbus-tcp)
+// ---------------------------------------------------------------------------
+const dongleRegister = {
+  cacheKey: '_dongleEntities',
+
+  fetch(ctx) {
+    return fetchDongleProfileEntities(ctx && ctx.profileId);
+  },
+
+  // Bare-hex register verbatim — what modules/dongle.js pollInstance decodes
+  // and what legacy saves contain.
+  entityId(e) {
+    if (!e) return '';
+    if (e.id !== undefined && e.id !== null) return String(e.id);
+    return (e.register !== undefined && e.register !== null) ? String(e.register) : '';
+  },
+
+  // Chip: "Label (unit) - 0x0065 - register".
+  entityLabel(e) {
+    const id = dongleRegister.entityId(e);
+    const name = (e && (e.label || e.name)) || id;
+    const unit = (e && e.unit) ? ` (${e.unit})` : '';
+    return `${name}${unit} - ${id} - ${catalogKindToken(e)}`;
+  },
+
+  // Saved value → catalog: exact id match first, then register-family legacy
+  // fallbacks (bare-hex case-insensitive / numeric-normalised — legacy saves
+  // predate the catalog and may carry a differently-cased or zero-padded hex).
+  resolveHandle(value, entities) {
+    const raw = String(value == null ? '' : value).trim();
+    if (!raw) return { id: '', entity: null };
+    const list = Array.isArray(entities) ? entities : [];
+    const lower = raw.toLowerCase();
+    const toNum = (s) => /^0x/i.test(s) ? parseInt(s, 16) : parseInt(s, 10);
+    const numMatches = (idStr) => {
+      if (idStr === raw) return true;
+      if (/^0x[0-9a-f]+$/i.test(raw) || /^\d+$/.test(raw)) {
+        const a = toNum(raw); const b = toNum(idStr);
+        return Number.isFinite(a) && Number.isFinite(b) && a === b;
+      }
+      return false;
+    };
+    const hit = list.find(e => dongleRegister.entityId(e).toLowerCase() === lower)
+      || list.find(e => numMatches(dongleRegister.entityId(e)));
+    if (!hit) return { id: raw, entity: null };
+    return { id: dongleRegister.entityId(hit), entity: hit };
+  },
+
+  handleCtrl: 'chip',
+
+  defaultUnit(e) {
+    return (e && e.unit) ? String(e.unit) : '';
+  },
+
+  // Register transports show Fetch/Add AND the legacy Load side by side;
+  // legacy-only profiles (growatt/felicity/blank) get Load alone.
+  applyMode(card, enabled) {
+    const loadBtn = card.querySelector('.load-dongle-registers');
+    const fetchBtn = card.querySelector('.fetch-dongle-entities');
+    const addBtn = card.querySelector('.add-dongle-mapping');
+    if (loadBtn) loadBtn.style.display = '';
+    if (fetchBtn) fetchBtn.style.display = enabled ? '' : 'none';
+    if (addBtn) addBtn.style.display = enabled ? '' : 'none';
+  }
+};
+
+// ---------------------------------------------------------------------------
+// modbusRegister — Modbus TCP/RTU device profiles (register addresses)
+// ---------------------------------------------------------------------------
+async function fetchModbusProfileEntities(profileId) {
+  if (!profileId) throw new Error('Select a profile first');
+  const res = await fetch(`/api/modbus/profile/${encodeURIComponent(profileId)}/entities`);
+  if (!res.ok) {
+    let msg = `Failed to load entities (HTTP ${res.status})`;
+    try { const d = await res.json(); if (d && d.error) msg = d.error; } catch (e) {}
+    throw new Error(msg);
+  }
+  const list = await res.json();
+  return Array.isArray(list) ? list : [];
+}
+
+const modbusRegister = {
+  cacheKey: '_modbusEntities',
+
+  fetch(ctx) {
+    return fetchModbusProfileEntities(ctx && ctx.profileId);
+  },
+
+  // id = String(address) — the exact handle modules/modbus.js addrToMetric
+  // consumes and legacy saves contain.
+  entityId(e) {
+    if (!e) return '';
+    if (e.id !== undefined && e.id !== null) return String(e.id);
+    return (e.address !== undefined && e.address !== null) ? String(e.address) : '';
+  },
+
+  // Chip: "Label (unit) - 90 - register".
+  entityLabel(e) {
+    const id = modbusRegister.entityId(e);
+    const name = (e && (e.label || e.name)) || id;
+    const unit = (e && e.unit) ? ` (${e.unit})` : '';
+    return `${name}${unit} - ${id} - ${catalogKindToken(e)}`;
+  },
+
+  resolveHandle(value, entities) {
+    const raw = String(value == null ? '' : value).trim();
+    if (!raw) return { id: '', entity: null };
+    const list = Array.isArray(entities) ? entities : [];
+    const lower = raw.toLowerCase();
+    const hit = list.find(e => modbusRegister.entityId(e).toLowerCase() === lower)
+      || (raw === String(parseInt(raw, 10)) // decimal address, legacy normalization
+        ? list.find(e => modbusRegister.entityId(e) === String(parseInt(raw, 10)))
+        : null);
+    if (!hit) return { id: raw, entity: null };
+    return { id: modbusRegister.entityId(hit), entity: hit };
+  },
+
+  handleCtrl: 'chip',
+
+  defaultUnit(e) {
+    return (e && e.unit) ? String(e.unit) : '';
+  },
+
+  // Same side-by-side contract as dongleRegister: Load stays visible, catalog
+  // buttons appear once a profile is active.
+  applyMode(card, enabled) {
+    const loadBtn = card.querySelector('.load-modbus-registers');
+    const fetchBtn = card.querySelector('.fetch-modbus-entities');
+    const addBtn = card.querySelector('.add-modbus-mapping');
+    if (loadBtn) loadBtn.style.display = '';
+    if (fetchBtn) fetchBtn.style.display = enabled ? '' : 'none';
+    if (addBtn) addBtn.style.display = enabled ? '' : 'none';
+  }
+};
+
+// ---------------------------------------------------------------------------
+// rs232Register / rs232Ascii / rs232Vedirect / rs232Solax — one adapter per
+// RS232 protocol family (entities endpoint /api/rs232/profile/:id/entities).
+// Shared base below; only the family word, chip label front, entity-id form
+// (all ride on the projection's canonical `id`) and legacy resolve fallback
+// differ per family.
+// ---------------------------------------------------------------------------
+async function fetchRs232ProfileEntities(profileId) {
+  if (!profileId) throw new Error('Select a profile first');
+  const res = await fetch(`/api/rs232/profile/${encodeURIComponent(profileId)}/entities`);
+  if (!res.ok) {
+    let msg = `Failed to load entities (HTTP ${res.status})`;
+    try { const d = await res.json(); if (d && d.error) msg = d.error; } catch (e) {}
+    throw new Error(msg);
+  }
+  const list = await res.json();
+  return Array.isArray(list) ? list : [];
+}
+
+// rs232 profile → adapter registry key, from the profile's protocol/decoder
+// (mirrors server.js rs232ProfileEntities family dispatch).
+function rs232FamilyAdapterKey(profile) {
+  if (!profile) return null;
+  const protocol = String(profile.protocol || '').toLowerCase();
+  if (protocol === 'modbus-rtu') return 'rs232Register';
+  if (protocol === 'vedirect-streaming') return 'rs232Vedirect';
+  if (protocol === 'solax-aa55' || String(profile.decoder || '').toLowerCase().includes('solax')) return 'rs232Solax';
+  return 'rs232Ascii'; // voltronic-qpigs + aliases (infinisolar) and any ascii query family
+}
+
+function makeRs232Adapter(family, opts) {
+  opts = opts || {};
+  return {
+    cacheKey: '_rs232Entities',
+
+    fetch(ctx) {
+      return fetchRs232ProfileEntities(ctx && ctx.profileId);
+    },
+
+    // The endpoint's canonical id IS the family-specific persisted handle:
+    // modbus-rtu bare hex, ascii `${cmd}:${index}`, vedirect field label,
+    // solax `${cmd}:${offset}`. entityId just round-trips it verbatim.
+    entityId(e) {
+      if (!e) return '';
+      if (e.id !== undefined && e.id !== null) return String(e.id);
+      return '';
+    },
+
+    // Chip: "Name (unit) - <id> - <family>".
+    entityLabel(e) {
+      const id = this.entityId(e);
+      let name = (e && (e.label || e.name)) || id;
+      if (opts.labelFromName && e && e.name) name = e.name; // vedirect: frame keys are the id
+      const unit = (e && e.unit) ? ` (${e.unit})` : '';
+      return `${name}${unit} - ${id} - ${family}`;
+    },
+
+    resolveHandle(value, entities) {
+      const raw = String(value == null ? '' : value).trim();
+      if (!raw) return { id: '', entity: null };
+      const list = Array.isArray(entities) ? entities : [];
+      const lower = raw.toLowerCase();
+      let hit = list.find(e => this.entityId(e).toLowerCase() === lower);
+      // Family legacy fallbacks beyond the exact match:
+      if (!hit && opts.legacyNumeric && /^0x[0-9a-f]+$/i.test(raw)) {
+        const num = parseInt(raw, 16);
+        hit = list.find(e => {
+          const idStr = this.entityId(e);
+          return (/^0x[0-9a-f]+$/i.test(idStr) && parseInt(idStr, 16) === num);
+        });
+      }
+      if (!hit) return { id: raw, entity: null };
+      return { id: this.entityId(hit), entity: hit };
+    },
+
+    handleCtrl: 'chip',
+
+    defaultUnit(e) {
+      return (e && e.unit) ? String(e.unit) : '';
+    },
+
+    // Load Profile Fields stays visible for every family; the catalog buttons
+    // appear once a profile is active.
+    applyMode(card, enabled) {
+      const loadBtn = card.querySelector('.load-rs232-fields');
+      const fetchBtn = card.querySelector('.fetch-rs232-entities');
+      const addBtn = card.querySelector('.add-rs232-mapping');
+      if (loadBtn) loadBtn.style.display = '';
+      if (fetchBtn) fetchBtn.style.display = enabled ? '' : 'none';
+      if (addBtn) addBtn.style.display = enabled ? '' : 'none';
+    }
+  };
+}
+
+const rs232Register = makeRs232Adapter('register', { legacyNumeric: true });
+const rs232Ascii = makeRs232Adapter('ascii', {});
+const rs232Vedirect = makeRs232Adapter('vedirect', { labelFromName: true });
+const rs232Solax = makeRs232Adapter('solax', {});
+
+window.catalogAdapters.dongleRegister = dongleRegister;
+window.catalogAdapters.modbusRegister = modbusRegister;
+window.catalogAdapters.rs232Register = rs232Register;
+window.catalogAdapters.rs232Ascii = rs232Ascii;
+window.catalogAdapters.rs232Vedirect = rs232Vedirect;
+window.catalogAdapters.rs232Solax = rs232Solax;
+
+// ============ Issue #108 wave 5 (AC-25..27, AC-29..31): HA / MQTT / REST ====
+// These three families predate CatalogUI and keep their bespoke per-card
+// renderers and save collectors byte-compatible (AC-31). Their adapters make
+// the registry complete and let the shared component's helpers (entity
+// labeling, unit prefill, applyMode, '+ New' inline create) be wired INTO the
+// existing card functions — the cards themselves are not rewritten.
+//
+//   ha        — enriched HA entity catalog (AC-25): fetch(ctx{url,token}) →
+//               GET /api/ha/entities (items have friendly_name/unit/state);
+//               handle = entity_id (the persisted mapping value, byte-compat);
+//               handleCtrl 'select' (row anatomy of addHaMetricRow).
+//   mqtt      — MQTT discovery cache (AC-26): fetch(ctx{broker}) → GET
+//               /api/mqtt-discovery-cache?broker → entries [{topic, sample}];
+//               handle = topic; handleCtrl 'input' (rows carry .topic-input).
+//   external  — REST leaf catalog (AC-27): fetch(ctx{url}) → POST
+//               /api/external/fields {url} → leaves [{path,value,type,sample}];
+//               handle = leaf path; handleCtrl 'input' (rows carry .jsonpath).
+const haAdapter = {
+  cacheKey: '_haCatalog',
+  fetch(ctx) {
+    const url = ctx && ctx.url;
+    const token = ctx && ctx.token;
+    if (!url || !token) return Promise.reject(new Error('HA URL and token required'));
+    return fetchHaEntityCatalog(url, token);
+  },
+  // Persisted handle: entity_id — exactly what the save collector writes and
+  // modules/ha.js reverse-looks-up (byte-compat, AC-25).
+  entityId(e) { return haEntityIdOf(e); },
+  // Chip/option text: "friendly_name (unit) - sensor.x - <state>".
+  entityLabel(e) { return haEntityLabelText(e); },
+  resolveHandle(value, entities) {
+    const raw = String(value == null ? '' : value).trim();
+    const list = Array.isArray(entities) ? entities : [];
+    const hit = list.find(e => haEntityIdOf(e) === raw);
+    return hit ? { id: haEntityIdOf(hit), entity: hit } : { id: raw, entity: null };
+  },
+  handleCtrl: 'select',
+  defaultUnit(e) {
+    return (e && e.unit_of_measurement !== undefined && e.unit_of_measurement !== null) ? String(e.unit_of_measurement) : '';
+  },
+  // HA cards always expose the fetch/add-row/actions UI — nothing to hide.
+  applyMode() {}
+};
+
+const mqttAdapter = {
+  cacheKey: '_mqttCache',
+  fetch(ctx) {
+    const broker = ctx && ctx.broker;
+    if (!broker) return Promise.reject(new Error('Broker URL required'));
+    return fetch(`/api/mqtt-discovery-cache?broker=${encodeURIComponent(broker)}`)
+      .then(res => res.json().catch(() => ({})))
+      .then(data => (data && Array.isArray(data.entries)) ? data.entries : []);
+  },
+  entityId(e) { return (e && e.topic != null) ? String(e.topic) : ''; },
+  entityLabel(e) { return mqttSampleText(mqttAdapter.entityId(e), e && e.sample); },
+  resolveHandle(value, entities) {
+    const raw = String(value == null ? '' : value).trim();
+    const list = Array.isArray(entities) ? entities : [];
+    const hit = list.find(e => mqttAdapter.entityId(e) === raw);
+    return hit ? { id: mqttAdapter.entityId(hit), entity: hit } : { id: raw, entity: null };
+  },
+  handleCtrl: 'input',
+  defaultUnit() { return ''; },
+  applyMode() {}
+};
+
+const externalAdapter = {
+  cacheKey: '_externalLeaves',
+  fetch(ctx) {
+    const url = ctx && ctx.url;
+    if (!url) return Promise.reject(new Error('URL required'));
+    return fetch('/api/external/fields', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      body: JSON.stringify({ url })
+    }).then(res => res.json().catch(() => ({})))
+      .then(data => {
+        if (data && data.error) throw new Error(data.error);
+        return (data && Array.isArray(data.leaves)) ? data.leaves : [];
+      });
+  },
+  entityId(e) { return (e && e.path !== undefined) ? String(e.path) : ''; },
+  entityLabel(e) { return externalLeafSampleText(e); },
+  resolveHandle(value, entities) {
+    const raw = String(value == null ? '' : value).trim();
+    const list = Array.isArray(entities) ? entities : [];
+    const hit = list.find(e => externalAdapter.entityId(e) === raw);
+    return hit ? { id: externalAdapter.entityId(hit), entity: hit } : { id: raw, entity: null };
+  },
+  handleCtrl: 'input',
+  defaultUnit() { return ''; },
+  applyMode() {}
+};
+
+window.catalogAdapters.ha = haAdapter;
+window.catalogAdapters.mqtt = mqttAdapter;
+window.catalogAdapters.external = externalAdapter;
+
+// ---------------------------------------------------------------------------
+// AC-29 row-state helpers (page side). CatalogUI rows stamp themselves; the
+// legacy renderers (Load Profile Registers/Fields rows) use these so the save
+// handler sees one consistent dataset contract:
+//   dataset.prevMetric — metric the row held when it entered the DOM
+//   dataset.cleared='1' — that metric was flipped back to empty (removal intent)
+// ---------------------------------------------------------------------------
+function stampRowMetricState(row, metricName) {
+  if (!row) return;
+  if (metricName) row.dataset.prevMetric = metricName;
+}
+
+function syncRowClearedFlag(row, selectEl) {
+  if (!row) return;
+  if (selectEl && selectEl.value) {
+    row.dataset.prevMetric = selectEl.value;
+    delete row.dataset.cleared;
+  } else if (row.dataset.prevMetric) {
+    row.dataset.cleared = '1';
+  } else {
+    delete row.dataset.cleared;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// AC-29 save-count note + implicit→explicit-none flip warning (register
+// families: modbus / rs232 / dongle). DOM-only — the save collectors read the
+// same rows, so the note always agrees with what a save would persist.
+// ---------------------------------------------------------------------------
+// Count of rows on a card that would persist: a chosen metric AND a handle
+// (chip/select rows: dataset.address; input rows: their text input). Mirrors
+// the modbus/rs232/dongle save collectors exactly.
+function cardMappedRowCount(card) {
+  const listEl = card ? card.querySelector('.mappings-section .mappings-list') : null;
+  if (!listEl) return 0;
+  let n = 0;
+  listEl.querySelectorAll('.metric-row').forEach(row => {
+    const ms = row.querySelector('.metric-name');
+    if (!ms || !ms.value) return;
+    const textInput = row.querySelector('.topic-input, .jsonpath');
+    const entitySel = row.querySelector('.entity-select');
+    const handle = row.dataset.address
+      || (entitySel && entitySel.value ? entitySel.value : '')
+      || (textInput ? textInput.value.trim() : '');
+    if (handle) n++;
+  });
+  return n;
+}
+
+// "Save will persist N of M mapped" transient note for one card's mapping
+// section. Rendered as a sibling of .mappings-list (never inside it, so the
+// filter machinery and row counts are unaffected); removed when the list is
+// empty. Called from catalog-rows-changed events (CatalogUI), container
+// delegation (legacy rows) and directly after restore / legacy-load renders.
+function updateMappingSaveNote(card) {
+  if (!card || !card.querySelector) return;
+  const section = card.querySelector('.mappings-section');
+  const listEl = card.querySelector('.mappings-section .mappings-list');
+  if (!section || !listEl) return;
+  const old = section.querySelector('.mappings-save-note');
+  if (old) old.remove();
+  const rows = listEl.querySelectorAll('.metric-row').length;
+  if (!rows) return;
+  const mapped = cardMappedRowCount(card);
+  const note = document.createElement('div');
+  note.className = 'note mappings-save-note';
+  note.style.color = 'var(--text-secondary, #93a1b5)';
+  note.style.fontSize = '0.8em';
+  note.textContent = `Save will persist ${mapped} of ${rows} mapped.`;
+  listEl.after(note);
+}
+
+// CatalogUI rows dispatch 'catalog-rows-changed' (catalog-ui.js) after every
+// row-structural change — keep the note live for all of them.
+document.addEventListener('catalog-rows-changed', (e) => {
+  const card = e && e.detail && e.detail.card ? e.detail.card : null;
+  if (card) updateMappingSaveNote(card);
+});
+// Legacy renderers (Load Profile Registers/Fields + growatt/felicity restore)
+// build rows directly — cover their metric picks and row removals too. The HA,
+// MQTT and external cards use the same legacy row anatomy, so they join here
+// for a live "Save will persist N of M mapped" note (AC-29/AC-31).
+['ha-devices-container', 'mqtt-devices-container', 'external-sources-container', 'modbus-devices-container', 'rs232-devices-container', 'dongle-devices-container'].forEach(id => {
+  const container = document.getElementById(id);
+  if (!container) return;
+  container.addEventListener('change', (e) => {
+    const t = e.target;
+    if (t && t.classList && (t.classList.contains('metric-name') || t.classList.contains('entity-select') || t.classList.contains('topic-input') || t.classList.contains('jsonpath'))) {
+      updateMappingSaveNote(t.closest('.device-card'));
+    }
+  });
+  container.addEventListener('click', (e) => {
+    const t = e.target;
+    if (t && t.classList && t.classList.contains('remove-metric')) {
+      updateMappingSaveNote(t.closest('.device-card'));
+    }
+  });
+});
+
+// AC-29 flip warning: a device whose STORED config has no `mappings` key polls
+// implicitly (profile-default names). Saving it with zero mapped rows writes
+// `mappings: {}`, which every poller reads as explicit-none — polling stops.
+// Warn when that would happen. Devices already carrying a `mappings` key are
+// already explicit (an existing `{}` is explicit-none, no flip); brand-new
+// cards (no stored device) were never implicit, so they never warn.
+function confirmImplicitToExplicitNoneFlips() {
+  const flagged = [];
+  ['modbus-devices-container', 'rs232-devices-container', 'dongle-devices-container'].forEach(id => {
+    const container = document.getElementById(id);
+    if (!container) return;
+    container.querySelectorAll('.device-card').forEach(card => {
+      const orig = card._origDevice;
+      if (!orig || Object.prototype.hasOwnProperty.call(orig, 'mappings')) return;
+      if (cardMappedRowCount(card) > 0) return;
+      const nameInput = card.querySelector('.device-header input[type="text"]');
+      flagged.push((nameInput && nameInput.value.trim()) || orig.name || 'this device');
+    });
+  });
+  if (flagged.length === 0) return true;
+  const list = flagged.map(n => `“${n}”`).join(', ');
+  return showConfirm(
+    `Saving will flip ${flagged.length === 1 ? 'a device' : flagged.length + ' devices'} from implicit ` +
+    `profile-default polling to explicit-none (polling stops) because it has no mapped metrics: ${list}. ` +
+    `Map at least one metric to keep it polling. Save anyway?`
+  );
+}
+
+function hideDongleWriteControls(card) {
+  const wrap = card.querySelector('.write-controls');
+  const divider = card.querySelector('.dongle-write-divider');
+  if (wrap) wrap.style.display = 'none';
+  if (divider) divider.style.display = 'none';
+}
+
+// ---- Dongle mapping-mode dispatch (issue #108 wave 4, AC-20/AC-22) ---------
+// One place that decides which adapter/buttons a dongle card shows, driven by
+// the selected PROFILE (the transport <select> is cosmetic; the profile's
+// protocol/transport is authoritative — mirrors modules/dongle.js + the
+// entityCatalog dispatcher):
+//   luxpower-tcp         → dongleLux (Fetch/Add only — wave-3 behaviour, unchanged)
+//   register transport   → dongleRegister (Fetch/Add AND legacy Load side by side)
+//   growatt / felicity   → legacy Load only (input families, later wave)
+//   no profile           → legacy Load only (nothing to catalogue yet)
+async function resolveDongleProfile(profileId) {
+  if (!profileId) return null;
+  let p = getProfileById(profileId);
+  if (p) return p;
+  try {
+    const res = await fetch(`/api/dongle/profile/${encodeURIComponent(profileId)}`);
+    if (res.ok) p = await res.json();
+  } catch (e) {}
+  return p || null;
+}
+
+function applyDongleMappingMode(card, profile) {
+  if (!card || !window.CatalogUI) return;
+  if (!profile) { CatalogUI.applyMode(dongleLux, card, false); return; } // legacy Load only
+  if (isLuxpowerDongleProfile(profile)) { CatalogUI.applyMode(dongleLux, card, true); return; }
+  if (isDongleRegisterProfile(profile)) { CatalogUI.applyMode(dongleRegister, card, true); return; }
+  CatalogUI.applyMode(dongleLux, card, false); // growatt/felicity: legacy Load only
+}
+
+function dongleCatalogAdapterForProfile(profile) {
+  if (!profile) return null;
+  if (isLuxpowerDongleProfile(profile)) return dongleLux;
+  if (isDongleRegisterProfile(profile)) return dongleRegister;
+  return null; // legacy-only families have no catalog buttons
+}
+
+// Empty-state note used when a register-family card resets its mapping list.
+function dongleRegisterResetNote() {
+  const note = document.createElement('div');
+  note.className = 'note';
+  note.textContent = 'No mappings yet — “Fetch Profile Entities” lists every register for this profile (metrics are never auto-created), “+ Add Mapping” adds a single row, or “Load Profile Registers” imports the profile defaults.';
+  return note;
+}
+
+// Write Controls — luxpower-tcp only, when the profile has capabilities.write
+// and a non-empty writable_registers list. Per writable entry: a human label
+// (unit + min/max/step), a number input and a Write button that confirm()s and
+// POSTs /api/action { source:'dongle', device:<card instance name>,
+// action:'write', entity:'holding:0xNNNN', params:{value} } with an inline
+// status (8s timeout). Preset buttons render from entry.actions when present.
+async function populateDongleWriteControls(card, profileId, profile) {
+  const wrap = card.querySelector('.write-controls');
+  if (!wrap || !profileId) return;
+  hideDongleWriteControls(card);
+  wrap.innerHTML = '';
+  let p = profile;
+  if (!p) {
+    try {
+      const res = await fetch(`/api/dongle/profile/${encodeURIComponent(profileId)}`);
+      if (res.ok) p = await res.json();
+    } catch (e) {}
+  }
+  if (!p || !isLuxpowerDongleProfile(p)) return;
+  const caps = p.capabilities || {};
+  const writable = Array.isArray(p.writable_registers) ? p.writable_registers : [];
+  if (caps.write !== true || writable.length === 0) return;
+  let entities = Array.isArray(card._dongleEntities) ? card._dongleEntities : [];
+  if (!entities.length) {
+    try { entities = await fetchDongleProfileEntities(profileId); card._dongleEntities = entities; } catch (e) {}
+  }
+  const byId = new Map();
+  entities.forEach(e => { const id = dongleLux.entityId(e); if (id) byId.set(id.toLowerCase(), e); });
+  // The user may have switched profiles while the fetches above were in flight.
+  const sel = card.querySelector('.dongle-profile-select');
+  if (sel && sel.value && sel.value !== profileId) return;
+
+  const divider = card.querySelector('.dongle-write-divider');
+  if (divider) divider.style.display = '';
+  wrap.style.display = '';
+
+  writable.forEach(w => {
+    const id = `${(w.register_type || 'holding').toLowerCase()}:${w.register}`;
+    const ent = byId.get(id.toLowerCase()) || null;
+    const label = w.label || w.name || id;
+    const unit = w.unit ? ` (${w.unit})` : '';
+    const rangeParts = [];
+    if (w.min !== undefined && w.min !== null) rangeParts.push(`min ${w.min}`);
+    if (w.max !== undefined && w.max !== null) rangeParts.push(`max ${w.max}`);
+    if (w.step !== undefined && w.step !== null) rangeParts.push(`step ${w.step}`);
+    const rangeTxt = rangeParts.length ? ` · ${rangeParts.join(' · ')}` : '';
+
+    const row = document.createElement('div');
+    row.className = 'write-control-row';
+    row.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;padding:0.3rem 0;';
+    const nameEl = document.createElement('span');
+    nameEl.textContent = `${label}${unit}${rangeTxt}`;
+    nameEl.title = `${id} — ${w.type || 'uint16'}${w.scale !== undefined && w.scale !== 1 ? `, scale ${w.scale}` : ''}`;
+    nameEl.style.cssText = 'flex:1;min-width:180px;font-size:0.85em;';
+    row.appendChild(nameEl);
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    if (w.min !== undefined && w.min !== null) input.min = w.min;
+    if (w.max !== undefined && w.max !== null) input.max = w.max;
+    input.step = (w.step !== undefined && w.step !== null) ? w.step : 'any';
+    input.placeholder = (w.min !== undefined && w.max !== undefined) ? `${w.min} … ${w.max}` : 'value';
+    input.style.cssText = 'width:110px;';
+    row.appendChild(input);
+
+    const writeBtn = document.createElement('button');
+    writeBtn.type = 'button';
+    writeBtn.className = 'fetch-btn';
+    writeBtn.textContent = 'Write';
+    row.appendChild(writeBtn);
+
+    const statusEl = document.createElement('span');
+    statusEl.className = 'test-status';
+    statusEl.style.fontSize = '0.75em';
+    row.appendChild(statusEl);
+
+    const runWrite = () => {
+      const rawVal = input.value.trim();
+      if (rawVal === '') { showStatus(statusEl, 'Enter a value first', 'error'); return; }
+      const val = Number(rawVal);
+      if (isNaN(val)) { showStatus(statusEl, 'Not a number', 'error'); return; }
+      if (!showConfirm(`Write ${val} to ${label} (${id})?`)) return;
+      sendDongleRegisterWrite(card, id, val, 'write', statusEl);
+    };
+    writeBtn.addEventListener('click', runWrite);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); runWrite(); }
+    });
+
+    // Preset actions for this entry (catalog entity first, then profile entry).
+    const actions = (ent && Array.isArray(ent.actions) && ent.actions.length) ? ent.actions
+      : (Array.isArray(w.actions) ? w.actions : []);
+    actions.forEach(a => {
+      const preset = (a && typeof a === 'object' && !Array.isArray(a)) ? a : { action: String(a), label: String(a) };
+      const pBtn = document.createElement('button');
+      pBtn.type = 'button';
+      pBtn.className = 'fetch-btn write-preset-btn';
+      pBtn.textContent = preset.label || String(preset.action || 'preset');
+      pBtn.style.cssText = 'font-size:0.72rem;padding:0.15rem 0.55rem;';
+      row.appendChild(pBtn);
+      pBtn.addEventListener('click', () => {
+        const val = (preset.value !== undefined && preset.value !== null)
+          ? preset.value
+          : (input.value.trim() !== '' ? Number(input.value) : undefined);
+        if (val === undefined) { showStatus(statusEl, 'Enter a value (or use the number box)', 'error'); return; }
+        sendDongleRegisterWrite(card, id, val, String(preset.action || 'preset'), statusEl);
+      });
+    });
+
+    wrap.appendChild(row);
+  });
+}
+
+// POST /api/action for a dongle register write. The device NAME comes from the
+// card header input — the server resolves the transport from its stored config
+// (no host/port/serials cross the wire; same SSRF-safe pattern as HA actions).
+async function sendDongleRegisterWrite(card, entityId, value, action, statusEl) {
+  const nameInput = card.querySelector('.device-header input[type="text"]');
+  const deviceName = nameInput ? nameInput.value.trim() : '';
+  if (!deviceName) { showStatus(statusEl, 'Instance name required', 'error'); return; }
+  // Disable every button in this entry's row while the write is in flight so a
+  // second click (Write or a preset) cannot fire a concurrent POST.
+  const rowEl = statusEl.closest ? statusEl.closest('.write-control-row') : null;
+  const rowBtns = rowEl ? Array.from(rowEl.querySelectorAll('button')) : [];
+  rowBtns.forEach(b => { b.disabled = true; });
+  showStatus(statusEl, 'Writing…', 'info');
+  const body = { source: 'dongle', device: deviceName, action: action || 'write', entity: entityId, params: {} };
+  if (value !== undefined && value !== null) body.params.value = value;
+  try {
+    const res = await fetch('/api/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(8000)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data && data.success !== false && !data.error) {
+      showStatus(statusEl, 'Write OK', 'success');
+    } else {
+      showStatus(statusEl, (data && data.error) ? data.error : `Write failed (HTTP ${res.status})`, 'error');
+    }
+  } catch (e) {
+    const timedOut = e && (e.name === 'TimeoutError' || e.name === 'AbortError');
+    showStatus(statusEl, timedOut ? 'Write timed out' : (e.message || 'Write failed'), 'error');
+  } finally {
+    rowBtns.forEach(b => { b.disabled = false; });
+  }
+}
+
+// Async initialiser for a dongle card: fetch the profile to pick the mapping UI
+// by family (luxpower-tcp → dongleLux entity-catalog; register transports →
+// dongleRegister entity-catalog with legacy Load retained; growatt/felicity →
+// legacy register/field UI), restore saved mappings, then build the Write
+// Controls section (luxpower-tcp only).
+async function initDongleCardMappings(card, profileId, savedMappings, mappingsList) {
+  if (!profileId) return;
+  if (!mappingsList) mappingsList = card.querySelector('.mappings-list');
+  if (!mappingsList) return;
+  const profileSel = card.querySelector('.dongle-profile-select');
+  const profileStillSelected = () => {
+    if (!profileSel) return true;
+    return profileSel.value === '' || profileSel.value === profileId;
+  };
+  let profile = null;
+  try {
+    const res = await fetch(`/api/dongle/profile/${encodeURIComponent(profileId)}`);
+    if (res.ok) profile = await res.json();
+  } catch (e) {}
+  if (!profileStillSelected()) return;
+  const lux = isLuxpowerDongleProfile(profile);
+  const reg = !lux && isDongleRegisterProfile(profile);
+  // Card button mode is adapter-driven (#108 wave 4 family dispatch).
+  applyDongleMappingMode(card, profile);
+  if (!lux && !reg) {
+    // growatt/felicity + any legacy-only family: unchanged legacy UI.
+    hideDongleWriteControls(card);
+    if (savedMappings && Object.keys(savedMappings).length > 0) {
+      renderDongleMappings(profileId, savedMappings, mappingsList);
+    } else {
+      mappingsList.innerHTML = '';
+    }
+    updateMappingSaveNote(card);
+    return;
+  }
+  // luxpower-tcp / register transport: cache the entity catalog, then restore
+  // saved rows through the shared component (metric dropdowns pre-selected to
+  // the saved names, handles resolved against the catalog — raw chips for
+  // unresolvable values, round-trip safe). Zero auto-creation on this path.
+  const adapter = lux ? dongleLux : dongleRegister;
+  let entities = [];
+  try {
+    entities = await fetchDongleProfileEntities(profileId);
+    card._dongleEntities = entities;
+  } catch (e) {
+    card._dongleEntities = [];
+  }
+  if (!profileStillSelected()) return;
+  if (lux) {
+    // The transport <select> derives from the profile cache, which may not have
+    // loaded when this card first rendered — correct it for luxpower so the
+    // dongle/inverter serial fields show and saves persist transport:'luxpower-tcp'.
+    const txSel = card.querySelector('select[name$="[transport]"]');
+    if (txSel && txSel.value !== 'luxpower-tcp') {
+      txSel.value = 'luxpower-tcp';
+      if (typeof updateDongleTransportUI === 'function') updateDongleTransportUI(card);
+    }
+    if (!profileStillSelected()) return;
+    CatalogUI.renderSaved(dongleLux, savedMappings || {}, entities, mappingsList);
+    await populateDongleWriteControls(card, profileId, profile);
+    return;
+  }
+  // Register transport: restore via the dongleRegister adapter.
+  hideDongleWriteControls(card);
+  if (savedMappings && Object.keys(savedMappings).length > 0) {
+    CatalogUI.renderSaved(dongleRegister, savedMappings, entities, mappingsList);
+  } else {
+    mappingsList.innerHTML = '';
+    mappingsList.appendChild(dongleRegisterResetNote());
+  }
+  updateMappingSaveNote(card);
 }
 
 // ======================== PVOUTPUT ========================
@@ -3658,6 +5253,16 @@ if (addTuyaBtn) {
 }
 
 // ======================== SAVE ========================
+// AC-38 (_catalogV2 migration marker): a card "used catalog mode" when any of
+// its mapping rows were produced by the shared catalog component — those rows
+// carry data-catalog (CatalogUI.createRow / addMqttDiscoveryRow) or, on the HA
+// card, data-ha-expose. Legacy Load-Profile/Fields imports and manual add-row
+// flows build rows without those attributes, so their saves stay unmarked.
+// The marker is inert: nothing reads _catalogV2 for behavior today.
+function cardHasCatalogRows(card) {
+  if (!card || !card.querySelector) return false;
+  return card.querySelectorAll('.mappings-list .metric-row[data-catalog]').length > 0;
+}
 if (form) form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const payload = {};
@@ -3689,6 +5294,12 @@ if (form) form.addEventListener('submit', async (e) => {
         }
       }
     });
+    // AC-38: HA-catalog expose-all rows are deliberately NOT stamped. Expose
+    // provenance (data-ha-expose) is in-session only — restored rows render as
+    // manual-anatomy rows, so a _catalogV2 stamp could not round-trip
+    // reload→save and would break the AC-31.14 byte-identical contract.
+    // HA-catalog is not trivially separable; the marker stays register-family
+    // + MQTT-cache scoped.
     return dev;
   });
   payload.mqtt_devices = collectDeviceArray('mqtt-devices-container', (card) => {
@@ -3704,6 +5315,9 @@ if (form) form.addEventListener('submit', async (e) => {
       const topic = row.querySelector('.topic-input').value.trim();
       if (metricName && topic) dev.topics[metricName] = topic;
     });
+    // AC-38: MQTT discovery/cache rows are catalog rows — stamp when the card
+    // persists any (manual topic rows and pure restores carry no data-catalog).
+    if (cardHasCatalogRows(card)) dev._catalogV2 = true;
     return dev;
   });
   payload.modbus_devices = collectDeviceArray('modbus-devices-container', (card) => {
@@ -3728,6 +5342,9 @@ if (form) form.addEventListener('submit', async (e) => {
       const metricName = row.querySelector('.metric-name').value;
       if (address && metricName) dev.mappings[metricName] = address;
     });
+    // AC-38: catalog-mode saves (fetch/+Add/restore rows) carry data-catalog;
+    // legacy 'Load Profile Registers' rows never do.
+    if (cardHasCatalogRows(card)) dev._catalogV2 = true;
     return dev;
   });
   payload.rs232_devices = collectDeviceArray('rs232-devices-container', (card) => {
@@ -3801,20 +5418,38 @@ if (form) form.addEventListener('submit', async (e) => {
     dev.name = card.querySelector('.device-header input[type="text"]').value;
     dev.enabled = card.querySelector('.device-header input[type="checkbox"]').checked;
     dev.profile = card.querySelector('.dongle-profile-select').value;
-    dev.transport = card.querySelector('select[name$="[transport]"]')?.value || 'solarman-v5';
+    const txSel = card.querySelector('select[name$="[transport]"]')?.value || 'solarman-v5';
+    dev.transport = txSel;
     dev.host = card.querySelector('input[name$="[host]"]').value;
     dev.port = parseInt(card.querySelector('input[name$="[port]"]').value) || undefined;
     dev.serial_number = card.querySelector('input[name$="[serial_number]"]')?.value || '';
+    dev.dongle_serial = card.querySelector('input[name$="[dongle_serial]"]')?.value?.trim() || '';
+    dev.inverter_serial = card.querySelector('input[name$="[inverter_serial]"]')?.value?.trim() || '';
+    // LuxPower: never persist a stranded shape (serial in serial_number but dongle_serial empty).
+    if ((txSel === 'luxpower-tcp') && !dev.dongle_serial && dev.serial_number) {
+      dev.dongle_serial = dev.serial_number;
+      dev.serial_number = '';
+    }
     dev.modbus_unit_id = parseInt(card.querySelector('input[name$="[modbus_unit_id]"]').value) || 1;
-    dev.poll_interval = parseInt(card.querySelector('input[name$="[poll_interval]"]').value) || 30;
+    dev.poll_interval = parseInt(card.querySelector('input[name$="[poll_interval]"]').value) || (txSel === 'luxpower-tcp' ? 5 : 30);
     dev.prefix = card.querySelector('input[name$="[prefix]"]')?.value || '';
-    // Collect register mappings: { metricName → register }
+    // Phase-2 (issue #106) explicit-mapping era marker (AC18): every luxpower-tcp
+    // device saved through the current settings UI is user-managed under
+    // mapping:'explicit'. Stamp it so the boot-time legacy migration never
+    // treats a phase-2 save (brand-new instance, or one whose mappings were all
+    // deleted) as a phase-1 legacy instance to auto-migrate.
+    if (txSel === 'luxpower-tcp') dev._luxpowerPhase2 = true;
     dev.mappings = {};
     card.querySelectorAll('.mappings-list .metric-row').forEach(row => {
       const address = row.dataset.address;
       const metricName = row.querySelector('.metric-name').value;
       if (address && metricName) dev.mappings[metricName] = address;
     });
+    // AC-38: catalog-mode saves stamp the inert _catalogV2 marker. LuxPower
+    // keeps its existing _luxpowerPhase2 marker ONLY (byte-compat: never add
+    // _catalogV2 to luxpower saves); non-LuxPower register families stamp
+    // _catalogV2 when any catalog component row is persisted.
+    if (txSel !== 'luxpower-tcp' && cardHasCatalogRows(card)) dev._catalogV2 = true;
     return dev;
   });
   payload.tuya_devices = collectDeviceArray('tuya-devices-container', (card) => {
@@ -3869,6 +5504,13 @@ if (form) form.addEventListener('submit', async (e) => {
   };
   if (tuyaCloud.access_id || tuyaCloud.access_secret || tuyaCloud.device_id) {
     payload.tuya_cloud = JSON.stringify(tuyaCloud);
+  }
+  // AC-29: an implicit-polling device (stored config has no `mappings` key)
+  // that saves with zero mapped rows would flip to explicit-none and stop
+  // polling — confirm before persisting that.
+  if (!confirmImplicitToExplicitNoneFlips()) {
+    showStatus(saveStatus, 'Save cancelled — a device would flip from implicit profile-default polling to explicit-none (polling stops). Map at least one metric for it first.', 'error');
+    return;
   }
   try {
     const res = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify(payload) });

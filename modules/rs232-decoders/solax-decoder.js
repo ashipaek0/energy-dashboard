@@ -49,9 +49,13 @@ function encodeQuery(cmd, profile) {
  * @param {Buffer} buffer - Raw response from inverter
  * @param {object} cmd - Command that was sent
  * @param {object} profile - Profile JSON with fields definition
+ * @param {object} [mappings] - Optional explicit mappings { metricName → `${cmd.name}:${field.offset}` }.
+ *   When present, only mapped fields are emitted under their mapped metric names
+ *   (skip unmapped); when absent, every field decodes under its profile-default
+ *   `field.metric` name (byte-identical to pre-mapping behavior).
  * @returns {object} { metric_name: value, ... }
  */
-function decodeResponse(buffer, cmd, profile) {
+function decodeResponse(buffer, cmd, profile, mappings) {
   if (buffer.length < 7) {
     throw new Error(`Solax response too short: ${buffer.length} bytes`);
   }
@@ -81,6 +85,15 @@ function decodeResponse(buffer, cmd, profile) {
   const payloadData = buffer.slice(payloadOffset, bodyEnd);
 
   const results = {};
+  // Build reverse lookup: handle → metric name (mappings is { metricName → "cmd.name:offset" })
+  let keyToMetric = null;
+  if (mappings) {
+    keyToMetric = {};
+    for (const [metric, key] of Object.entries(mappings)) {
+      keyToMetric[key] = metric;
+    }
+  }
+
   for (const field of profile.fields || []) {
     const offset = field.offset;
     if (offset + 2 > payloadData.length) continue; // field out of range
@@ -100,7 +113,20 @@ function decodeResponse(buffer, cmd, profile) {
     let value = raw * (field.scale || 1);
     // Round to sensible precision
     value = parseFloat(value.toFixed(4));
-    results[field.metric] = value;
+
+    // Mapping override logic
+    let metricName;
+    if (keyToMetric) {
+      const key = `${cmd.name}:${offset}`;
+      if (keyToMetric[key] !== undefined) {
+        metricName = keyToMetric[key];
+      } else {
+        continue; // skip unmapped when mappings exist
+      }
+    } else {
+      metricName = field.metric;
+    }
+    results[metricName] = value;
   }
 
   return results;

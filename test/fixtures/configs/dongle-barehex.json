@@ -1,0 +1,1 @@
+[{"name":"DNG-deye-hybrid","enabled":true,"profile":"deye-hybrid","transport":"solarman-v5","host":"10.0.0.9","port":8899,"serial_number":"SN0001","dongle_serial":"","inverter_serial":"","modbus_unit_id":1,"poll_interval":30,"prefix":"","mappings":{"battery_soc":"0x0045","solar_power":"0x0049","stranded":"0xFFFF"},"_catalogV2":true}]

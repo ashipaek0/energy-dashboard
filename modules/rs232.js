@@ -316,7 +316,7 @@ function decodeResponse(rawResponse, cmd, profile, mappings) {
     try {
       const decoderPath = path.join(__dirname, 'rs232-decoders', profile.decoder);
       const decoder = require(decoderPath);
-      return decoder.decodeResponse(rawResponse, cmd, profile);
+      return decoder.decodeResponse(rawResponse, cmd, profile, mappings);
     } catch (err) {
       logger.error(`RS232 decoder '${profile.decoder}' error:`, err.message);
       return {};

@@ -1,0 +1,1 @@
+[{"name":"MQTT-Core","enabled":true,"broker":"mqtt://core-mosquitto:1883","username":"","password":"","topics":{"battery_soc":"solar/battery/soc","pv1_power":"solar/inverter/pv1"}}]

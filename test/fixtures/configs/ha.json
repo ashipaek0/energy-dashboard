@@ -1,0 +1,1 @@
+[{"name":"HA-Main","enabled":true,"url":"http://ha.local:8123","token":"tok123","poll_interval":"30","entities":{"house_load":{"entityId":"sensor.house_power","actions":["toggle"]},"solar_export":"sensor.solar_production","battery_soc":"sensor.battery_level"}}]
