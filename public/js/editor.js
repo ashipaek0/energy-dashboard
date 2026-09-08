@@ -63,13 +63,21 @@ function hideSettingsModal() {
 }
 
 /** Build a <select> dropdown with metric options */
-function metricSelect(selectedName, existingId) {
+function metricSelect(selectedName, existingId, extraOptions) {
   var id = existingId || ('ms_' + Math.random().toString(36).slice(2,8));
   var sel = '<select id="' + id + '" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:0.3rem;background:var(--bg);color:var(--text);min-height:36px;">';
   sel += '<option value="">-- select --</option>';
   for (var i = 0; i < availableMetrics.length; i++) {
     var m = availableMetrics[i];
     sel += '<option value="' + escHtml(m) + '"' + (m === selectedName ? ' selected' : '') + '>' + escHtml(m) + '</option>';
+  }
+  // Additive per-block overrides (e.g. computed 'battery_power' for chart-power) not present as live metrics.
+  if (extraOptions) {
+    for (var j = 0; j < extraOptions.length; j++) {
+      var eo = extraOptions[j];
+      if (availableMetrics.indexOf(eo.value) !== -1) continue;
+      sel += '<option value="' + escHtml(eo.value) + '"' + (eo.value === selectedName ? ' selected' : '') + '>' + escHtml(eo.label) + '</option>';
+    }
   }
   sel += '</select>';
   return sel;
@@ -479,7 +487,7 @@ function buildChartForm(block, showFill) {
   return html;
 }
 
-function renderChartRows(container, showUnit) {
+function renderChartRows(container, showUnit, extraOptions) {
   var dataEl = container.querySelector('#chart-data');
   var datasets = [];
   try { datasets = JSON.parse(dataEl.textContent); } catch(e) {}
@@ -490,7 +498,7 @@ function renderChartRows(container, showUnit) {
     var d = datasets[i] || {};
     html += '<div class="chart-row" style="display:flex;align-items:center;gap:0.35rem;margin-bottom:0.3rem;">';
     html += '<input type="text" class="chart-label" value="' + escHtml(d.label || '') + '" placeholder="Label" style="flex:1;padding:0.3rem;border:1px solid var(--border);border-radius:0.3rem;background:var(--bg);color:var(--text);min-height:36px;font-size:0.85rem;">';
-    html += metricSelect(d.metric || '', 'chart-metric-' + i);
+    html += metricSelect(d.metric || '', 'chart-metric-' + i, extraOptions);
     if (showUnit) {
       html += '<input type="text" class="chart-unit" value="' + escHtml(d.unit || '') + '" placeholder="Unit" title="Measurement unit (e.g. %, kWh, kW, V, hours)" style="width:4rem;padding:0.3rem;border:1px solid var(--border);border-radius:0.3rem;background:var(--bg);color:var(--text);min-height:36px;font-size:0.8rem;">';
       html += '<input type="number" step="any" class="chart-scale" value="' + String(d.scale != null ? d.scale : 1) + '" placeholder="Scale" title="Multiply values by this factor (e.g. 0.001 for W->kW)" style="width:4.5rem;padding:0.3rem;border:1px solid var(--border);border-radius:0.3rem;background:var(--bg);color:var(--text);min-height:36px;font-size:0.8rem;">';
@@ -507,7 +515,7 @@ function renderChartRows(container, showUnit) {
       try { current = JSON.parse(dataEl.textContent); } catch(e) {}
       current.push({ label: '', metric: '', color: '#888888' });
       dataEl.textContent = JSON.stringify(current);
-      renderChartRows(container, showUnit);
+      renderChartRows(container, showUnit, extraOptions);
     };
   }
   container.querySelectorAll('.chart-remove').forEach(function(btn) {
@@ -517,7 +525,7 @@ function renderChartRows(container, showUnit) {
       try { current = JSON.parse(dataEl.textContent); } catch(e) {}
       current.splice(idx, 1);
       dataEl.textContent = JSON.stringify(current);
-      renderChartRows(container, showUnit);
+      renderChartRows(container, showUnit, extraOptions);
     };
   });
 }
@@ -1144,6 +1152,8 @@ async function openSettingsModal(block) {
       renderMetricCardsRows(body);
       break;
     case 'chart-power':
+      renderChartRows(body, false, [{ value: 'battery_power', label: 'Battery Power (net)' }]);
+      break;
     case 'chart-energy':
       renderChartRows(body);
       break;

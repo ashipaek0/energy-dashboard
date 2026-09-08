@@ -11,8 +11,8 @@ function normalizeDatasets(datasets) {
   var cGrid = style.getPropertyValue('--color-grid').trim();
   var cExport = style.getPropertyValue('--color-export').trim();
   var cFallback = style.getPropertyValue('--text-secondary').trim();
-  if (!datasets || !datasets.length) return [{ label: 'Load', metric: 'consumption', color: cLoad }, { label: 'Solar', metric: 'solar', color: cSolar }, { label: 'Battery Charge', metric: 'battery_charge', color: cBatt }, { label: 'Grid Import', metric: 'grid_import', color: cGrid }];
-  if (typeof datasets[0] === 'string') { const lm = { load: { label: 'Load', color: cLoad }, solar: { label: 'Solar', color: cSolar }, battery_charge: { label: 'Battery Charge', color: cBatt }, grid_import: { label: 'Grid Import', color: cGrid }, battery_discharge: { label: 'Battery Discharge', color: cBatt }, grid_export: { label: 'Grid Export', color: cExport } }; return datasets.map(ds => { const b = lm[ds] || { label: ds, color: cFallback }; return { label: b.label, metric: ds, color: b.color }; }); }
+  if (!datasets || !datasets.length) return [{ label: 'Load', metric: 'consumption', color: cLoad }, { label: 'Solar', metric: 'solar', color: cSolar }, { label: 'Battery Power', metric: 'battery_power', color: cBatt }, { label: 'Grid Import', metric: 'grid_import', color: cGrid }];
+  if (typeof datasets[0] === 'string') { const lm = { load: { label: 'Load', color: cLoad }, solar: { label: 'Solar', color: cSolar }, battery_power: { label: 'Battery Power', color: cBatt }, battery_charge: { label: 'Battery Charge', color: cBatt }, grid_import: { label: 'Grid Import', color: cGrid }, battery_discharge: { label: 'Battery Discharge', color: cBatt }, grid_export: { label: 'Grid Export', color: cExport } }; return datasets.map(ds => { const b = lm[ds] || { label: ds, color: cFallback }; return { label: b.label, metric: ds, color: b.color }; }); }
   return datasets.map(ds => ({ label: ds.label || ds.metric || 'Unknown', metric: ds.metric || '', color: ds.color || cFallback }));
 }
 
