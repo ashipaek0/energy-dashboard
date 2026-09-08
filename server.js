@@ -438,6 +438,10 @@ wss.on('connection', (ws) => {
  * 24h power history, 7d energy bar data.
  * @returns {Promise<object>} dashboard state
  */
+// 24h power history is downsampled into 10-minute buckets so the chart gets a
+// bounded, deterministic point count (~145) across the FULL window regardless
+// of the raw ~30s poll density (was LIMIT 300, which truncated to ~2.5h).
+const POWER_HISTORY_BUCKET_SECONDS = 600;
 async function buildDashboardState() {
   const start = Date.now();
   const latest = db.prepare('SELECT * FROM history ORDER BY timestamp DESC LIMIT 1').get();
@@ -474,7 +478,16 @@ async function buildDashboardState() {
     getCurrentMetrics(),
     getSavings(),
     getCurrentGridStatus(),
-    db.prepare('SELECT * FROM (SELECT * FROM history WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT 300) ORDER BY timestamp ASC').all(historySince),
+    db.prepare(`SELECT (timestamp / ${POWER_HISTORY_BUCKET_SECONDS}) * ${POWER_HISTORY_BUCKET_SECONDS} AS timestamp,
+       AVG(consumption) as consumption,
+       AVG(solar) as solar,
+       AVG(battery_charge) as battery_charge,
+       AVG(battery_discharge) as battery_discharge,
+       AVG(grid_import) as grid_import,
+       AVG(grid_export) as grid_export
+     FROM history WHERE timestamp >= ?
+     GROUP BY (timestamp / ${POWER_HISTORY_BUCKET_SECONDS})
+     ORDER BY timestamp ASC`).all(historySince),
     db.prepare(`
       SELECT date(timestamp, 'unixepoch') as day,
         MAX(daily_solar) as solar_kwh,
