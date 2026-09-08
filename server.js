@@ -456,6 +456,7 @@ async function buildDashboardState() {
       solar_kw: latest.solar / 1000,
       battery_charge_kw: latest.battery_charge / 1000,
       battery_discharge_kw: latest.battery_discharge / 1000,
+      battery_power_kw: (latest.battery_charge - latest.battery_discharge) / 1000,
       grid_import_kw: latest.grid_import / 1000,
       grid_export_kw: latest.grid_export / 1000,
       battery_soc: latest.battery_soc,
@@ -523,6 +524,7 @@ async function buildDashboardState() {
     solar_kw: r.solar / 1000,
     battery_charge_kw: r.battery_charge / 1000,
     battery_discharge_kw: r.battery_discharge / 1000,
+    battery_power_kw: (r.battery_charge - r.battery_discharge) / 1000,
     grid_import_kw: r.grid_import / 1000,
     grid_export_kw: r.grid_export / 1000
   }));
@@ -613,6 +615,7 @@ app.get('/api/current', async (req, res) => {
         solar_kw: latest.solar / 1000,
         battery_charge_kw: latest.battery_charge / 1000,
         battery_discharge_kw: latest.battery_discharge / 1000,
+        battery_power_kw: (latest.battery_charge - latest.battery_discharge) / 1000,
         grid_import_kw: latest.grid_import / 1000,
         grid_export_kw: latest.grid_export / 1000,
         battery_soc: latest.battery_soc,
@@ -651,6 +654,7 @@ app.get('/api/history', async (req, res) => {
       solar_kw: r.solar / 1000,
       battery_charge_kw: r.battery_charge / 1000,
       battery_discharge_kw: r.battery_discharge / 1000,
+      battery_power_kw: (r.battery_charge - r.battery_discharge) / 1000,
       grid_import_kw: r.grid_import / 1000,
       grid_export_kw: r.grid_export / 1000,
       timestamp: r.timestamp * 1000
