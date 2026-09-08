@@ -51,7 +51,7 @@ class PVOutputClient {
     });
     const res = await fetch(url.toString(), {
       method: 'POST',
-      headers: this._headers(),
+      headers: { ...this._headers(), 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
       signal: AbortSignal.timeout(15000)
     });
