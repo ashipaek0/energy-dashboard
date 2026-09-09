@@ -93,11 +93,10 @@ async function processBatchBackfill(db, client) {
         await sleep(10_000);
       } catch (e) {
         logger.warn(`[pvoutput] backfill chunk failed for ${date}: ${e.message}`);
-        if (e.message.includes('429')) {
-          const wait = msUntilReset('general');
-          logger.info(`[pvoutput] rate limited, waiting ${wait}ms`);
-          await sleep(wait);
-        }
+        // HUMAN-7: removed a dead '429' branch — PVOutput lockouts are 403
+        // Exceeded, which never matched. Rate-limit lockouts are handled by the
+        // client choke point + the canCall() gate in backfillDateChunk, so the
+        // next chunk defers via msUntilReset instead of hammering.
       }
     }
   }
@@ -154,12 +153,11 @@ async function processFreeBackfill(db, client) {
       db.prepare("UPDATE pvoutput_upload_queue SET status = 'uploaded', uploaded_at = datetime('now') WHERE id = ?").run(record.id);
       logger.debug(`[pvoutput] backfill ${record.date} ${record.time} (${status})`);
     } catch (e) {
-      if (e.message.includes('400') || e.message.includes('No sun') || e.message.includes('Energy')) {
-        db.prepare("UPDATE pvoutput_upload_queue SET status = 'failed', attempts = attempts + 1 WHERE id = ?").run(record.id);
-      } else {
-        db.prepare("UPDATE pvoutput_upload_queue SET status = 'failed', attempts = attempts + 1 WHERE id = ?").run(record.id);
-        logger.warn(`[pvoutput] backfill record failed: ${e.message}`);
-      }
+      // HUMAN-7: the '429' branch was dead code — PVOutput lockouts are 403
+      // Exceeded and are already taught to the limiter at the client choke
+      // point; the canCall() gate above handles the next record's wait.
+      logger.warn(`[pvoutput] backfill record failed: ${e.message}`);
+      db.prepare("UPDATE pvoutput_upload_queue SET status = 'failed', attempts = attempts + 1 WHERE id = ?").run(record.id);
     }
     // 10s courtesy pause (FS4)
     await sleep(10_000);
