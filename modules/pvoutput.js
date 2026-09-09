@@ -14,7 +14,7 @@
 const express = require('express');
 const { getConfig, getDb } = require('./database');
 const { logger } = require('./logger');
-const { init: initRateLimiter } = require('./pvoutput/rateLimiter');
+const { init: initRateLimiter, canCall } = require('./pvoutput/rateLimiter');
 const { PVOutputClient } = require('./pvoutput/client');
 const { start: startPush, stop: stopPush } = require('./pvoutput/push');
 const { start: startPull, stop: stopPull, fetchSystemInfo } = require('./pvoutput/pull');
@@ -41,11 +41,23 @@ function start() {
   initRateLimiter(db);
   client = new PVOutputClient(config.api_key, config.system_id);
 
+  // AC-6: when the pool is locked at startup (remaining <= 0 / cooldown), do no
+  // burst — defer the initial pulls and queue backfill with a single warn log;
+  // nothing retries until the window recovers (canCall() lazily self-heals on
+  // the next restart once resetAt passes). startPull() receives skipInitial so
+  // it stays silent and this remains the one warn.
+  const poolLocked = !canCall('general');
+  if (poolLocked) {
+    logger.warn('[pvoutput] rate-limit window active at startup — deferring system-info/history fetches and queue backfill until reset');
+  }
+
   startPush(db, client, config, getCurrentMetrics);
-  startPull(db, client, config);
+  startPull(db, client, config, { skipInitial: poolLocked });
 
   // Run backfill for any pending queue items from previous runs
-  runBackfill(db, client).catch(e => logger.warn(`[pvoutput] startup backfill: ${e.message}`));
+  if (!poolLocked) {
+    runBackfill(db, client).catch(e => logger.warn(`[pvoutput] startup backfill: ${e.message}`));
+  }
 
   logger.info(`[pvoutput] started — uploading every ${config.upload_interval_minutes || 5}min`);
 }
@@ -82,7 +94,9 @@ apiRouter.post('/test', async (req, res) => {
   if (!api_key || !system_id) return res.status(400).json({ error: 'API key and system ID required' });
   try {
     const testClient = new PVOutputClient(api_key, system_id);
-    const info = await fetchSystemInfo(getDb(), testClient);
+    // force: true — the test endpoint must always be a live fetch (AC-4),
+    // never satisfied from the pvoutput_system cache gate.
+    const info = await fetchSystemInfo(getDb(), testClient, { force: true });
     const { getState } = require('./pvoutput/rateLimiter');
     res.json({ success: true, system_name: info.system_name, system_size: info.system_size, timezone: info.timezone, rate_limits: getState() });
   } catch (err) {

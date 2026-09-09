@@ -9,13 +9,20 @@
  */
 const { PVOutputClient } = require('./client');
 const { buildStatusPayload, validatePayload } = require('./mapper');
-const { canCall, msUntilReset } = require('./rateLimiter');
+const { canCall, isRateLimitError } = require('./rateLimiter');
 const { logger } = require('../logger');
 
 let pushInterval = null;
 let eodInterval = null;
+// AC-1: the startup-delay timer handle must be tracked so stop() can cancel a
+// pending delay; an untracked timer used to survive stop() and later orphan the
+// interval it created (N restarts inside the delay window → N upload loops).
+let startupTimer = null;
 
 function start(db, client, config, getMetricsFn) {
+  // Idempotent by construction (AC-2): stop() clears any pending startup delay
+  // and any live interval, so a second start()/restart always leaves exactly
+  // one chain that will eventually fire.
   stop();
 
   const intervalMs = (config.upload_interval_minutes || 5) * 60 * 1000;
@@ -23,7 +30,8 @@ function start(db, client, config, getMetricsFn) {
   const msToBoundary = (intervalMs - (Date.now() % intervalMs)) % intervalMs;
   const delay = Math.max(msToBoundary, 30_000);
 
-  setTimeout(() => {
+  startupTimer = setTimeout(() => {
+    startupTimer = null;
     uploadStatus(db, client, config, getMetricsFn);
     pushInterval = setInterval(() => uploadStatus(db, client, config, getMetricsFn), intervalMs);
   }, delay);
@@ -69,14 +77,17 @@ function start(db, client, config, getMetricsFn) {
 }
 
 function stop() {
+  // AC-1: cancel a pending startup delay so no interval can be born after stop().
+  if (startupTimer) { clearTimeout(startupTimer); startupTimer = null; }
   if (pushInterval) { clearInterval(pushInterval); pushInterval = null; }
   if (eodInterval) { clearInterval(eodInterval); eodInterval = null; }
 }
 
 async function uploadStatus(db, client, config, getMetricsFn) {
   if (!canCall('general', 'high')) {
-    logger.warn('[pvoutput] rate limit exhausted, queuing upload for backfill');
-    queueForBackfill(db, {}, new Date(), 'rate_limit');
+    // AC-10 (D3): rate-limit lockouts NEVER enqueue — log-and-drop; the next
+    // interval tick retries and a newer tick supersedes an old status anyway.
+    logger.warn('[pvoutput] rate limit window active — skipping status upload (not queued)');
     return;
   }
   try {
@@ -93,6 +104,13 @@ async function uploadStatus(db, client, config, getMetricsFn) {
     const status = resp.includes('Updated') ? 'updated' : 'added';
     logger.debug(`[pvoutput] uploaded status at ${payload.t} (${status})`);
   } catch (err) {
+    // AC-10 (D3): a 403-Exceeded lockout log-and-drops — the limiter was already
+    // taught by the client choke point; queueing a hollow row would only feed
+    // backfill replay into the next window.
+    if (isRateLimitError(err)) {
+      logger.warn(`[pvoutput] upload rate-limited (403 Exceeded) — dropping tick, retrying next interval`);
+      return;
+    }
     if (err.message.includes('No sun') || err.message.includes('400')) {
       logger.debug(`[pvoutput] upload skipped: ${err.message}`);
       return;
@@ -101,6 +119,7 @@ async function uploadStatus(db, client, config, getMetricsFn) {
       logger.error('[pvoutput] invalid API key or system ID — disabling');
       return;
     }
+    // Non-rate-limit (transient network/5xx) errors keep queueing for backfill.
     logger.warn(`[pvoutput] upload failed: ${err.message}`);
     queueForBackfill(db, {}, new Date(), err.message);
   }
