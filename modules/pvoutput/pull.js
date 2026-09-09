@@ -10,19 +10,35 @@
  * @module pvoutput/pull
  */
 const { PVOutputClient } = require('./client');
-const { updateFromHeaders } = require('./rateLimiter');
+const { canCall, isRateLimitError } = require('./rateLimiter');
 const { logger } = require('../logger');
+
+// D2: startup getsystem cache gate — re-fetch at most once per 60 minutes
+// unless no row exists yet or the caller forces a live fetch (/api/pvoutput/test).
+const SYSTEM_CACHE_TTL_MS = 60 * 60 * 1000;
 
 let dailyInterval = null;
 
-function start(db, client, config) {
+/**
+ * Start the pull engine. The startup burst (getsystem + 7-date history) only
+ * runs when the rate-limit pool allows it — AC-6: a locked pool defers the
+ * initial fetches (single warn) and nothing retries until the window recovers.
+ * `opts.skipInitial` is set by the pvoutput orchestrator when it has already
+ * decided the pool is locked (so the warn is logged exactly once, up-stack).
+ */
+function start(db, client, config, opts = {}) {
   stop();
 
-  // Fetch system info on startup (shared with test endpoint, M8)
-  fetchSystemInfo(db, client).catch(e => logger.warn(`[pvoutput] getsystem failed: ${e.message}`));
-
-  // 7-day status history — cache-gated per date (GS3)
-  populateHistory(db, client).catch(e => logger.warn(`[pvoutput] history fetch failed: ${e.message}`));
+  if (opts.skipInitial === true) {
+    logger.debug('[pvoutput] initial pulls deferred (rate-limit window active)');
+  } else if (canCall('general')) {
+    // Fetch system info on startup (shared with test endpoint, M8)
+    fetchSystemInfo(db, client).catch(e => logger.warn(`[pvoutput] getsystem failed: ${e.message}`));
+    // 7-day status history — cache-gated per date (GS3)
+    populateHistory(db, client).catch(e => logger.warn(`[pvoutput] history fetch failed: ${e.message}`));
+  } else {
+    logger.warn('[pvoutput] rate limit window locked at startup — deferring system-info and history fetches until it recovers');
+  }
 
   // Daily pulls at 01:00, 01:30 — evaluated in PVOutput system timezone (S3/S6)
   const tz = config.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -41,8 +57,41 @@ function stop() {
   if (dailyInterval) { clearInterval(dailyInterval); dailyInterval = null; }
 }
 
-/** Fetch system info from PVOutput. Shared between startup and test endpoint (M8). */
-async function fetchSystemInfo(db, client) {
+/**
+ * Parse a SQLite datetime('now') value ('YYYY-MM-DD HH:MM:SS', UTC) or an ISO
+ * string into epoch ms. Returns NaN when unparseable.
+ */
+function parseDbDate(str) {
+  if (!str) return NaN;
+  const s = String(str).trim().replace(' ', 'T');
+  return Date.parse(/[zZ]$|[+-]\d{2}:\d{2}$/.test(s) ? s : s + 'Z');
+}
+
+function isCacheFresh(fetchedAt, ttlMs, now = Date.now()) {
+  const t = parseDbDate(fetchedAt);
+  return Number.isFinite(t) && (now - t) < ttlMs;
+}
+
+/**
+ * Fetch system info from PVOutput. Shared between startup and test endpoint (M8).
+ *
+ * AC-4 (D2): cache-gated on pvoutput_system.fetched_at — skips the live GET
+ * when the stored row is newer than SYSTEM_CACHE_TTL_MS (60 min) and a row
+ * exists. Pass `{ force: true }` (the /api/pvoutput/test endpoint does) to
+ * always hit the network. Returns the stored row on a cache hit, or the parsed
+ * info object after a live fetch.
+ */
+async function fetchSystemInfo(db, client, opts = {}) {
+  const force = opts === true || (opts && opts.force === true);
+
+  if (!force) {
+    const row = db.prepare('SELECT * FROM pvoutput_system WHERE system_id = ?').get(client.systemId);
+    if (row && row.fetched_at && isCacheFresh(row.fetched_at, SYSTEM_CACHE_TTL_MS)) {
+      logger.debug(`[pvoutput] getsystem cache hit (fetched_at ${row.fetched_at}) — skipping live fetch`);
+      return row;
+    }
+  }
+
   const text = await client.get('getsystem.jsp', {}, 'general');
   const fields = text.trim().split(',');
   if (fields.length < 16) throw new Error('unexpected getsystem response');
@@ -103,10 +152,20 @@ async function fetchSystemInfo(db, client) {
   return info;
 }
 
-/** Fetch 7-day status history — cache-gated per date (GS3). */
+/**
+ * Fetch 7-day status history — cache-gated per date (GS3).
+ * AC-5: checks canCall('general') before EACH getstatus; on a rate-limit
+ * failure mid-loop it stops requesting the remaining dates (no cascade of
+ * 403s). Per-date failures never reject — startup cannot crash on history.
+ */
 async function populateHistory(db, client) {
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   for (let i = 0; i < 7; i++) {
+    // AC-5/AC-6: never request another date while the window is locked.
+    if (!canCall('general')) {
+      logger.warn('[pvoutput] rate limit window active — stopping history fetch');
+      break;
+    }
     const d = new Date();
     d.setDate(d.getDate() - i);
     const dateStr = d.toLocaleDateString('en-CA', { timeZone: tz });
@@ -135,6 +194,11 @@ async function populateHistory(db, client) {
       }
       logger.debug(`[pvoutput] fetched history for ${dateStr}: ${records.length} records`);
     } catch (e) {
+      if (isRateLimitError(e)) {
+        // AC-5: 403 Exceeded mid-loop — stop requesting the remaining dates.
+        logger.warn(`[pvoutput] rate limited fetching ${dateStr} — skipping remaining history dates`);
+        break;
+      }
       logger.warn(`[pvoutput] history fetch for ${dateStr} failed: ${e.message}`);
     }
   }
@@ -197,7 +261,7 @@ async function fetchDailyOutputs(db, client) {
   }
 }
 
-module.exports = { start, stop, fetchSystemInfo };
+module.exports = { start, stop, fetchSystemInfo, populateHistory };
 
 function getLocalTime(timezone) {
   const fmt = new Intl.DateTimeFormat("en-GB", {
