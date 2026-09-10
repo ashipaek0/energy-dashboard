@@ -37,6 +37,7 @@ const { pollGridStatus, getCurrentGridStatus, getGridHours, getGridTimeline } = 
 const { computeTodaySolar, getSolarForecast, testForecast } = require('./modules/solar');
 const { getSavings } = require('./modules/savings');
 const { getCurrentMetrics, getMetricHistory } = require('./modules/metrics');
+const metricSanity = require('./modules/metricSanity');
 const { getDashboardConfig, saveDashboardConfig } = require('./modules/dashboard-config');
 const { backupDatabase, restoreDatabase, startSnapshotScheduler, stopSnapshotScheduler, listSnapshots, restoreFromSnapshot, checkpointWal } = require('./modules/backup');
 const { parseGridState, assertSafeFetchUrl, assertSafeBrokerUrl, isBlockedIp } = require('./modules/utils');
@@ -629,6 +630,8 @@ app.get('/api/current', async (req, res) => {
         savings_rate: rate,
         today_savings: dailySolarKwh * rate,
         all_time_savings: allTimeSavings,
+        // #119 AC-8: machine-readable guard status (suspect/suspectSince/reason)
+        metric_sanity: metricSanity.getStatus(),
         timestamp: latest.timestamp * 1000
       });
     } else {

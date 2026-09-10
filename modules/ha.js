@@ -1,6 +1,7 @@
 const { logger } = require('./logger');
 const { getConfig, getDb } = require('./database');
 const { assertSafeFetchUrl } = require('./utils');
+const metricSanity = require('./metricSanity');
 
 // Build a Home Assistant REST API URL from a base URL, robust to trailing
 // slashes and a base that already ends in '/api' (new URL().toString() adds a
@@ -75,6 +76,15 @@ function getLatestUpsertText() {
 function saveMetric(metricName, rawValue, timestamp) {
   const num = parseFloat(rawValue);
   if (!isNaN(num) && num === Number(rawValue)) {
+    // #119 metric sanity guard: reject implausible jumps in daily counters at
+    // the write choke point. Guarded + rejected -> HOLD: no write to
+    // latest_metrics/metrics and the held row keeps its ORIGINAL timestamp
+    // (AC-4). check() fails open and never throws (AC-9); unguarded metrics
+    // are written exactly as before (AC-12b).
+    const verdict = metricSanity.check(metricName, num, timestamp);
+    if (verdict && verdict.guarded && !verdict.accepted) {
+      return;
+    }
     getLatestUpsert().run(metricName, num, timestamp);
     getMetricInsert().run(timestamp, metricName, num);
   } else {
@@ -93,6 +103,9 @@ let mqttValues = {};
 async function pollHomeAssistant() {
   const haDevices = JSON.parse(getConfig('ha_devices') || '[]');
   if (!haDevices.length) return;
+
+  // #119: thresholds are read once per poll cycle (§5); missing keys never throw.
+  metricSanity.reloadConfig();
 
   for (const device of haDevices) {
     if (!device.enabled || !device.url || !device.token) continue;
@@ -350,4 +363,4 @@ async function getEntityModes(url, token, entityId) {
   return data;
 }
 
-module.exports = { pollHomeAssistant, fetchHAEntities, mqttValues, executeHAAction, getActionsForEntity, getEntityActions, getEntityModes };
+module.exports = { pollHomeAssistant, fetchHAEntities, mqttValues, executeHAAction, getActionsForEntity, getEntityActions, getEntityModes, saveMetric };
