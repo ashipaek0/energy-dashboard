@@ -1,0 +1,48 @@
+# Unit/fixture tests for Epilykos.
+#
+# This workflow is deliberately SEPARATE from docker-build-dev.yml and
+# docker-build.yml, and is non-blocking: a red test run does NOT stop the
+# image build/push. It reports status only. Do not fold these steps into a
+# build workflow — the operator's chosen semantics are "report, don't block".
+name: Tests
+
+on:
+  push:
+    branches:
+      - dev
+  pull_request:
+    branches:
+      - main
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          # Matches the Dockerfile base image (node:22-slim), so CI tests the
+          # same runtime that ships to production.
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # test/run-all.js auto-discovers both test/*.test.js and tests/*.test.js,
+      # so this single command covers all fixtures (15 as of now).
+      - name: Run tests
+        run: npm test

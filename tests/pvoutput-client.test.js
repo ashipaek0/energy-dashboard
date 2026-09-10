@@ -127,15 +127,26 @@ test('AC-7: 403 Exceeded body at the client choke point teaches the limiter (pre
 
   const client = new PVOutputClient('test-api-key', 'test-system-id');
   rl._test.reset();
-  await assert.rejects(
-    () => client.post('addstatus.jsp', { d: '20260909', t: '12:00', v1: 1 }, 'general'),
-    /PVOutput 403/
-  );
-  const st = rl.getState().general;
-  assert.strictEqual(st.remaining, 0, 'handleRateLimitExceeded zeroes remaining');
-  assert.strictEqual(st.resetAt, 1788969600, 'server X-Rate-Limit-Reset preferred over the hour-boundary fallback');
-  assert.strictEqual(rl.canCall('general', 'high'), false, 'pool is hard-locked after the 403');
-  rl._test.reset();
+  // AC-3 (issue #120): pin the limiter clock to a FIXED instant strictly before
+  // the server reset epoch (1788969600 = 2026-09-09 16:00:00 UTC). Without this
+  // the assertion is a time bomb: once the wall clock passes that epoch,
+  // healIfExpired() sees nowFn() >= resetAt*1000 and self-heals the pool, so the
+  // hard lock disappears and canCall() legitimately returns true (AC-8 behaviour
+  // — the product is right, the test was assuming "now < epoch" forever).
+  const PINNED_NOW_MS = (1788969600 - 60) * 1000; // 60s before the server reset
+  try {
+    rl._test.setNow(() => PINNED_NOW_MS);
+    await assert.rejects(
+      () => client.post('addstatus.jsp', { d: '20260909', t: '12:00', v1: 1 }, 'general'),
+      /PVOutput 403/
+    );
+    const st = rl.getState().general;
+    assert.strictEqual(st.remaining, 0, 'handleRateLimitExceeded zeroes remaining');
+    assert.strictEqual(st.resetAt, 1788969600, 'server X-Rate-Limit-Reset preferred over the hour-boundary fallback');
+    assert.strictEqual(rl.canCall('general', 'high'), false, 'pool is hard-locked after the 403');
+  } finally {
+    rl._test.reset(); // restore the real clock + clean pool so later tests see real time
+  }
 });
 
 test('AC-7: 403 Exceeded with NO rate headers still locks the pool via the D1 fallback reset', async () => {

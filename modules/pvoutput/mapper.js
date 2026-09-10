@@ -7,6 +7,8 @@
  * @module pvoutput/mapper
  */
 
+const { resolveEnergyUnit } = require('../../public/js/pvoutput-units');
+
 /**
  * Unwrap a metric value that may be the envelope shape from getCurrentMetrics()
  * ({ value, type, timestamp, unit }) or a legacy flat number. Returns the raw
@@ -68,7 +70,9 @@ function buildStatusPayload(metrics, config, date = new Date()) {
 
   if (hasCumulative && Number.isFinite(Number(v1))) {
     const raw = Number(v1);
-    payload.v1 = Math.round(map.v1_is_kwh ? raw * 1000 : raw);
+    // Energy: Epilykos kWh → PVOutput Wh. Converted unless the mapping is
+    // explicitly Wh (see resolveEnergyUnit — default is kWh, AC-4/AC-5).
+    payload.v1 = Math.round(resolveEnergyUnit(map, 'v1') === 'kWh' ? raw * 1000 : raw);
     if (!config.net_mode) payload.c1 = config.c1_mode ?? 1;
   }
   if (hasInstantPower && Number.isFinite(Number(v2))) {
@@ -78,7 +82,7 @@ function buildStatusPayload(metrics, config, date = new Date()) {
   // Consumption
   const v3 = metricValue(metrics, map.v3);
   if (v3 != null && Number.isFinite(Number(v3))) {
-    payload.v3 = Math.round(map.v3_is_kwh ? Number(v3) * 1000 : Number(v3));
+    payload.v3 = Math.round(resolveEnergyUnit(map, 'v3') === 'kWh' ? Number(v3) * 1000 : Number(v3));
   }
   const v4 = metricValue(metrics, map.v4);
   if (v4 != null && Number.isFinite(Number(v4))) payload.v4 = Math.round(Number(v4));
@@ -124,13 +128,20 @@ function deriveBatteryState(metrics, map) {
 
 /**
  * Validate payload against PVOutput constraints.
- * @param {object} payload
+ * @param {object} payload — addstatus (v1/v3) or addoutput/EOD (g/c) body
  * @param {number|null} systemSizeW — from config or getsystem cache
+ * @param {object} [opts] — optional #119 checks:
+ *   maxDailyKwh / maxDailyConsumptionKwh — explicit daily kWh ceilings
+ *     (config `pvoutput.max_daily_kwh` / `pvoutput.max_daily_consumption_kwh`)
+ *   safetyFactor / maxSunHours — ceiling derivation (default 1.5 / 6)
+ *   minV1Wh / minV3Wh — last accepted same-day value (Wh) for the
+ *     generation/consumption field (AC-11 no-regression)
  * @returns {string[]} error messages (empty = valid)
  */
-function validatePayload(payload, systemSizeW) {
+function validatePayload(payload, systemSizeW, opts) {
+  opts = opts || {};
   const errors = [];
-  if (!payload.v1 && !payload.v2 && !payload.v3 && !payload.v4) {
+  if (!payload.v1 && !payload.v2 && !payload.v3 && !payload.v4 && payload.g == null && payload.c == null) {
     errors.push('No energy or power values to upload');
   }
   if (systemSizeW && payload.v2 && payload.v2 > systemSizeW * 1.5) {
@@ -142,7 +153,51 @@ function validatePayload(payload, systemSizeW) {
   if (payload.b2 != null && payload.b1 == null) {
     errors.push('b2 requires b1');
   }
+
+  // ── #119 AC-10: implausible same-day daily-ceiling ─────────────────────
+  // v1/v3 (addstatus) and g/c (addoutput EOD) carry day-cumulative energy in Wh.
+  const genField = payload.v1 != null ? 'v1' : (payload.g != null ? 'g' : null);
+  const conField = payload.v3 != null ? 'v3' : (payload.c != null ? 'c' : null);
+  const genVal = genField ? Number(payload[genField]) : null;
+  const conVal = conField ? Number(payload[conField]) : null;
+
+  const sizeW = Number(systemSizeW);
+  const hasSize = Number.isFinite(sizeW) && sizeW > 0;
+  const safetyFactor = posNum(opts.safetyFactor) || 1.5;
+  const maxSunHours = posNum(opts.maxSunHours) || 6;
+  const derivedKwh = hasSize ? (sizeW / 1000) * maxSunHours * safetyFactor : null;
+  const genCeilingKwh = posNum(opts.maxDailyKwh) || derivedKwh;
+  const conCeilingKwh = posNum(opts.maxDailyConsumptionKwh) || derivedKwh;
+  // Round to whole Wh: payload.v1/v3 are integer Wh, and the formula may carry
+  // binary-float dust (2.9 kW * 6 h * 1.5 = 26.099999999999998 kWh).
+  const genCeilingWh = genCeilingKwh != null ? Math.round(genCeilingKwh * 1000) : null;
+  const conCeilingWh = conCeilingKwh != null ? Math.round(conCeilingKwh * 1000) : null;
+
+  if (genField && genCeilingWh != null && Number.isFinite(genVal) && genVal > genCeilingWh) {
+    errors.push(`${genField} energy ${genVal}Wh > daily ceiling ${genCeilingWh}Wh (${genCeilingKwh} kWh)`);
+  }
+  if (conField && conCeilingWh != null && Number.isFinite(conVal) && conVal > conCeilingWh) {
+    errors.push(`${conField} consumption ${conVal}Wh > daily ceiling ${conCeilingWh}Wh (${conCeilingKwh} kWh)`);
+  }
+
+  // ── #119 AC-11: no regression vs last accepted same-day value ──────────
+  // PVOutput latches day-cumulative energy downward, so never post lower.
+  const minGenWh = posNum(opts.minV1Wh);
+  if (genField && minGenWh != null && Number.isFinite(genVal) && genVal < minGenWh) {
+    errors.push(`${genField} energy ${genVal}Wh < last accepted same-day ${minGenWh}Wh (regression)`);
+  }
+  const minConWh = posNum(opts.minV3Wh);
+  if (conField && minConWh != null && Number.isFinite(conVal) && conVal < minConWh) {
+    errors.push(`${conField} consumption ${conVal}Wh < last accepted same-day ${minConWh}Wh (regression)`);
+  }
+
   return errors;
 }
 
-module.exports = { formatStatusTimestamp, buildStatusPayload, validatePayload, deriveBatteryState };
+/** Positive finite number, else null (0/NaN/undefined ⇒ null). */
+function posNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+module.exports = { formatStatusTimestamp, buildStatusPayload, validatePayload, deriveBatteryState, resolveEnergyUnit };
