@@ -7,6 +7,8 @@
  * @module pvoutput/mapper
  */
 
+const { resolveEnergyUnit } = require('../../public/js/pvoutput-units');
+
 /**
  * Unwrap a metric value that may be the envelope shape from getCurrentMetrics()
  * ({ value, type, timestamp, unit }) or a legacy flat number. Returns the raw
@@ -68,7 +70,9 @@ function buildStatusPayload(metrics, config, date = new Date()) {
 
   if (hasCumulative && Number.isFinite(Number(v1))) {
     const raw = Number(v1);
-    payload.v1 = Math.round(map.v1_is_kwh ? raw * 1000 : raw);
+    // Energy: Epilykos kWh → PVOutput Wh. Converted unless the mapping is
+    // explicitly Wh (see resolveEnergyUnit — default is kWh, AC-4/AC-5).
+    payload.v1 = Math.round(resolveEnergyUnit(map, 'v1') === 'kWh' ? raw * 1000 : raw);
     if (!config.net_mode) payload.c1 = config.c1_mode ?? 1;
   }
   if (hasInstantPower && Number.isFinite(Number(v2))) {
@@ -78,7 +82,7 @@ function buildStatusPayload(metrics, config, date = new Date()) {
   // Consumption
   const v3 = metricValue(metrics, map.v3);
   if (v3 != null && Number.isFinite(Number(v3))) {
-    payload.v3 = Math.round(map.v3_is_kwh ? Number(v3) * 1000 : Number(v3));
+    payload.v3 = Math.round(resolveEnergyUnit(map, 'v3') === 'kWh' ? Number(v3) * 1000 : Number(v3));
   }
   const v4 = metricValue(metrics, map.v4);
   if (v4 != null && Number.isFinite(Number(v4))) payload.v4 = Math.round(Number(v4));
@@ -145,4 +149,4 @@ function validatePayload(payload, systemSizeW) {
   return errors;
 }
 
-module.exports = { formatStatusTimestamp, buildStatusPayload, validatePayload, deriveBatteryState };
+module.exports = { formatStatusTimestamp, buildStatusPayload, validatePayload, deriveBatteryState, resolveEnergyUnit };

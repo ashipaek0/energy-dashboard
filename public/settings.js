@@ -4339,22 +4339,18 @@ function buildPvoutputConfig(config) {
   if (cumulativeRadio) cumulativeRadio.checked = !config.net_mode;
   if (netRadio) netRadio.checked = config.net_mode === true;
 
-  // Metric mapping dropdowns
+  // Metric mapping dropdowns. The rows, labels, hints and the per-field
+  // kWh/Wh unit selectors live in public/js/pvoutput-units.js so the UI and the
+  // upload mapper share one definition (issue #117).
   const mm = config.metric_map || {};
-  const metricFields = [
-    { key: 'v1', label: 'v1 Energy Generated (Wh)', hint: 'Cumulative daily solar generation. Typically daily_solar_kwh or solar_kwh.' },
-    { key: 'v2', label: 'v2 Power Generated (W)', hint: 'Instantaneous solar output in watts. Typically solar_power or solar.' },
-    { key: 'v3', label: 'v3 Energy Consumed (Wh)', hint: 'Cumulative daily consumption. Typically daily_consumption or load_kwh.' },
-    { key: 'v4', label: 'v4 Power Consumed (W)', hint: 'Instantaneous load in watts. Typically load_power or consumption.' },
-    { key: 'v5', label: 'v5 Temperature (°C)', hint: 'Ambient or inverter temperature. Typically inverter_temperature.' },
-    { key: 'v6', label: 'v6 Voltage (V)', hint: 'Grid/mains voltage. Typically grid_voltage.' }
-  ];
+  const pvUnits = window.EPILYKOS_PVOUTPUT_UNITS;
   const container = document.getElementById('pvoutput-metrics-container');
-  if (container) {
-    container.innerHTML = metricFields.map(f => {
-      const sel = generateMetricOptionsHtml(mm[f.key]);
-      return `<div class="form-group" style="flex:1;min-width:200px;"><label>${escapeHtml(f.label)}</label><select class="pvoutput-metric" data-key="${f.key}" style="width:100%;">${sel}</select><div class="note">${escapeHtml(f.hint)}</div></div>`;
-    }).join('');
+  if (container && pvUnits) {
+    container.innerHTML = pvUnits.renderMetricFieldsHtml(
+      mm,
+      escapeHtml,
+      (selected) => generateMetricOptionsHtml(selected)
+    );
   }
 
   // Queue status
@@ -4362,10 +4358,12 @@ function buildPvoutputConfig(config) {
 }
 
 function collectPvoutputConfig() {
-  const mm = {};
-  document.querySelectorAll('.pvoutput-metric').forEach(sel => {
-    if (sel.value) mm[sel.dataset.key] = sel.value;
-  });
+  const pvUnits = window.EPILYKOS_PVOUTPUT_UNITS;
+  const metricSelections = Array.from(document.querySelectorAll('.pvoutput-metric'), el => ({ key: el.dataset.key, value: el.value }));
+  const unitSelections = Array.from(document.querySelectorAll('.pvoutput-metric-unit'), el => ({ key: el.dataset.key, value: el.value }));
+  // Writes `<key>_unit` ('kWh'|'Wh') plus the legacy `<key>_is_kwh` boolean
+  // (true only for kWh) — issue #117 AC-2.
+  const mm = pvUnits.collectMetricMap(metricSelections, unitSelections);
   return {
     enabled: document.getElementById('pvoutput-enabled')?.checked || false,
     api_key: document.getElementById('pvoutput-api-key')?.value || '',
