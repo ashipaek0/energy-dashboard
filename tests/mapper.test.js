@@ -10,7 +10,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 
-const { buildStatusPayload, validatePayload, deriveBatteryState } = require('../modules/pvoutput/mapper');
+const { buildStatusPayload, validatePayload, deriveBatteryState, resolveEnergyUnit } = require('../modules/pvoutput/mapper');
 
 // 12:34 UTC rounds down to the 12:30 PVOutput slot.
 const DATE = new Date('2026-08-11T12:34:00Z');
@@ -91,7 +91,7 @@ test('mixed donation loop: v7="bad" omitted, v8="25.556" -> 25.56 present', () =
   assert.strictEqual(payload.v8, 25.56);
 });
 
-test('all-numeric control payload matches pre-fix shape', () => {
+test('all-numeric control payload matches shape (energy defaults to kWh ×1000)', () => {
   const config = {
     timezone: 'UTC',
     metric_map: {
@@ -106,9 +106,9 @@ test('all-numeric control payload matches pre-fix shape', () => {
     c1_mode: 1
   };
   const metrics = {
-    energy_kwh: 12.345,  // v1 = 12 (Math.round)
+    energy_kwh: 12.345,  // v1 = round(12.345*1000) = 12345 (issue #117 default kWh)
     power_w: 1234.5,     // v2 = 1235 (Math.round)
-    consume_kwh: 5.5,    // v3 = 6 (Math.round)
+    consume_kwh: 5.5,    // v3 = round(5.5*1000) = 5500 (issue #117 default kWh)
     consume_w: 300.2,    // v4 = 300 (Math.round)
     temp_c: '42.5',      // v5 = 42.5 (toFixed(1))
     voltage_v: '24.56',  // v6 = 24.6 (toFixed(1))
@@ -125,10 +125,10 @@ test('all-numeric control payload matches pre-fix shape', () => {
   assert.deepStrictEqual(payload, {
     d: '20260811',
     t: '12:30',
-    v1: 12,
+    v1: 12345,
     c1: 1,
     v2: 1235,
-    v3: 6,
+    v3: 5500,
     v4: 300,
     v5: 42.5,
     v6: 24.6,
@@ -203,20 +203,22 @@ test('T1 envelope: v1..v6 numeric + string values unwrap and round', () => {
 });
 
 // T3: mixed envelope + flat legacy metrics coexist through the same accessor.
-test('T3 mixed: envelope and flat metrics both map correctly', () => {
+// Issue #117: with NO unit flag the energy fields now default to kWh and are
+// converted ×1000 (pre-#117 this asserted 12 / 151 — the 1000× bug).
+test('T3 mixed: envelope and flat metrics both map correctly (default kWh ×1000)', () => {
   const config = fullConfig();
   const metrics = {
-    energy_kwh: 12.345,                 // flat legacy number -> v1 = 12
+    energy_kwh: 12.345,                 // flat legacy number -> v1 = round(12.345*1000) = 12345
     power_w: envelope('900.1', 'number', 'W'), // envelope string -> v2 = 900
-    consume_kwh: envelope('150.7', 'number', 'kWh'), // envelope -> v3 = 151
+    consume_kwh: envelope('150.7', 'number', 'kWh'), // envelope -> v3 = round(150.7*1000) = 150700
     consume_w: 45,                      // flat -> v4 = 45
     temp_c: envelope(22.1),             // envelope numeric -> v5 = 22.1
     voltage_v: '23.9'                   // flat string -> v6 = 23.9
   };
   const payload = buildStatusPayload(metrics, config, DATE);
-  assert.strictEqual(payload.v1, 12);
+  assert.strictEqual(payload.v1, 12345);
   assert.strictEqual(payload.v2, 900);
-  assert.strictEqual(payload.v3, 151);
+  assert.strictEqual(payload.v3, 150700);
   assert.strictEqual(payload.v4, 45);
   assert.strictEqual(payload.v5, 22.1);
   assert.strictEqual(payload.v6, 23.9);
@@ -313,3 +315,131 @@ test('T7 envelope: donation v7..v12 numeric round, bad omitted', () => {
   assert.strictEqual(payload.v11, 5.56);
   assert.ok(!('v12' in payload), 'v12 should be omitted for envelope value "bad"');
 });
+
+/**
+ * Issue #117 — PVOutput energy units (kWh vs Wh, 1000× understatement).
+ *
+ * Epilykos energy metrics are kWh; PVOutput addstatus wants Wh. The mapper
+ * converts ×1000 unless the mapping is EXPLICITLY Wh (D2). Scenarios M-1..M-10
+ * from the issue spec.
+ */
+
+// M-1: no unit keys at all (a config saved before #117) -> default kWh, ×1000.
+test('M-1 no unit keys -> default kWh, ×1000 (pre-#117 config repaired)', () => {
+  const config = fullConfig({
+    metric_map: { v1: 'energy_kwh', v3: 'consume_kwh' }
+  });
+  const payload = buildStatusPayload({ energy_kwh: 5.9, consume_kwh: 39.5 }, config, DATE);
+  assert.strictEqual(payload.v1, 5900);
+  assert.strictEqual(payload.v3, 39500);
+  assert.strictEqual(typeof payload.v1, 'number');
+  assert.ok(Number.isFinite(payload.v1), 'converted v1 must stay a finite number (AC-9)');
+});
+
+// M-2: explicit string unit kWh -> ×1000.
+test('M-2 v1_unit/v3_unit = "kWh" -> ×1000', () => {
+  const config = fullConfig({
+    metric_map: { v1: 'energy_kwh', v3: 'consume_kwh', v1_unit: 'kWh', v3_unit: 'kWh' }
+  });
+  const payload = buildStatusPayload({ energy_kwh: 5.9, consume_kwh: 39.5 }, config, DATE);
+  assert.strictEqual(payload.v1, 5900);
+  assert.strictEqual(payload.v3, 39500);
+});
+
+// M-3: explicit string unit Wh -> no conversion.
+test('M-3 v1_unit/v3_unit = "Wh" -> passed through unscaled', () => {
+  const config = fullConfig({
+    metric_map: { v1: 'energy_kwh', v3: 'consume_kwh', v1_unit: 'Wh', v3_unit: 'Wh' }
+  });
+  const payload = buildStatusPayload({ energy_kwh: 5900, consume_kwh: 39500 }, config, DATE);
+  assert.strictEqual(payload.v1, 5900);
+  assert.strictEqual(payload.v3, 39500);
+});
+
+// M-4: legacy explicit false -> "already Wh", no conversion (D8).
+test('M-4 legacy v1_is_kwh/v3_is_kwh = false -> Wh, no conversion', () => {
+  const config = fullConfig({
+    metric_map: { v1: 'energy_kwh', v3: 'consume_kwh', v1_is_kwh: false, v3_is_kwh: false }
+  });
+  const payload = buildStatusPayload({ energy_kwh: 5900, consume_kwh: 39500 }, config, DATE);
+  assert.strictEqual(payload.v1, 5900);
+  assert.strictEqual(payload.v3, 39500);
+});
+
+// M-5: legacy explicit true -> kWh, ×1000 (the pre-#117 T1 path).
+test('M-5 legacy v1_is_kwh/v3_is_kwh = true -> kWh, ×1000', () => {
+  const config = fullConfig({
+    metric_map: { v1: 'energy_kwh', v3: 'consume_kwh', v1_is_kwh: true, v3_is_kwh: true }
+  });
+  const payload = buildStatusPayload({ energy_kwh: 12.345, consume_kwh: 5.5 }, config, DATE);
+  assert.strictEqual(payload.v1, 12345);
+  assert.strictEqual(payload.v3, 5500);
+});
+
+// M-6: the string unit outranks the legacy boolean (Wh wins over is_kwh:true).
+test('M-6 v1_unit="Wh" beats legacy v1_is_kwh=true -> no conversion', () => {
+  const config = fullConfig({
+    metric_map: { v1: 'energy_kwh', v1_unit: 'Wh', v1_is_kwh: true }
+  });
+  const payload = buildStatusPayload({ energy_kwh: 5900 }, config, DATE);
+  assert.strictEqual(payload.v1, 5900);
+});
+
+// M-7: ...and kWh wins over legacy is_kwh:false.
+test('M-7 v1_unit="kWh" beats legacy v1_is_kwh=false -> ×1000', () => {
+  const config = fullConfig({
+    metric_map: { v1: 'energy_kwh', v1_unit: 'kWh', v1_is_kwh: false }
+  });
+  const payload = buildStatusPayload({ energy_kwh: 5.9 }, config, DATE);
+  assert.strictEqual(payload.v1, 5900);
+});
+
+// M-8: a serialized string "false" must NOT be read as an explicit Wh flag.
+test('M-8 v1_is_kwh="false" (string) is not truthy-read -> default kWh, ×1000', () => {
+  const config = fullConfig({
+    metric_map: { v1: 'energy_kwh', v1_is_kwh: 'false' }
+  });
+  const payload = buildStatusPayload({ energy_kwh: 5.9 }, config, DATE);
+  assert.strictEqual(payload.v1, 5900);
+});
+
+// M-9: no metric_map at all -> nothing mapped, no v1 key, no crash.
+test('M-9 no metric_map at all -> v1 omitted', () => {
+  const config = { timezone: 'UTC', net_mode: false, battery_enabled: false, donation_mode: false };
+  const payload = buildStatusPayload({ energy_kwh: 5.9 }, config, DATE);
+  assert.ok(!('v1' in payload), 'v1 must be absent when unmapped');
+});
+
+// M-10: Wh unit with a non-numeric envelope value -> key omitted, no null.
+test('M-10 v1_unit="Wh" with null / "N/A" values -> v1 omitted', () => {
+  const config = fullConfig({
+    metric_map: { v1: 'energy_kwh', v3: 'consume_kwh', v1_unit: 'Wh', v3_unit: 'Wh' }
+  });
+  const payload = buildStatusPayload({ energy_kwh: envelope(null), consume_kwh: envelope('N/A', 'text') }, config, DATE);
+  assert.ok(!('v1' in payload), 'v1 must be omitted for null');
+  assert.ok(!('v3' in payload), 'v3 must be omitted for "N/A"');
+  assert.ok(!JSON.stringify(payload).includes('null'), 'payload JSON must not contain null');
+});
+
+// Precedence is defined once, in public/js/pvoutput-units.js — assert the
+// resolver directly so the order is pinned independently of buildStatusPayload.
+test('resolveEnergyUnit precedence: unit string > legacy boolean > kWh default', () => {
+  const cases = [
+    [{ v1_unit: 'Wh', v1_is_kwh: true }, 'Wh'],     // rule 1
+    [{ v1_unit: 'kWh', v1_is_kwh: false }, 'kWh'],  // rule 2
+    [{ v1_is_kwh: false }, 'Wh'],                   // rule 3
+    [{ v1_is_kwh: true }, 'kWh'],                   // rule 4
+    [{}, 'kWh'],                                    // rule 4 (missing)
+    [undefined, 'kWh'],                             // rule 4 (no map)
+    [{ v1_is_kwh: 'false' }, 'kWh'],                // rule 4 (string, strict ===)
+    [{ v1_unit: 'wh' }, 'Wh'],                      // case-insensitive normalisation
+    [{ v1_unit: 'Wh' }, 'Wh']
+  ];
+  for (const [map, expected] of cases) {
+    assert.strictEqual(resolveEnergyUnit(map, 'v1'), expected,
+      `resolveEnergyUnit(${JSON.stringify(map)}) should be ${expected}`);
+  }
+  // v3 resolves independently of v1.
+  assert.strictEqual(resolveEnergyUnit({ v1_unit: 'Wh', v3_unit: 'kWh' }, 'v3'), 'kWh');
+});
+

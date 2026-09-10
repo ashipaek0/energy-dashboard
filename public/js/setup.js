@@ -127,7 +127,7 @@
     dashboard: { choice: 'full', layoutMap: {}, mainBlocks: [], blockCount: 0 },
     basics: { savings_currency: '€', solar_capacity_kwp: '4', dashboard_title: 'My Solar' },
     optional: {
-      pvoutput: { enabled: false, api_key: '', system_id: '', timezone: '', upload_interval_minutes: '5', system_size_w: '0', net_mode: false, webhook_url: '' },
+      pvoutput: { enabled: false, api_key: '', system_id: '', timezone: '', upload_interval_minutes: '5', system_size_w: '0', net_mode: false, webhook_url: '', metric_map: {} },
       forecast: { enabled: false, latitude: '', longitude: '', tilt: '30', azimuth: '180', capacity_kwp: '', solcast_api_key: '', solcast_resource_id: '', loss_factor: '0.9', install_date: '' },
       network: { local_url: '', remote_url: '' }
     }
@@ -276,6 +276,11 @@
           if (present(pv[k])) pvPatch[k] = pv[k];
         });
         if (pvPatch.enabled !== undefined) pvPatch.enabled = !!pvPatch.enabled;
+        // Issue #117 (D6/AC-11): carry the existing metric_map — including the
+        // v1_unit/v3_unit energy-unit selections — through the wizard.
+        // saveConfigKeys uses INSERT OR REPLACE for the whole pvoutput_config
+        // value, so omitting this key here would silently wipe it.
+        pvPatch.metric_map = (pv.metric_map && typeof pv.metric_map === 'object') ? pv.metric_map : {};
         Object.assign(state.optional.pvoutput, pvPatch);
       }
     }
@@ -1567,7 +1572,7 @@
     state.roleMetrics = {};
     state.dashboard.choice = 'full';
     state.optional = {
-      pvoutput: { enabled: false, api_key: '', system_id: '', timezone: '', upload_interval_minutes: '5', system_size_w: '0', net_mode: false, webhook_url: '' },
+      pvoutput: { enabled: false, api_key: '', system_id: '', timezone: '', upload_interval_minutes: '5', system_size_w: '0', net_mode: false, webhook_url: '', metric_map: {} },
       forecast: { enabled: false, latitude: '', longitude: '', tilt: '30', azimuth: '180', capacity_kwp: '', solcast_api_key: '', solcast_resource_id: '', loss_factor: '0.9', install_date: '' },
       network: { local_url: '', remote_url: '' }
     };
@@ -1876,7 +1881,10 @@
           upload_interval_minutes: parseInt(pv.upload_interval_minutes, 10) || 5,
           system_size_w: parseInt(pv.system_size_w, 10) || 0,
           net_mode: truthy(pv.net_mode),
-          webhook_url: pv.webhook_url
+          webhook_url: pv.webhook_url,
+          // Issue #117 (D6/AC-11): re-emit the existing metric_map so the
+          // wizard's wholesale config replace cannot drop the unit selection.
+          metric_map: pv.metric_map || {}
         })
       }) });
     }).then(function () { return true; }).catch(function () { return true; });
@@ -1901,7 +1909,10 @@
         upload_interval_minutes: parseInt(pv.upload_interval_minutes, 10) || 5,
         system_size_w: parseInt(pv.system_size_w, 10) || 0,
         net_mode: truthy(pv.net_mode),
-        webhook_url: pv.webhook_url
+        webhook_url: pv.webhook_url,
+        // Issue #117 (D6/AC-11): re-emit the existing metric_map so the
+        // wizard's wholesale config replace cannot drop the unit selection.
+        metric_map: pv.metric_map || {}
       })
     }) }).then(function (res) {
       if (res.ok) { setBadge('pvoutput', 'ok', '✔ Saved'); return true; }
