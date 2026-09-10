@@ -200,4 +200,4 @@ function isValidHostname(value) {
   );
 }
 
-module.exports = { parseGridState, isPrivateOrLocalIp, isBlockedIp, isValidHostname, assertSafeFetchUrl, assertSafeBrokerUrl };
+module.exports = { parseGridState, isPrivateOrLocalIp, isBlockedIp, isValidHostname, assertSafeFetchUrl, assertSafeBrokerUrl, warnParseRateLimited };
