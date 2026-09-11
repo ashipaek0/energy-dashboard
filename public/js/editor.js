@@ -420,6 +420,21 @@ function buildTextCardForm(block) {
   return html;
 }
 
+/** Text Metric: metric dropdown + optional friendly label + optional unit suffix */
+function buildTextMetricForm(block) {
+  var cfg = block.config || {};
+  var html = '<fieldset style="border:1px solid var(--border);border-radius:0.4rem;padding:0.75rem;margin-bottom:0.75rem;">';
+  html += '<legend style="font-weight:600;font-size:0.9rem;">Text Metric</legend>';
+  html += '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.35rem;">';
+  html += '<span style="width:80px;font-size:0.85rem;">Metric</span>';
+  html += '<div style="flex:1;">' + metricSelect(cfg.metric || '', 'modal-metric-textmetric') + '</div>';
+  html += '</div>';
+  html += '<label style="font-size:0.85rem;display:block;margin-bottom:0.35rem;">Label <input type="text" id="modal-textmetric-label" value="' + escHtml(cfg.label || '') + '" placeholder="Falls back to the metric key" style="display:block;width:100%;padding:0.35rem;margin-top:0.15rem;border:1px solid var(--border);border-radius:0.3rem;background:var(--bg);color:var(--text);min-height:36px;"></label>';
+  html += '<label style="font-size:0.85rem;display:block;">Unit suffix <input type="text" id="modal-textmetric-unit" value="' + escHtml(cfg.unit || '') + '" placeholder="Optional; appended to numeric values only" style="display:block;width:100%;padding:0.35rem;margin-top:0.15rem;border:1px solid var(--border);border-radius:0.3rem;background:var(--bg);color:var(--text);min-height:36px;"></label>';
+  html += '</fieldset>';
+  return html;
+}
+
 /** Iframe Card: URL input */
 function buildIframeCardForm(block) {
   var cfg = block.config || {};
@@ -712,6 +727,9 @@ function buildSettingsForm(block) {
     case 'text-card':
       html += buildTextCardForm(block);
       break;
+    case 'text-metric':
+      html += buildTextMetricForm(block);
+      break;
     case 'iframe-card':
       html += buildIframeCardForm(block);
       break;
@@ -918,6 +936,12 @@ function readSettingsForm(block) {
     }
     case 'text-card': {
       config.content = document.getElementById('modal-text-content')?.value || '';
+      break;
+    }
+    case 'text-metric': {
+      config.metric = document.getElementById('modal-metric-textmetric')?.value || '';
+      config.label = document.getElementById('modal-textmetric-label')?.value || '';
+      config.unit = document.getElementById('modal-textmetric-unit')?.value || '';
       break;
     }
     case 'iframe-card': {
@@ -1335,7 +1359,7 @@ async function initEditor() {
 
     // Palette — use addBlockToGrid instead of loadTab rebuild
     var palette = document.getElementById('available-blocks');
-    var names = { 'flow-card':'\uD83D\uDD04 Flow Card','forecast-banner':'\u2600\uFE0F Forecast','forecast-sparkline':'\u2600\uFE0F Forecast Spark','forecast-info':'\u2600\uFE0F Forecast Info','metric-cards':'\uD83D\uDCCA Metric Cards','grid-card':'\uD83D\uDD0C Grid Card','chart-power':'\u26A1 Power Chart','chart-energy':'\uD83D\uDCC8 Energy Chart','chart-metric':'\u25C7 Metric Chart','savings-summary':'\uD83D\uDCB0 Savings','data-table-daily':'\uD83D\uDCCB Daily Table','data-table-monthly':'\uD83D\uDCC5 Monthly Table','weather-block':'\uD83C\uDF26\uFE0F Weather','battery-block':'\uD83D\uDD0B Battery','flow-card-2':'\uD83D\uDD04 Flow Card 2','multi-value':'\uD83D\uDCCA Multi-Value','gauge-card':'\uD83C\uDFAF Gauge','half-gauge':'\uD83C\uDFAF Half Gauge','half-gauge-2':'\uD83C\uDFAF Half Gauge 2','flow-card-square':'\uD83D\uDD04 Flow Sq','flow-card-square-2':'\uD83D\uDD04 Flow Sq 2','text-card':'\uD83D\uDCDD Text','iframe-card':'\uD83C\uDF10 Embed','forecast-pvtoday':'\u2600\uFE0F PV Today','bar-gauge':'\uD83D\uDCCA Bar Gauge','bar-gauge-retro':'\uD83D\uDCCA Bar Retro','switch-block':'\uD83D\uDD18 Toggle Switch','state-select':'\uD83D\uDCCB State Select' };
+    var names = { 'flow-card':'\uD83D\uDD04 Flow Card','forecast-banner':'\u2600\uFE0F Forecast','forecast-sparkline':'\u2600\uFE0F Forecast Spark','forecast-info':'\u2600\uFE0F Forecast Info','metric-cards':'\uD83D\uDCCA Metric Cards','grid-card':'\uD83D\uDD0C Grid Card','chart-power':'\u26A1 Power Chart','chart-energy':'\uD83D\uDCC8 Energy Chart','chart-metric':'\u25C7 Metric Chart','savings-summary':'\uD83D\uDCB0 Savings','data-table-daily':'\uD83D\uDCCB Daily Table','data-table-monthly':'\uD83D\uDCC5 Monthly Table','weather-block':'\uD83C\uDF26\uFE0F Weather','battery-block':'\uD83D\uDD0B Battery','flow-card-2':'\uD83D\uDD04 Flow Card 2','multi-value':'\uD83D\uDCCA Multi-Value','gauge-card':'\uD83C\uDFAF Gauge','half-gauge':'\uD83C\uDFAF Half Gauge','half-gauge-2':'\uD83C\uDFAF Half Gauge 2','flow-card-square':'\uD83D\uDD04 Flow Sq','flow-card-square-2':'\uD83D\uDD04 Flow Sq 2','text-card':'\uD83D\uDCDD Text','text-metric':'\uD83D\uDCDD Text Metric','iframe-card':'\uD83C\uDF10 Embed','forecast-pvtoday':'\u2600\uFE0F PV Today','bar-gauge':'\uD83D\uDCCA Bar Gauge','bar-gauge-retro':'\uD83D\uDCCA Bar Retro','switch-block':'\uD83D\uDD18 Toggle Switch','state-select':'\uD83D\uDCCB State Select' };
     Object.entries(componentBuilders).forEach(function(entry) {
       var type = entry[0];
       var item = document.createElement('div');
