@@ -3,7 +3,7 @@
  * Each row: label | [▮▮▮▮▯▯▯▯▯▯] | value+unit
  * Lit segments determined by value position between min and max.
  */
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, isNumericValue, formatValueText } from '../utils.js';
 export function buildBarGaugeRetro(block = {}) {
   const id = block.id || '';
   const config = block.config || {};
@@ -50,7 +50,7 @@ export function updateBarGaugeRetro(state) {
       const min = cfg.min ?? 0;
       const max = cfg.max ?? 100;
       const range = max - min;
-      const pct = (typeof v === 'number' && range > 0) ? Math.min(1, Math.max(0, (v - min) / range)) : 0;
+      const pct = (isNumericValue(v) && range > 0) ? Math.min(1, Math.max(0, (v - min) / range)) : 0;
       const segs = cfg.segments || 10;
       const litCount = Math.round(pct * segs);
       const color = cfg.color || 'var(--accent)';
@@ -82,9 +82,15 @@ export function updateBarGaugeRetro(state) {
 
       const val = document.getElementById(`bg-retro-val-${id}-${i}`);
       if (val) {
-        const unit = cfg.unit || entry.unit || inferUnit(cfg.metric);
-        if (typeof v === 'number') val.textContent = v.toFixed(1) + (unit ? ' ' + unit : '');
-        else val.textContent = String(v != null ? v : '--') + (unit ? ' ' + unit : '');
+        if (isNumericValue(v)) {
+          const unit = cfg.unit || entry.unit || inferUnit(cfg.metric);
+          val.textContent = v.toFixed(1) + (unit ? ' ' + unit : '');
+        } else {
+          // D6: non-numeric values use explicit units only — never a name-inferred
+          // guess (which renders nonsense such as "error °C").
+          const unit = cfg.unit || entry.unit || '';
+          val.textContent = formatValueText(v) + (unit ? ' ' + unit : '');
+        }
       }
     });
   });

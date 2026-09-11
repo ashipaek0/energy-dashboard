@@ -1,5 +1,5 @@
 import { uid } from '../utils/uid.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, isNumericValue, formatValueText } from '../utils.js';
 
 
 export function buildFlowCardSquare2(block = {}) {
@@ -55,18 +55,21 @@ export function updateFlowCardSquare2(state) {
     const id = card.dataset.blockId || '';
     let mm; try{mm=JSON.parse(card.dataset.metricMap);}catch(e){return;}
     const m = state.metrics || {};
-    const gv = (r) => { const n = mm[r]; return n ? (m[n]?.value || 0) : 0; };
-    const solar = gv('solar'), grid = gv('grid_import'), battPower = gv('battery_charge'), battSoc = gv('battery_soc'), consumption = gv('consumption');
-    const battDischarge = gv('battery_discharge') || (battPower < 0 ? Math.abs(battPower) : 0);
-    const gridExport = gv('grid_export');
+    // Issue #61 Phase 2 (D1/D4/D6): identical guard to flowCard/flowCardSquare.
+    const entryOf = (r) => { const n = mm[r]; return n ? m[n] : undefined; };
+    const numOf = (r) => { const v = entryOf(r)?.value; return isNumericValue(v) ? v : 0; };
+    const rawTextOf = (r) => { const v = entryOf(r)?.value; return (typeof v === 'string' || typeof v === 'boolean') ? formatValueText(v) : null; };
+    const solar = numOf('solar'), grid = numOf('grid_import'), battPower = numOf('battery_charge'), battSoc = numOf('battery_soc'), consumption = numOf('consumption');
+    const battDischarge = numOf('battery_discharge') || (battPower < 0 ? Math.abs(battPower) : 0);
+    const gridExport = numOf('grid_export');
     const battIsSource = battDischarge > 50;
     const el = (s) => document.getElementById(uid(s, id));
 
     const sv = card.querySelector(`#${uid('fcs2-solar',id)} .fcs2-value`);
-    if (sv) sv.textContent = Math.round(solar) + ' W';
+    if (sv) sv.textContent = rawTextOf('solar') ?? (Math.round(solar) + ' W');
     const gv2 = card.querySelector(`#${uid('fcs2-grid',id)} .fcs2-value`);
     if (gv2) { gv2.textContent = gridExport > grid ? Math.round(gridExport) + ' W out' : Math.round(grid) + ' W in'; }
-    const so = el('fcs2-battery-soc'); if (so) so.textContent = Math.round(battSoc) + '%';
+    const so = el('fcs2-battery-soc'); if (so) so.textContent = rawTextOf('battery_soc') ?? (Math.round(battSoc) + '%');
     const bp = el('fcs2-battery-power'); if (bp) { if (battPower > 50) bp.textContent = '↑ ' + Math.round(battPower) + ' W'; else if (battDischarge > 50) bp.textContent = '↓ ' + Math.round(battDischarge) + ' W'; else bp.textContent = '0 W'; }
     const si = el('fcs2-icon-solar'); if (si) si.style.color = solar > 50 ? 'var(--solar)' : 'var(--text-secondary)';
     const gi = el('fcs2-icon-grid'); if (gi) { if (grid > 50) gi.style.color = 'var(--grid)'; else if (gridExport > 50) gi.style.color = 'var(--export)'; else gi.style.color = 'var(--text-secondary)'; }

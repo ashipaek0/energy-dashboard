@@ -2,7 +2,7 @@
  * Bar Gauge Card — multi-row horizontal bar visualization for any metric.
  * Each row: label | bar (min→max fill) | value+unit.
  */
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, isNumericValue, formatValueText } from '../utils.js';
 export function buildBarGauge(block = {}) {
   const id = block.id || '';
   const config = block.config || {};
@@ -46,16 +46,22 @@ export function updateBarGauge(state) {
       const min = cfg.min ?? 0;
       const max = cfg.max ?? 100;
       const range = max - min;
-      const pct = (typeof v === 'number' && range > 0) ? Math.min(100, Math.max(0, ((v - min) / range) * 100)) : 0;
+      const pct = (isNumericValue(v) && range > 0) ? Math.min(100, Math.max(0, ((v - min) / range) * 100)) : 0;
 
       const fill = document.getElementById(`bg-fill-${id}-${i}`);
       if (fill) fill.style.width = pct + '%';
 
       const val = document.getElementById(`bg-val-${id}-${i}`);
       if (val) {
-        const unit = cfg.unit || entry.unit || inferBarUnit(cfg.metric);
-        if (typeof v === 'number') val.textContent = v.toFixed(1) + (unit ? ' ' + unit : '');
-        else val.textContent = String(v != null ? v : '--') + (unit ? ' ' + unit : '');
+        if (isNumericValue(v)) {
+          const unit = cfg.unit || entry.unit || inferBarUnit(cfg.metric);
+          val.textContent = v.toFixed(1) + (unit ? ' ' + unit : '');
+        } else {
+          // D6: non-numeric values use explicit units only — never a name-inferred
+          // guess (which renders nonsense such as "error °C").
+          const unit = cfg.unit || entry.unit || '';
+          val.textContent = formatValueText(v) + (unit ? ' ' + unit : '');
+        }
       }
     });
   });

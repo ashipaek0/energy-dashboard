@@ -1,4 +1,4 @@
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, isNumericValue, formatValueText } from '../utils.js';
 export function buildGaugeCard(block = {}) {
   const config = block.config || {};
   const metric = config.metric || '';
@@ -27,14 +27,20 @@ export function updateGaugeCard(state) {
     if (v === undefined || v === null) return;
     const id = container.querySelector('[id^="gauge-fill-"]')?.id?.replace('gauge-fill-','');
     const val = document.getElementById('gauge-val-' + id);
-    const unit = state.metrics?.[cfg.value]?.unit || inferUnit(cfg.value);
-    if (typeof v === 'number') {
+    if (isNumericValue(v)) {
+      // D6 keeps the name-inferred unit on the numeric path only (no regression).
+      const unit = state.metrics?.[cfg.value]?.unit || inferUnit(cfg.value);
       const pct = Math.min(100, Math.max(0, ((v - cfg.min) / (cfg.max - cfg.min)) * 100));
       const fill = document.getElementById('gauge-fill-' + id);
       if (fill) fill.setAttribute('stroke-dasharray', `${(pct/100)*314} 314`);
       if (val) val.textContent = Math.round(v) + (unit ? ' ' + unit : '');
     } else {
-      if (val) val.textContent = String(v) + (unit ? ' ' + unit : '');
+      // D6: non-numeric values use explicit units only — never a name-inferred guess.
+      const unit = state.metrics?.[cfg.value]?.unit || '';
+      // AC-2.4: reset the arc so a number→text flip cannot leave a stale fill.
+      const fill = document.getElementById('gauge-fill-' + id);
+      if (fill) fill.setAttribute('stroke-dasharray', '0 314');
+      if (val) val.textContent = formatValueText(v) + (unit ? ' ' + unit : '');
     }
   });
 }

@@ -1,5 +1,5 @@
 import { uid } from '../utils/uid.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, isNumericValue, formatValueText } from '../utils.js';
 
 
 export function buildFlowCard(block = {}) {
@@ -21,14 +21,21 @@ export function updateFlowCard(state) {
     const id = card.dataset.blockId || '';
     let mm; try{mm=JSON.parse(card.dataset.metricMap);}catch(e){return;}
     const m = state.metrics || {};
-    const gv = (r) => { const n = mm[r]; return n ? (m[n]?.value || 0) : 0; };
-    const sw = Math.round(gv('solar')), cw = Math.round(gv('consumption')), bc = Math.round(gv('battery_charge')), bd = Math.round(gv('battery_discharge')), gi = Math.round(gv('grid_import')), ge = Math.round(gv('grid_export')), bs = gv('battery_soc');
+    // Issue #61 Phase 2 (D1/D4): every slot is coerced through the shared numeric
+    // predicate before any arithmetic, so a text/boolean metric can never reach
+    // Math.round() and produce a not-a-number result. A non-numeric *primary* slot
+    // renders its raw text (so the user sees why the diagram is idle); derived
+    // sub-labels (battery power, grid net, direction) fall back to numeric zero.
+    const entryOf = (r) => { const n = mm[r]; return n ? m[n] : undefined; };
+    const numOf = (r) => { const v = entryOf(r)?.value; return isNumericValue(v) ? v : 0; };
+    const rawTextOf = (r) => { const v = entryOf(r)?.value; return (typeof v === 'string' || typeof v === 'boolean') ? formatValueText(v) : null; };
+    const sw = Math.round(numOf('solar')), cw = Math.round(numOf('consumption')), bc = Math.round(numOf('battery_charge')), bd = Math.round(numOf('battery_discharge')), gi = Math.round(numOf('grid_import')), ge = Math.round(numOf('grid_export')), bs = numOf('battery_soc');
     const el = (s) => document.getElementById(uid(s, id));
-    const sf = el('flow-solar'); if (sf) sf.textContent = sw + ' W';
-    const so = el('flow-battery-soc'); if (so) so.textContent = Math.round(bs) + '%';
+    const sf = el('flow-solar'); if (sf) sf.textContent = rawTextOf('solar') ?? (sw + ' W');
+    const so = el('flow-battery-soc'); if (so) so.textContent = rawTextOf('battery_soc') ?? (Math.round(bs) + '%');
     const bn = bc - bd, bSign = bn >= 0 ? '↑' : '↓', bCol = bn >= 0 ? 'var(--battery)' : 'var(--discharge)';
     const be = el('flow-battery-power'); if (be) { be.innerHTML = ''; const s = document.createElement('span'); s.style.color = bCol; s.textContent = `${bSign} ${Math.abs(bn)} W`; be.appendChild(s); }
-    const he = el('flow-home'); if (he) he.textContent = cw + ' W';
+    const he = el('flow-home'); if (he) he.textContent = rawTextOf('consumption') ?? (cw + ' W');
     const gn = gi - ge, gDir = gn >= 0 ? 'Import' : 'Export', gCol = gn >= 0 ? 'var(--grid)' : 'var(--export)';
     const ge2 = el('flow-grid'); if (ge2) { ge2.innerHTML = ''; const s = document.createElement('span'); s.style.color = gCol; s.textContent = Math.abs(gn) + ' W'; ge2.appendChild(s); }
     const gd = el('flow-grid-direction'); if (gd) gd.textContent = gDir;
@@ -42,6 +49,6 @@ export function updateFlowCard(state) {
     const isCharging = bc > bd, isDischarging = bd > bc, isGridChargingBattery = gi > 0 && isCharging;
     const ba = card.querySelector('.flow-arrow.battery'); if (ba) { if (isDischarging) { ba.style.color = 'var(--discharge)'; ba.textContent = '→'; } else if (isCharging) { ba.style.color = isGridChargingBattery ? 'var(--grid)' : 'var(--solar)'; ba.textContent = isGridChargingBattery ? '←' : '→'; } else { ba.style.color = 'var(--text-secondary)'; ba.textContent = '⇄'; } }
     const ga = card.querySelector('.flow-arrow.grid'); if (ga) { if (gi > ge) { ga.style.color = 'var(--grid)'; ga.textContent = '←'; } else if (ge > gi) { ga.style.color = 'var(--export)'; ga.textContent = '→'; } else { ga.style.color = 'var(--text-secondary)'; ga.textContent = '⇄'; } }
-    const gf = el('gauge-bar-fill'), gp = el('gauge-percent'); if (gf && gp && window.systemCapacityKwp) { const swVal = typeof sw === 'number' ? sw : 0; const pct = Math.min(100, (swVal / (window.systemCapacityKwp * 1000)) * 100); gf.style.width = pct + '%'; gp.textContent = pct.toFixed(0) + '%'; }
+    const gf = el('gauge-bar-fill'), gp = el('gauge-percent'); if (gf && gp && window.systemCapacityKwp) { const pct = Math.min(100, (sw / (window.systemCapacityKwp * 1000)) * 100); gf.style.width = pct + '%'; gp.textContent = pct.toFixed(0) + '%'; }
   });
 }
