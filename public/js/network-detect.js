@@ -24,6 +24,14 @@ const BASE_CHECK_MS = 12000;          // ~12s periodic re-check
 const HYSTERESIS_THRESHOLD = 3;       // consecutive failing probes before we switch/failover
 const OFFLINE_BACKOFF_MS = 30000;     // back off to 30s when both bases are down
 
+// ── Constants: Phase 2b — network-mode pill auto-hide ──────────────────
+// Every resolved Phase-2b choice is exactly one literal here, so any future
+// revision stays a one-line change. The mechanism below is driven from these,
+// never from a hard-coded value.
+const AUTO_HIDE_MS = 5000;                              // 5s: the pill auto-hide window
+const AUTO_HIDE_TARGET = '#epilykos-network-indicator'; // the WHOLE pill hides (badge + select + offline notice)
+const AUTO_HIDE_REVEAL = 'handle';                      // a persistent handle toggles the pill
+
 // ── State ─────────────────────────────────────────────────────────────
 let cachedConfig = null;      // last {localURL, remoteURL} from /api/network-config
 let activeBase = null;        // last known active base URL (exposed via getActiveBase)
@@ -31,6 +39,12 @@ let checkTimer = null;        // setTimeout handle for the periodic re-check
 let currentInterval = BASE_CHECK_MS;
 let consecutiveDown = 0;      // consecutive unreachable probes for the CURRENT origin
 let offlineFlag = false;      // both bases down -> offline state + backoff
+
+// Phase 2b state (independent of checkTimer — R1)
+let autoHideTimer = null;     // setTimeout handle for the pill auto-hide countdown
+let indicatorHidden = false;  // current hidden state of the pill (drives the handle's aria-expanded)
+let pillFocused = false;      // true while focus is inside the pill -> auto-hide suspended (P2b.7)
+let hideToken = 0;            // invalidates a pending faded-hide so it can never hide a re-revealed pill
 
 // ── Mode helpers ──────────────────────────────────────────────────────
 function getNetworkMode() {
@@ -172,11 +186,18 @@ async function ensureCorrectOrigin(config) {
 
 // ── Indicator: badge + Auto/Local/Remote select ───────────────────────
 function showIndicator() {
-  if (document.getElementById('epilykos-network-indicator')) return;
+  if (document.getElementById('epilykos-network-indicator')) {
+    // P2b: the pill already exists (idempotent re-fire, e.g. a settings save at
+    // line 394). Reveal it and restart the countdown instead of rebuilding it.
+    if (AUTO_HIDE_REVEAL === 'handle') { revealIndicator(); scheduleAutoHide(); }
+    return;
+  }
 
   const container = document.createElement('div');
   container.id = 'epilykos-network-indicator';
-  container.style.cssText = 'position:fixed; top:12px; right:12px; z-index:100000; display:flex; align-items:center; gap:8px; background:#0f172a; color:#e2e8f0; padding:6px 10px; border-radius:999px; box-shadow:0 2px 10px rgba(0,0,0,0.35); font-family:system-ui,-apple-system,sans-serif; font-size:12px; line-height:1;';
+  // P2b: right offset 64px = 12px viewport margin + 44px handle + 8px gap, so the
+  // pill no longer sits under the persistent handle.
+  container.style.cssText = 'position:fixed; top:12px; right:64px; z-index:100000; display:flex; align-items:center; gap:8px; background:#0f172a; color:#e2e8f0; padding:6px 10px; border-radius:999px; box-shadow:0 2px 10px rgba(0,0,0,0.35); font-family:system-ui,-apple-system,sans-serif; font-size:12px; line-height:1;';
 
   const badge = document.createElement('span');
   badge.id = 'epilykos-network-status';
@@ -186,6 +207,8 @@ function showIndicator() {
   const select = document.createElement('select');
   select.id = 'epilykos-network-mode-select';
   select.title = 'Network base: Auto / Local / Remote';
+  // P2b.7(4): `title` is not a reliable accessible name — give the select a real one.
+  select.setAttribute('aria-label', 'Network base: Auto, Local, or Remote');
   select.style.cssText = 'background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:6px; font-size:11px; padding:2px 4px; cursor:pointer;';
   [['auto', 'Auto'], ['local', 'Local'], ['remote', 'Remote']].forEach(([value, label]) => {
     const opt = document.createElement('option');
@@ -194,7 +217,11 @@ function showIndicator() {
     select.appendChild(opt);
   });
   select.value = getNetworkMode();
-  select.addEventListener('change', () => { applyModeChange(); });
+  select.addEventListener('change', () => {
+    // P2b.5 (N3): a mode change reveals the pill and restarts a full countdown.
+    if (AUTO_HIDE_REVEAL === 'handle') { revealIndicator(); scheduleAutoHide(); }
+    applyModeChange();
+  });
 
   const notice = document.createElement('span');
   notice.id = 'epilykos-network-offline';
@@ -204,7 +231,52 @@ function showIndicator() {
   container.appendChild(badge);
   container.appendChild(select);
   container.appendChild(notice);
+
+  // P2b.7(1): suspend the countdown while focus is anywhere inside the pill.
+  // The pending timer is CANCELLED (not deferred) so it can never fade out
+  // from under a focused control; focusout restarts a full window.
+  container.addEventListener('focusin', () => {
+    pillFocused = true;
+    cancelAutoHide();
+  });
+  container.addEventListener('focusout', () => {
+    // focusout fires before the incoming target is known — re-check next tick.
+    setTimeout(() => {
+      pillFocused = container.contains(document.activeElement);
+      if (!pillFocused && !indicatorHidden) scheduleAutoHide();
+    }, 0);
+  });
+
   document.body.appendChild(container);
+
+  // P2b.4: the persistent, never-hidden handle. Built once, guarded by its own
+  // existence check so a repeated showIndicator() can never add a second one.
+  if (AUTO_HIDE_REVEAL === 'handle' && !document.getElementById('epilykos-network-handle')) {
+    const handle = document.createElement('button');
+    handle.id = 'epilykos-network-handle';
+    handle.type = 'button';
+    handle.dataset.autoHideReveal = AUTO_HIDE_REVEAL;
+    // Real focusable element -> Enter/Space activation come free (P2b.7(2)).
+    handle.setAttribute('aria-label', HANDLE_BASE_LABEL);
+    handle.setAttribute('aria-expanded', 'true');
+    handle.setAttribute('aria-controls', 'epilykos-network-indicator');
+    handle.style.cssText = 'position:fixed; top:12px; right:12px; z-index:100000; width:44px; height:22px; display:flex; align-items:center; justify-content:center; background:#334155; color:#fff; border:none; border-radius:999px; box-shadow:0 2px 10px rgba(0,0,0,0.35); font-family:system-ui,-apple-system,sans-serif; font-size:12px; line-height:1; cursor:pointer; padding:0;';
+    const glyph = document.createElement('span');
+    glyph.id = 'epilykos-network-handle-cue';
+    glyph.textContent = HANDLE_STATE_GLYPH.Active;   // state cue — a glyph, never colour alone (P2b.7(5))
+    handle.appendChild(glyph);
+    handle.addEventListener('click', () => { toggleIndicator(); });
+    // P2b.7(3) fix: the handle must PRECEDE the pill in DOM/tab order, otherwise
+    // forward-Tab from the handle skips over the pill's select (which sits
+    // earlier in document order) instead of landing on it. Fixed positions and
+    // z-index are unchanged, so both stay visually where they were.
+    document.body.insertBefore(handle, container);
+  }
+
+  indicatorHidden = false;
+  syncHandleState();
+  // "Appears" is the trigger named in the requirement (P2b.5).
+  scheduleAutoHide();
 }
 
 function setBadge(text, color) {
@@ -218,6 +290,9 @@ function setOffline(flag) {
   offlineFlag = flag;
   const notice = document.getElementById('epilykos-network-offline');
   if (notice) notice.style.display = flag ? 'inline' : 'none';
+  // P2b.4a: the offline warning must survive the pill hiding — echo it on the
+  // handle. Touches the cue only; never the auto-hide timer (P2b.5).
+  setHandleCue(flag ? '#b91c1c' : null, flag ? HANDLE_STATE_GLYPH.Offline : HANDLE_STATE_GLYPH.Active, flag ? 'Offline' : null);
 }
 
 function updateIndicator(resolved) {
@@ -225,6 +300,7 @@ function updateIndicator(resolved) {
 
   if (offlineFlag) {
     setBadge('Offline', '#b91c1c');
+    setHandleCue('#b91c1c', HANDLE_STATE_GLYPH.Offline, 'Offline');
     return;
   }
 
@@ -238,11 +314,146 @@ function updateIndicator(resolved) {
     else if (ro && currentOrigin === ro) { label = 'Remote'; color = '#1d4ed8'; }
   }
   setBadge(label, color);
+  // P2b.7(5): distinct glyph per state (Local / Remote / Active) — never colour alone.
+  setHandleCue(color, HANDLE_STATE_GLYPH[label] || HANDLE_STATE_GLYPH.Active, label);
 }
 
 function updateIndicatorOffline() {
   setOffline(true);
   updateIndicator(null);
+}
+
+// ── Phase 2b: pill auto-hide / reveal ─────────────────────────────────
+// The WHOLE pill (AUTO_HIDE_TARGET) hides AUTO_HIDE_MS after it appears and is
+// toggled back open by the persistent handle (AUTO_HIDE_REVEAL). The node is
+// never removed or detached: the idempotency guard at line 175 and the
+// getElementById lookups in setBadge()/setOffline() must keep succeeding while
+// it is hidden, so the badge and the offline notice stay current (P2b.4).
+// This mechanism owns its OWN timer and must never touch checkTimer,
+// startRecheck() or stopRecheck() (R1).
+
+function getAutoHideTarget() {
+  return document.querySelector(AUTO_HIDE_TARGET);
+}
+
+function prefersReducedMotion() {
+  try {
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  } catch (e) {
+    return false;
+  }
+}
+
+// P2b.7(5): the handle's connection state must be perceivable WITHOUT hover
+// and to a screen-reader user — never colour alone. The state text is folded
+// into the handle's accessible name by setHandleCue(), and each state gets its
+// own non-colour glyph (the base '⌄' cue is kept for the unknown/active case).
+const HANDLE_BASE_LABEL = 'Show connection status and network mode';
+const HANDLE_STATE_GLYPH = { Local: '⌂', Remote: '☁', Active: '⌄', Offline: '⚠' };
+
+// P2b.4a: minimal state cue on the always-visible handle, so the failover
+// warning is not silently lost while the pill is hidden. Colour is paired with
+// a glyph and, for assistive tech, with the state in the accessible name and
+// the title text — never colour alone (P2b.7(5)).
+// This is the SINGLE place that updates the cue.
+function setHandleCue(color, glyph, stateText) {
+  const handle = document.getElementById('epilykos-network-handle');
+  if (!handle) return;
+  if (color) handle.style.background = color;
+  const cue = document.getElementById('epilykos-network-handle-cue');
+  if (cue && glyph) cue.textContent = glyph;
+  if (stateText) handle.title = 'Connection: ' + stateText;
+  // P2b.7(5): a hover-only title is not exposed on touch/keyboard, so the live
+  // state goes into the accessible name too. The required base label text is
+  // preserved verbatim as the prefix.
+  handle.setAttribute('aria-label', stateText
+    ? HANDLE_BASE_LABEL + ' — connection: ' + stateText
+    : HANDLE_BASE_LABEL);
+}
+
+function syncHandleState() {
+  const handle = document.getElementById('epilykos-network-handle');
+  if (handle) handle.setAttribute('aria-expanded', indicatorHidden ? 'false' : 'true');
+}
+
+function cancelAutoHide() {
+  if (autoHideTimer) { clearTimeout(autoHideTimer); autoHideTimer = null; }
+}
+
+// ONE timer handle, always cleared before re-scheduling, so repeated
+// showIndicator() calls and rapid handle toggles cannot accumulate timers.
+function scheduleAutoHide() {
+  cancelAutoHide();
+  if (pillFocused) return;             // P2b.7(1): never hide under focus
+  if (!getAutoHideTarget()) return;    // pill not built yet
+  autoHideTimer = setTimeout(() => {
+    autoHideTimer = null;
+    if (pillFocused) return;           // focus arrived after scheduling (defensive)
+    hideIndicator(true);               // P2b.6: fade on the timeout path
+  }, AUTO_HIDE_MS);
+}
+
+function revealIndicator() {
+  const target = getAutoHideTarget();
+  if (!target) return;
+  indicatorHidden = false;
+  hideToken++;   // any pending faded-hide callback is now stale
+  // Genuine visibility is restored (not bare opacity), so a following Tab lands
+  // on #epilykos-network-mode-select when shown and never when hidden (P2b.7(3)).
+  target.style.transition = prefersReducedMotion() ? 'none' : 'opacity 200ms ease';
+  target.style.visibility = 'visible';
+  target.style.opacity = '1';
+  target.style.pointerEvents = 'auto';
+  syncHandleState();
+}
+
+// animate=true: the auto-hide path fades (~200ms) then goes visibility:hidden,
+// which removes the pill and its descendants from the tab order and a11y tree
+// while leaving textContent/style updates working (P2b.6).
+// animate=false: the user's explicit "close" hides instantly — a fade there is
+// only delay.
+function hideIndicator(animate) {
+  const target = getAutoHideTarget();
+  if (!target) return;
+  cancelAutoHide();
+  indicatorHidden = true;
+  // P2b.7(1) hardening: a hide must NEVER leave the focus-suspension flag stuck.
+  // `pillFocused` used to be cleared only from the focusout 0 ms callback; if a
+  // browser does not fire focusout when the focused select's ancestor goes
+  // visibility:hidden, the flag stayed true and every later scheduleAutoHide()
+  // returned early — a re-revealed pill could then never auto-hide. The pill is
+  // being hidden, so re-derive the flag from the live DOM instead of trusting
+  // the callback (a focused node inside the hidden pill no longer holds focus).
+  pillFocused = !indicatorHidden && target.contains(document.activeElement);
+  const token = ++hideToken;   // invalidates any earlier pending faded-hide
+  target.style.pointerEvents = 'none';
+  if (animate && !prefersReducedMotion()) {
+    target.style.transition = 'opacity 200ms ease';
+    target.style.opacity = '0';
+    // After the fade, take the pill (and its descendants) out of the tab order
+    // and the a11y tree. The token makes a stale callback a no-op if the pill
+    // was re-revealed in the meantime.
+    setTimeout(() => {
+      if (token === hideToken && indicatorHidden) target.style.visibility = 'hidden';
+    }, 200);
+  } else {
+    target.style.transition = 'none';
+    target.style.opacity = '0';
+    target.style.visibility = 'hidden';
+  }
+  syncHandleState();
+}
+
+// Toggle semantics (P2b.4): hidden -> reveal + (re)start the countdown;
+// shown -> hide immediately and cancel the pending timer.
+function toggleIndicator() {
+  if (!getAutoHideTarget()) return;
+  if (indicatorHidden) {
+    revealIndicator();
+    scheduleAutoHide();
+  } else {
+    hideIndicator(false);
+  }
 }
 
 // ── Periodic re-check with hysteresis + backoff ───────────────────────
