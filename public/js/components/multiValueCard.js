@@ -1,4 +1,4 @@
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, isNumericValue, formatValueText } from '../utils.js';
 export function buildMultiValueCard(block = {}) {
   const config = block.config || {};
   const metrics = config.metrics || [];
@@ -30,8 +30,8 @@ export function updateMultiValueCard(state) {
       if (cards[i]) {
         const valEl = cards[i].querySelector('.stat-value');
         if (valEl) {
-          if (typeof v === 'number') valEl.textContent = `${v.toFixed(1)} ${cfg.unit||''}`;
-          else valEl.textContent = String(v != null ? v : '--') + (cfg.unit ? ' ' + cfg.unit : '');
+          if (isNumericValue(v)) valEl.textContent = `${v.toFixed(1)} ${cfg.unit||''}`;
+          else valEl.textContent = formatValueText(v) + (cfg.unit ? ' ' + cfg.unit : '');
         }
       }
     });

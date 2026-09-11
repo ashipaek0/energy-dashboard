@@ -1,4 +1,4 @@
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, isNumericValue, formatValueText } from '../utils.js';
 export function buildMetricCards(block) {
   if (!block.cards || !block.cards.length) {
     const placeholder = document.createElement('div');
@@ -36,7 +36,7 @@ export function updateMetricCardsFromState(state) {
         block.cards.forEach((card, i) => {
           if (!card.metric) return;
           const data = state.metrics[card.metric];
-          if (data && typeof data.value === 'number' && !isNaN(data.value)) {
+          if (data && isNumericValue(data.value)) {
             if (cards[i]) {
               const valEl = cards[i].querySelector('.stat-value');
               if (valEl) valEl.textContent = `${data.value.toFixed(1)} ${card.unit || ''}`;
@@ -44,7 +44,7 @@ export function updateMetricCardsFromState(state) {
           } else if (data && data.value != null) {
             if (cards[i]) {
               const valEl = cards[i].querySelector('.stat-value');
-              if (valEl) valEl.textContent = String(data.value) + (card.unit ? ' ' + card.unit : '');
+              if (valEl) valEl.textContent = formatValueText(data.value) + (card.unit ? ' ' + card.unit : '');
             }
           }
         });
