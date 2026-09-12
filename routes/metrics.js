@@ -15,6 +15,8 @@ const { getSavings } = require('../modules/savings');
 const metricSanity = require('../modules/metricSanity');
 const { getDashboardConfig } = require('../modules/dashboard-config');
 
+const { getCurrentMetrics } = require('../modules/metrics');
+
 const router = express.Router();
 
 const POWER_HISTORY_BUCKET_SECONDS = 600;
@@ -52,22 +54,13 @@ async function buildDashboardState() {
     timestamp: latest.timestamp * 1000
   } : null;
 
-  const metricsRows = db.prepare('SELECT * FROM latest_metrics').all();
-  const metrics = {};
-  for (const row of metricsRows) {
-    if (row.value_type === 'string' || row.value_type === 'boolean') {
-      metrics[row.metric] = row.value_text;
-    } else {
-      metrics[row.metric] = row.value;
-    }
-  }
-
   const gridStatus = getCurrentGridStatus();
   const now = Math.floor(Date.now() / 1000);
   const powerHistorySince = now - 86400;
   const barSince = now - (7 * 86400);
 
-  const [savings, historyRows, barRows] = await Promise.all([
+  const [metrics, savings, historyRows, barRows] = await Promise.all([
+    getCurrentMetrics(),
     getSavings(),
     Promise.resolve(db.prepare(`
       SELECT
