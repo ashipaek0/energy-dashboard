@@ -330,8 +330,13 @@ router.get('/monthly', async (req, res) => {
   }
 });
 
-router.get('/grid/status', (req, res) => {
-  res.json(getCurrentGridStatus());
+router.get('/grid/status', async (req, res) => {
+  try {
+    res.json(await getCurrentGridStatus());
+  } catch (err) {
+    logger.error('Error in /api/grid/status:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 router.get('/grid/timeline', async (req, res) => {
