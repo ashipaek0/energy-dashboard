@@ -167,7 +167,12 @@ async function assertSafeFetchUrl(url, opts) {
   for (const a of addrs) {
     if (isBlockedIp(a.address, allowPrivate)) return { ok: false, error: 'Host not allowed' };
   }
-  return { ok: true, url: u.toString() };
+  // Pin connection to the verified IP to prevent DNS rebinding TOCTOU
+  const safeIp = addrs[0].address;
+  const ipFormatted = net.isIP(safeIp) === 6 ? `[${safeIp}]` : safeIp;
+  const pinnedUrl = new URL(u.toString());
+  pinnedUrl.hostname = ipFormatted;
+  return { ok: true, url: pinnedUrl.toString(), resolvedIp: safeIp };
 }
 
 /**

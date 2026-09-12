@@ -116,30 +116,25 @@ async function pollTuyaDevices() {
 
   if (!Array.isArray(devices) || !devices.length) return;
 
-  for (const device of devices) {
-    if (!device || !device.enabled) continue;
-    if (!device.dev_id || !device.address || !device.local_key) {
-      logger.debug(`Tuya: skipping "${device.name || 'unnamed'}" — missing dev_id/address/local_key`);
-      continue;
-    }
+  const enabledDevices = devices.filter(d => d && d.enabled && d.dev_id && d.address && d.local_key);
+  if (!enabledDevices.length) return;
 
+  const bridgePath = path.join(__dirname, 'tuya_bridge.py');
+  const now = Math.floor(Date.now() / 1000);
+
+  const pollPromises = enabledDevices.map(async (device) => {
     const version = device.version || '3.3';
-    const bridgePath = path.join(__dirname, 'tuya_bridge.py');
-
     try {
-      // poll returns raw DP map e.g. {"1": 85, "2": 230}
       const dps = await runBridge(bridgePath, [
         'poll', device.dev_id, device.address, device.local_key, version
       ]);
 
       if (!dps || typeof dps !== 'object') {
         logger.debug(`Tuya poll (${device.name || device.dev_id}): no DPs returned`);
-        continue;
+        return;
       }
 
-      // Map DP numbers → named metrics via device.dps { metricName: dpNumber }
       const dpsConfig = device.dps || {};
-      const now = Math.floor(Date.now() / 1000);
       let written = 0;
 
       for (const [metricName, dpNumber] of Object.entries(dpsConfig)) {
@@ -155,7 +150,9 @@ async function pollTuyaDevices() {
     } catch (e) {
       logger.error(`Tuya poll error for "${device.name || device.dev_id}": ${e.message}`);
     }
-  }
+  });
+
+  await Promise.allSettled(pollPromises);
 }
 
 /**
