@@ -46,6 +46,7 @@ const { startBmsPolling, restartBmsPolling, stopBmsPolling } = require('./module
 const { startBmsWiredPolling, restartBmsWiredPolling, stopBmsWiredPolling, testBmsWiredConnection, getBmsWiredFields } = require('./modules/bmsWired');
 const { startDonglePolling, restartDonglePolling, stopDonglePolling } = require('./modules/dongle');
 const pvoutput = require('./modules/pvoutput');
+const { router: metricsRouter, buildDashboardState } = require('./routes/metrics');
 // Issue #108 (AC-1..13): dongle projections live in the pure module; the
 // remaining per-family projections are route-level pure helpers below (server
 // wave touches server.js only). All catalog routes are thin wrappers.
@@ -434,125 +435,6 @@ wss.on('connection', (ws) => {
 });
 
 /**
- * Build the complete dashboard state object sent via WebSocket and REST API.
- * Aggregates: latest power values, all metrics, savings, grid status/hours/timeline,
- * 24h power history, 7d energy bar data.
- * @returns {Promise<object>} dashboard state
- */
-// 24h power history is downsampled into 10-minute buckets so the chart gets a
-// bounded, deterministic point count (~145) across the FULL window regardless
-// of the raw ~30s poll density (was LIMIT 300, which truncated to ~2.5h).
-const POWER_HISTORY_BUCKET_SECONDS = 600;
-async function buildDashboardState() {
-  const start = Date.now();
-  const latest = db.prepare('SELECT * FROM history ORDER BY timestamp DESC LIMIT 1').get();
-  const dailySolarKwh = computeTodaySolar();
-  const rateRow = db.prepare('SELECT value FROM config WHERE key = ?').get('savings_rate');
-  const rate = parseFloat(rateRow?.value) || 0.30;
-  const currency = getConfig('savings_currency') || '€';
-  let currentData = { error: 'No data yet' };
-  if (latest) {
-    currentData = {
-      consumption_kw: latest.consumption / 1000,
-      solar_kw: latest.solar / 1000,
-      battery_charge_kw: latest.battery_charge / 1000,
-      battery_discharge_kw: latest.battery_discharge / 1000,
-      battery_power_kw: (latest.battery_charge - latest.battery_discharge) / 1000,
-      grid_import_kw: latest.grid_import / 1000,
-      grid_export_kw: latest.grid_export / 1000,
-      battery_soc: latest.battery_soc,
-      daily_consumption_kwh: latest.daily_consumption,
-      daily_solar_kwh: dailySolarKwh,
-      daily_battery_charge_kwh: latest.daily_battery_charge,
-      daily_battery_discharge_kwh: latest.daily_battery_discharge,
-      daily_grid_import_kwh: latest.daily_grid_import,
-      daily_grid_export_kwh: latest.daily_grid_export,
-      savings_currency: currency,
-      savings_rate: rate,
-      today_savings: dailySolarKwh * rate,
-      timestamp: latest.timestamp * 1000
-    };
-  }
-  // Parallelize independent DB/cache calls to avoid N+1 waterfall
-  const historySince = Math.floor(Date.now() / 1000) - 24 * 3600;
-  const barSince = Math.floor(Date.now() / 1000) - 7 * 24 * 3600;
-  const [metrics, savings, gridStatus, historyRows, barRows] = await Promise.all([
-    getCurrentMetrics(),
-    getSavings(),
-    getCurrentGridStatus(),
-    db.prepare(`SELECT (timestamp / ${POWER_HISTORY_BUCKET_SECONDS}) * ${POWER_HISTORY_BUCKET_SECONDS} AS timestamp,
-       AVG(consumption) as consumption,
-       AVG(solar) as solar,
-       AVG(battery_charge) as battery_charge,
-       AVG(battery_discharge) as battery_discharge,
-       AVG(grid_import) as grid_import,
-       AVG(grid_export) as grid_export
-     FROM history WHERE timestamp >= ?
-     GROUP BY (timestamp / ${POWER_HISTORY_BUCKET_SECONDS})
-     ORDER BY timestamp ASC`).all(historySince),
-    db.prepare(`
-      SELECT date(timestamp, 'unixepoch') as day,
-        MAX(daily_solar) as solar_kwh,
-        MAX(daily_consumption) as consumption_kwh,
-        MAX(daily_battery_charge) as battery_charge_kwh,
-        MAX(daily_battery_discharge) as battery_discharge_kwh,
-        MAX(daily_grid_import) as grid_import_kwh,
-        MAX(daily_grid_export) as grid_export_kwh
-      FROM history WHERE timestamp >= ?
-      GROUP BY day ORDER BY day ASC
-    `).all(barSince)
-  ]);
-  // Parallelize all grid queries — 4 periods + timeline
-  const [gridHoursDay, gridHoursWeek, gridHoursMonth, gridHoursYear, gridTimeline] = gridStatus.configured
-    ? await Promise.all([
-        getGridHours('day'), getGridHours('week'), getGridHours('month'), getGridHours('year'),
-        getGridTimeline('24h')
-      ])
-    : [0, 0, 0, 0, { configured: false, available: false, segments: [], windowStart: 0, windowEnd: 0 }];
-  const gridHours = {
-    day: gridHoursDay,
-    week: gridHoursWeek,
-    month: gridHoursMonth,
-    year: gridHoursYear,
-    // Pass through flags so the frontend can distinguish real 00:00 (measured
-    // zero, available=true) from no-data (not configured / unresolvable) — D1.
-    configured: gridStatus.configured,
-    available: gridStatus.available
-  };
-  const powerHistory = historyRows.map(r => ({
-    timestamp: r.timestamp * 1000,
-    consumption_kw: r.consumption / 1000,
-    solar_kw: r.solar / 1000,
-    battery_charge_kw: r.battery_charge / 1000,
-    battery_discharge_kw: r.battery_discharge / 1000,
-    battery_power_kw: (r.battery_charge - r.battery_discharge) / 1000,
-    grid_import_kw: r.grid_import / 1000,
-    grid_export_kw: r.grid_export / 1000
-  }));
-  const dailyEnergyBar = barRows.map(r => ({
-    day: r.day,
-    solar_kwh: r.solar_kwh,
-    consumption_kwh: r.consumption_kwh,
-    battery_charge_kwh: r.battery_charge_kwh,
-    battery_discharge_kwh: r.battery_discharge_kwh,
-    grid_import_kwh: r.grid_import_kwh,
-    grid_export_kwh: r.grid_export_kwh
-  }));
-  const elapsed = Date.now() - start;
-  logger.debug(`buildDashboardState took ${elapsed}ms`);
-  return {
-    current: currentData,
-    metrics,
-    savings,
-    gridStatus,
-    gridHours,
-    gridTimeline,
-    powerHistory,
-    dailyEnergyBar
-  };
-}
-
-/**
  * Main 30-second polling cycle. Fetches data from all configured sources,
  * builds dashboard state, and broadcasts to WebSocket clients.
  * Runs once immediately on startup, then every 30s via setInterval.
@@ -580,8 +462,6 @@ async function pollAllSources() {
 }
 pollAllSources();
 const pollInterval = setInterval(pollAllSources, 30000);
-
-const { router: metricsRouter, buildDashboardState } = require('./routes/metrics');
 
 // ---------- Public API (no auth) ----------
 app.get('/favicon.ico', (req, res) => res.status(204).end());
