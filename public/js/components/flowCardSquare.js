@@ -1,5 +1,5 @@
 import { uid } from '../utils/uid.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, isNumericValue, formatValueText } from '../utils.js';
 
 
 export function buildFlowCardSquare(block = {}) {
@@ -52,21 +52,27 @@ export function updateFlowCardSquare(state) {
     const id = card.dataset.blockId || '';
     let mm; try{mm=JSON.parse(card.dataset.metricMap);}catch(e){return;}
     const m = state.metrics || {};
-    const gv = (r) => { const n = mm[r]; return n ? (m[n]?.value || 0) : 0; };
-    const solar = gv('solar'), grid = gv('grid'), battPower = gv('battery_power'), battSoc = gv('battery_soc'), consumption = gv('consumption');
-    const battDischarge = gv('battery_discharge') || (battPower < 0 ? Math.abs(battPower) : 0);
-    const gridExport = gv('grid_export');
+    // Issue #61 Phase 2 (D1/D4/D6): identical guard to flowCard — coerce every
+    // slot through the shared numeric predicate before Math.round(), render the
+    // raw text for a non-numeric primary slot, and fall back to numeric zero for
+    // derived sub-labels.
+    const entryOf = (r) => { const n = mm[r]; return n ? m[n] : undefined; };
+    const numOf = (r) => { const v = entryOf(r)?.value; return isNumericValue(v) ? v : 0; };
+    const rawTextOf = (r) => { const v = entryOf(r)?.value; return (typeof v === 'string' || typeof v === 'boolean') ? formatValueText(v) : null; };
+    const solar = numOf('solar'), grid = numOf('grid'), battPower = numOf('battery_power'), battSoc = numOf('battery_soc'), consumption = numOf('consumption');
+    const battDischarge = numOf('battery_discharge') || (battPower < 0 ? Math.abs(battPower) : 0);
+    const gridExport = numOf('grid_export');
     const el = (s) => document.getElementById(uid(s, id));
 
     // Solar
     const sv = card.querySelector(`#${uid('fcs-solar',id)} .fcs-value`);
-    if (sv) sv.textContent = Math.round(solar) + ' W';
+    if (sv) sv.textContent = rawTextOf('solar') ?? (Math.round(solar) + ' W');
     const si = el('fcs-icon-solar');
     if (si) si.style.color = solar > 50 ? 'var(--solar)' : 'var(--text-secondary)';
 
     // Battery
     const bv = el('fcs-battery-soc');
-    if (bv) bv.textContent = Math.round(battSoc) + '%';
+    if (bv) bv.textContent = rawTextOf('battery_soc') ?? (Math.round(battSoc) + '%');
     const bp = el('fcs-battery-power');
     if (bp) {
       if (battPower > 50) bp.textContent = '↑ ' + Math.round(battPower) + ' W';

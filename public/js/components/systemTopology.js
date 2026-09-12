@@ -14,7 +14,7 @@
  *
  * @module systemTopology
  */
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, isNumericValue, formatValueText } from '../utils.js';
 import { uid } from '../utils/uid.js';
 
 const flowLineObservers = new Map();
@@ -78,18 +78,23 @@ export function updateSystemTopology(state) {
     const id = container.dataset.blockId || '';
     let mm; try{mm=JSON.parse(container.dataset.metricMap);}catch(e){return;}
     const m = state.metrics || {};
-    const gv = (r) => { const n = mm[r]; return n ? (m[n]?.value ?? 0) : 0; };
-    const solar = gv('solar'), grid = gv('grid_import'), battPower = gv('battery_charge'), battSoc = gv('battery_soc'), consumption = gv('consumption');
-    const battDischarge = gv('battery_discharge') || (battPower < 0 ? Math.abs(battPower) : 0);
-    const gridExport = gv('grid_export');
+    // Issue #61 Phase 2 (D1/D4): `?? 0` does NOT coerce strings, so a text slot
+    // used to reach Math.round() and render a not-a-number label. Coerce through
+    // predicate first; render the raw text for a non-numeric primary slot.
+    const entryOf = (r) => { const n = mm[r]; return n ? m[n] : undefined; };
+    const numOf = (r) => { const v = entryOf(r)?.value; return isNumericValue(v) ? v : 0; };
+    const rawTextOf = (r) => { const v = entryOf(r)?.value; return (typeof v === 'string' || typeof v === 'boolean') ? formatValueText(v) : null; };
+    const solar = numOf('solar'), grid = numOf('grid_import'), battPower = numOf('battery_charge'), battSoc = numOf('battery_soc'), consumption = numOf('consumption');
+    const battDischarge = numOf('battery_discharge') || (battPower < 0 ? Math.abs(battPower) : 0);
+    const gridExport = numOf('grid_export');
     const battIsSource = battDischarge > 10;
     const transparent = container.style.getPropertyValue('--card-bg') === 'transparent';
     const el = (s) => document.getElementById(uid(s, id));
-    const sv = container.querySelector('.topo-solar .topo-value'); if (sv) sv.textContent = Math.round(solar) + ' W';
+    const sv = container.querySelector('.topo-solar .topo-value'); if (sv) sv.textContent = rawTextOf('solar') ?? (Math.round(solar) + ' W');
     const sp = el('topo-solar-pct'); if (sp) { const cap = window.systemCapacityKwp || 2.1; const pct = Math.min(100, Math.round((solar / (cap * 1000)) * 100)); sp.textContent = pct + '%'; }
     const gv2 = container.querySelector('.topo-grid-node .topo-value'); if (gv2) { gv2.textContent = gridExport > grid ? Math.round(gridExport) + ' W out' : Math.round(grid) + ' W in'; }
-    const hv = container.querySelector('.topo-home .topo-value'); if (hv) hv.textContent = Math.round(consumption) + ' W';
-    const so = el('topo-battery-soc'); if (so) so.textContent = Math.round(battSoc) + '%';
+    const hv = container.querySelector('.topo-home .topo-value'); if (hv) hv.textContent = rawTextOf('consumption') ?? (Math.round(consumption) + ' W');
+    const so = el('topo-battery-soc'); if (so) so.textContent = rawTextOf('battery_soc') ?? (Math.round(battSoc) + '%');
     const bp = el('topo-battery-power'); if (bp) { if (battPower > 10) bp.textContent = '↑ ' + Math.round(battPower) + ' W'; else if (battDischarge > 10) bp.textContent = '↓ ' + Math.round(battDischarge) + ' W'; else bp.textContent = '0 W'; }
     [['topo-icon-solar', solar > 10 ? 'var(--solar)' : 'var(--text-secondary)']].forEach(([k, v]) => { const e = el(k); if (e) e.style.color = v; });
     const ih = el('topo-icon-home'); if (ih) { if (solar > 10) ih.style.color = 'var(--solar)'; else if (battIsSource) ih.style.color = 'var(--discharge)'; else if (grid > 10) ih.style.color = 'var(--grid)'; else ih.style.color = 'var(--text-secondary)'; }

@@ -131,7 +131,7 @@ async function pollHomeAssistant() {
         saveMetric(metric, data.state, now);
         // Store numeric representation for mqttValues compatibility
         const num = parseFloat(data.state);
-        mqttValues[metric] = !isNaN(num) ? num : (data.state === 'on' || data.state === 'true' ? 1 : (data.state === 'off' || data.state === 'false' ? 0 : undefined));
+        mqttValues[metric] = !isNaN(num) ? num : (data.state === 'on' || data.state === 'true' ? 1 : (data.state === 'off' || data.state === 'false' ? 0 : data.state));
       } catch (e) {
         logger.warn(`HA poll error for ${device.name} - ${metric}: ${e.message}`);
       }

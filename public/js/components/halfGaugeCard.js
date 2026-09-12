@@ -2,7 +2,7 @@
  * Half Gauge Card — 180° semicircle gauge (9 o'clock to 3 o'clock).
  * Zero at bottom center. Positive fills right, negative fills left.
  */
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, isNumericValue, formatValueText } from '../utils.js';
 export function buildHalfGaugeCard(block = {}) {
   const id = block.id || '';
   const config = block.config || {};
@@ -37,8 +37,9 @@ export function updateHalfGaugeCard(state) {
     if (v === undefined || v === null) return;
     const id = container.querySelector('[id^="hgauge-fill-"]')?.id?.replace('hgauge-fill-','');
     const val = document.getElementById('hgauge-val-' + id);
-    const unit = state.metrics?.[cfg.value]?.unit || inferHalfUnit(cfg.value);
-    if (typeof v === 'number') {
+    if (isNumericValue(v)) {
+      // D6 keeps the name-inferred unit on the numeric path only (no regression).
+      const unit = state.metrics?.[cfg.value]?.unit || inferHalfUnit(cfg.value);
       const min = cfg.min ?? -100, max = cfg.max ?? 100;
       const range = max - min;
       const pct = (v - min) / range;
@@ -58,7 +59,17 @@ export function updateHalfGaugeCard(state) {
       }
       if (val) val.textContent = Math.round(v) + (unit ? ' ' + unit : '');
     } else {
-      if (val) val.textContent = String(v) + (unit ? ' ' + unit : '');
+      // D6: non-numeric values use explicit units only — never a name-inferred guess.
+      const unit = state.metrics?.[cfg.value]?.unit || '';
+      // AC-2.5: reset the arc to its empty SVG state so a number→text flip
+      // cannot leave the previous fill (and colour) frozen on screen.
+      const fill = document.getElementById('hgauge-fill-' + id);
+      if (fill) {
+        fill.setAttribute('stroke-dasharray', '0 260');
+        fill.setAttribute('stroke-dashoffset', '130');
+        fill.setAttribute('stroke', cfg.color || 'var(--color-solar)');
+      }
+      if (val) val.textContent = formatValueText(v) + (unit ? ' ' + unit : '');
     }
   });
 }

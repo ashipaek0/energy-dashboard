@@ -1045,7 +1045,7 @@ function findLatestStateForEntity(entityId) {
         if (eid === entityId) {
           const row = db.prepare('SELECT value, value_text, value_type FROM latest_metrics WHERE metric = ?').get(metric);
           if (row) {
-            return { entity_id: entityId, state: row.value_type ? row.value_text : row.value };
+            return { entity_id: entityId, state: row.value_text != null ? row.value_text : row.value };
           }
         }
       }
