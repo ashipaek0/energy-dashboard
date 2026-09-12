@@ -54,7 +54,7 @@ async function buildDashboardState() {
     timestamp: latest.timestamp * 1000
   } : null;
 
-  const gridStatus = getCurrentGridStatus();
+  const gridStatus = await getCurrentGridStatus();
   const now = Math.floor(Date.now() / 1000);
   const powerHistorySince = now - 86400;
   const barSince = now - (7 * 86400);
